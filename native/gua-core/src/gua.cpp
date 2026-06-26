@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -51,6 +52,16 @@ std::string escape_json(const std::string& value)
         }
     }
     return out;
+}
+
+int write_node_id(const std::string& node_id, char* out_node_id, int out_node_id_size)
+{
+    if (out_node_id == nullptr || out_node_id_size <= 0) {
+        return 0;
+    }
+
+    std::snprintf(out_node_id, static_cast<std::size_t>(out_node_id_size), "%s", node_id.c_str());
+    return 1;
 }
 
 } // namespace
@@ -175,6 +186,58 @@ extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_n
     out_state->visible = found->visible ? 1 : 0;
     out_state->enabled = found->enabled ? 1 : 0;
     return 1;
+}
+
+extern "C" int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size)
+{
+    if (ctx == nullptr || node_id == nullptr) {
+        return 0;
+    }
+
+    const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
+        return node.id == node_id;
+    });
+    if (found == ctx->nodes.end()) {
+        return 0;
+    }
+
+    return write_node_id(found->id, out_node_id, out_node_id_size);
+}
+
+extern "C" int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size)
+{
+    if (ctx == nullptr || role == nullptr) {
+        return 0;
+    }
+
+    const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
+        if (node.role != role) {
+            return false;
+        }
+
+        return name == nullptr || std::strlen(name) == 0 || node.label == name;
+    });
+    if (found == ctx->nodes.end()) {
+        return 0;
+    }
+
+    return write_node_id(found->id, out_node_id, out_node_id_size);
+}
+
+extern "C" int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size)
+{
+    if (ctx == nullptr || text == nullptr) {
+        return 0;
+    }
+
+    const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
+        return node.label == text;
+    });
+    if (found == ctx->nodes.end()) {
+        return 0;
+    }
+
+    return write_node_id(found->id, out_node_id, out_node_id_size);
 }
 
 extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)

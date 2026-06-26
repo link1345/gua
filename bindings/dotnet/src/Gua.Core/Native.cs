@@ -30,5 +30,14 @@ internal static partial class Native
     internal static partial int gua_get_node_state(nint context, string nodeId, out GuaNodeState state);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial int gua_find_node_by_id(nint context, string nodeId, byte* outNodeId, int outNodeIdSize);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial int gua_find_node_by_role(nint context, string role, string? name, byte* outNodeId, int outNodeIdSize);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial int gua_find_node_by_text(nint context, string text, byte* outNodeId, int outNodeIdSize);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_enqueue_click(nint context, string nodeId);
 }

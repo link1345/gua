@@ -11,6 +11,18 @@ await game.getByRole("button", { name: "Start Game" }).click()
 await expect(game.getById("loading")).toBeVisible()
 ```
 
+Current v0.2 helpers expose that shape for C++ and C# over the C ABI:
+
+```cpp
+gua::testing::get_by_role(ctx, "button", "Start Game").click();
+gua::testing::wait_for_text(ctx, "Loading...").to_be_visible();
+```
+
+```csharp
+GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
+GuaAssertions.WaitForText(ui, "Loading...").ToBeVisible();
+```
+
 Gua is not a game engine.
 Gua is not an editor MCP.
 Gua is not an image-recognition QA bot.

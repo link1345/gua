@@ -2,6 +2,8 @@ namespace Gua.Core;
 
 public sealed class GuaContext : IDisposable
 {
+    private const int NodeIdBufferSize = 128;
+
     private nint _handle;
 
     public GuaContext()
@@ -54,6 +56,53 @@ public sealed class GuaContext : IDisposable
         return state;
     }
 
+    public string FindNodeById(string id)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            var buffer = stackalloc byte[NodeIdBufferSize];
+            if (Native.gua_find_node_by_id(_handle, id, buffer, NodeIdBufferSize) == 0)
+            {
+                throw new InvalidOperationException($"Gua node not found by id: {id}");
+            }
+
+            return ReadUtf8NodeId(buffer);
+        }
+    }
+
+    public string FindNodeByRole(string role, string? name = null)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            var buffer = stackalloc byte[NodeIdBufferSize];
+            if (Native.gua_find_node_by_role(_handle, role, name, buffer, NodeIdBufferSize) == 0)
+            {
+                throw new InvalidOperationException(name is null
+                    ? $"Gua node not found by role: {role}"
+                    : $"Gua node not found by role and name: {role}, {name}");
+            }
+
+            return ReadUtf8NodeId(buffer);
+        }
+    }
+
+    public string FindNodeByText(string text)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            var buffer = stackalloc byte[NodeIdBufferSize];
+            if (Native.gua_find_node_by_text(_handle, text, buffer, NodeIdBufferSize) == 0)
+            {
+                throw new InvalidOperationException($"Gua node not found by text: {text}");
+            }
+
+            return ReadUtf8NodeId(buffer);
+        }
+    }
+
     public bool EnqueueClick(string id)
     {
         ThrowIfDisposed();
@@ -77,5 +126,11 @@ public sealed class GuaContext : IDisposable
         {
             throw new ObjectDisposedException(nameof(GuaContext));
         }
+    }
+
+    private static unsafe string ReadUtf8NodeId(byte* buffer)
+    {
+        return System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)buffer)
+            ?? throw new InvalidOperationException("Native Gua returned an invalid node id.");
     }
 }
