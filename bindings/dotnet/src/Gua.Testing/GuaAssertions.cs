@@ -4,9 +4,63 @@ namespace Gua.Testing;
 
 public static class GuaAssertions
 {
+    public static GuaNodeExpectation GetById(GuaContext context, string id)
+    {
+        return new GuaNodeExpectation(context, context.FindNodeById(id));
+    }
+
+    public static GuaNodeExpectation GetByRole(GuaContext context, string role, string? name = null)
+    {
+        return new GuaNodeExpectation(context, context.FindNodeByRole(role, name));
+    }
+
+    public static GuaNodeExpectation GetByText(GuaContext context, string text)
+    {
+        return new GuaNodeExpectation(context, context.FindNodeByText(text));
+    }
+
     public static GuaNodeExpectation ExpectNode(GuaContext context, string id)
     {
-        return new GuaNodeExpectation(context, id);
+        return GetById(context, id);
+    }
+
+    public static void WaitFor(GuaNodeExpectation expectation, TimeSpan? timeout = null)
+    {
+        expectation.WaitFor(timeout);
+    }
+
+    public static GuaNodeExpectation WaitForId(GuaContext context, string id, TimeSpan? timeout = null)
+    {
+        return WaitForQuery(() => GetById(context, id), $"id: {id}", timeout);
+    }
+
+    public static GuaNodeExpectation WaitForRole(GuaContext context, string role, string? name = null, TimeSpan? timeout = null)
+    {
+        return WaitForQuery(() => GetByRole(context, role, name), name is null ? $"role: {role}" : $"role and name: {role}, {name}", timeout);
+    }
+
+    public static GuaNodeExpectation WaitForText(GuaContext context, string text, TimeSpan? timeout = null)
+    {
+        return WaitForQuery(() => GetByText(context, text), $"text: {text}", timeout);
+    }
+
+    private static GuaNodeExpectation WaitForQuery(Func<GuaNodeExpectation> query, string description, TimeSpan? timeout)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(1));
+        do
+        {
+            try
+            {
+                return query();
+            }
+            catch (InvalidOperationException)
+            {
+                Thread.Sleep(10);
+            }
+        }
+        while (DateTime.UtcNow < deadline);
+
+        throw new TimeoutException($"Timed out waiting for Gua node by {description}");
     }
 }
 
@@ -50,5 +104,25 @@ public sealed class GuaNodeExpectation
         {
             throw new InvalidOperationException($"Failed to click Gua node: {_id}");
         }
+    }
+
+    public void WaitFor(TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(1));
+        do
+        {
+            try
+            {
+                _context.GetNodeState(_id);
+                return;
+            }
+            catch (InvalidOperationException)
+            {
+                Thread.Sleep(10);
+            }
+        }
+        while (DateTime.UtcNow < deadline);
+
+        throw new TimeoutException($"Timed out waiting for Gua node: {_id}");
     }
 }
