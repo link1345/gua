@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/ui-tree.schema.json",
+  "title": "Gua UI Tree",
+  "type": "object",
+  "required": ["screen", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "screen": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    }
+  },
+  "$defs": {
+    "bounds": {
+      "type": "object",
+      "required": ["x", "y", "w", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number", "minimum": 0 },
+        "h": { "type": "number", "minimum": 0 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "role", "visible", "enabled", "bounds", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parentId": { "type": "string", "minLength": 1 },
+        "role": {
+          "type": "string",
+          "enum": [
+            "button",
+            "text",
+            "image",
+            "checkbox",
+            "radio",
+            "slider",
+            "textbox",
+            "list",
+            "listitem",
+            "panel",
+            "screen",
+            "dialog",
+            "menu",
+            "menuitem"
+          ]
+        },
+        "label": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "bounds": { "$ref": "#/$defs/bounds" },
+        "state": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "focused": { "type": "boolean" },
+            "hovered": { "type": "boolean" },
+            "pressed": { "type": "boolean" },
+            "checked": { "type": "boolean" },
+            "value": {
+              "type": ["number", "string", "boolean", "null"]
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["click", "focus", "press", "text_input", "set_value"]
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

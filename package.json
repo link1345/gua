@@ -1,0 +1,13 @@
+{
+  "name": "gua",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runtime UI automation protocol for games.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present"
+  }
+}

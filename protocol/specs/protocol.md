@@ -1,0 +1,52 @@
+# Gua Protocol Draft
+
+Gua exposes the current UI state of a running game as a semantic UI tree and
+accepts commands that interact with nodes in that tree.
+
+## UI Tree
+
+A UI tree response describes one frame or snapshot of runtime UI state.
+
+- `screen`: logical screen name, such as `title` or `settings`
+- `nodes`: flat list of semantic UI nodes
+
+Nodes are intentionally semantic. They describe role, label, state, bounds, and
+supported actions, not rendering internals.
+
+## Commands
+
+Commands are external automation requests.
+
+Initial command types:
+
+- `get_ui_tree`
+- `get_node`
+- `click_node`
+- `focus_node`
+- `press_key`
+- `text_input`
+- `move_gamepad`
+- `wait_for_node`
+- `get_screenshot`
+- `get_logs`
+- `poll_events`
+
+## Events
+
+Events are queued by the runtime core when commands should be observed by the
+game code. Language bindings should poll events instead of passing callbacks
+across ABI boundaries.
+
+Initial event types:
+
+- `click`
+- `focus`
+- `key`
+- `text`
+- `gamepad`
+
+## Transport
+
+The protocol should not depend on one transport. Early implementations may use
+in-process calls, TCP, WebSocket, stdio, or MCP tool calls as long as the payloads
+match the schemas.

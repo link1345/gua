@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/commands.schema.json",
+  "title": "Gua Command",
+  "oneOf": [
+    { "$ref": "#/$defs/getUiTree" },
+    { "$ref": "#/$defs/nodeCommand" },
+    { "$ref": "#/$defs/pressKey" },
+    { "$ref": "#/$defs/textInput" },
+    { "$ref": "#/$defs/moveGamepad" },
+    { "$ref": "#/$defs/simpleCommand" }
+  ],
+  "$defs": {
+    "getUiTree": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "get_ui_tree" }
+      }
+    },
+    "nodeCommand": {
+      "type": "object",
+      "required": ["type", "nodeId"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": ["get_node", "click_node", "focus_node", "wait_for_node"]
+        },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pressKey": {
+      "type": "object",
+      "required": ["type", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "press_key" },
+        "key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "textInput": {
+      "type": "object",
+      "required": ["type", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "text_input" },
+        "text": { "type": "string" }
+      }
+    },
+    "moveGamepad": {
+      "type": "object",
+      "required": ["type", "axis", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "move_gamepad" },
+        "axis": { "type": "string", "minLength": 1 },
+        "value": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "simpleCommand": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": ["get_screenshot", "get_logs", "poll_events"]
+        }
+      }
+    }
+  }
+}

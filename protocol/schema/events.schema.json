@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/events.schema.json",
+  "title": "Gua Event",
+  "type": "object",
+  "required": ["type", "timestampMs"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["click", "focus", "key", "text", "gamepad"]
+    },
+    "timestampMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nodeId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string"
+    },
+    "axis": {
+      "type": "string"
+    },
+    "value": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+    }
+  }
+}

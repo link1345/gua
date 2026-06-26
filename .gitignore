@@ -1,0 +1,34 @@
+# Build outputs
+build/
+out/
+dist/
+bin/
+obj/
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+compile_commands.json
+
+# Package managers
+node_modules/
+
+# Test and coverage
+coverage/
+.nyc_output/
+TestResults/
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs and local environment
+*.log
+.env
+.env.*
+!.env.example
