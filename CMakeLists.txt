@@ -10,6 +10,16 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
+option(GUA_BUILD_EXAMPLES "Build Gua examples." ON)
+
 add_subdirectory(native/gua-core)
 add_subdirectory(native/gua-imgui)
 add_subdirectory(native/gua-testing)
+
+if(GUA_BUILD_EXAMPLES)
+    if(WIN32)
+        add_subdirectory(examples/cpp-imgui)
+    else()
+        message(STATUS "Skipping examples/cpp-imgui because it requires Win32 and DirectX 11.")
+    endif()
+endif()

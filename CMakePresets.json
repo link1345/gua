@@ -9,8 +9,8 @@
     {
       "name": "windows-msvc-debug",
       "displayName": "Windows MSVC Debug",
-      "description": "Primary Windows development preset using MSVC.",
-      "generator": "Visual Studio 17 2022",
+      "description": "Primary Windows development preset using Visual Studio 18 2026.",
+      "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-debug",
       "condition": {
@@ -22,8 +22,8 @@
     {
       "name": "windows-msvc-release",
       "displayName": "Windows MSVC Release",
-      "description": "Primary Windows release preset using MSVC.",
-      "generator": "Visual Studio 17 2022",
+      "description": "Primary Windows release preset using Visual Studio 18 2026.",
+      "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-release",
       "condition": {

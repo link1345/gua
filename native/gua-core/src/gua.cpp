@@ -147,7 +147,11 @@ extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
         json += node.enabled ? "true" : "false";
         json += ",\"bounds\":";
         json += bounds;
-        json += ",\"actions\":[\"click\",\"focus\"]}";
+        if (node.role == "button" && node.enabled) {
+            json += ",\"actions\":[\"click\",\"focus\"]}";
+        } else {
+            json += ",\"actions\":[]}";
+        }
     }
 
     json += "]}";
