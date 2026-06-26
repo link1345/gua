@@ -26,6 +26,9 @@ bot, or full UI framework.
 - For .NET, prefer P/Invoke over a separate runtime implementation.
 - Test helpers should be usable from C++ and C# first. Do not make TypeScript the
   primary test API.
+- Treat Windows MSVC as the primary native development toolchain.
+- Keep the native core portable for Apple Clang and Android NDK Clang by staying
+  within the C ABI and standard C++20 unless platform code is isolated.
 - Prefer polling/event queues across language boundaries instead of callbacks.
 - Add engine integrations as adapters after the core protocol is usable.
 

@@ -33,6 +33,18 @@ Engine-specific integrations such as Unity, Unreal Engine, Godot, and MonoGame
 are expected to be adapters built on top of the protocol, not the center of the
 project.
 
+## Native Toolchain
+
+Windows native development uses MSVC as the primary toolchain:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+```
+
+The portable boundary remains the C ABI. macOS and iOS should use Apple Clang,
+and Android should use Android NDK Clang when those targets are added.
+
 ## Repository Layout
 
 ```text

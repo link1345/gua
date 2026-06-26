@@ -318,6 +318,21 @@ while (ui.TryPollEvent(out var e))
 }
 ```
 
+### 8.5 Native toolchain 方針
+
+Windows の C++ 開発は MSVC を主ターゲットとする。
+ただし、Gua の安定境界は C ABI であり、共有 native core は標準 C++20 の範囲に保つ。
+
+想定 toolchain:
+
+* Windows: MSVC
+* macOS / iOS: Apple Clang
+* Android: Android NDK Clang
+* Linux: 後回し。対応する場合は Clang または GCC
+
+MSVC 専用拡張、Windows API、platform 固有処理を protocol-level code に混ぜない。
+必要になった場合は platform-specific な native directory に隔離する。
+
 ## 9. 初期ターゲット
 
 ### 9.1 最初に避けるもの

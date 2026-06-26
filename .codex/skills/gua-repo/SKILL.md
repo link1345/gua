@@ -17,6 +17,8 @@ and AI agents.
 - Build C++ and ImGui APIs as thin layers over the core.
 - Build .NET as P/Invoke bindings over the C ABI.
 - Keep test helpers centered on C++ and C#, not TypeScript.
+- Use MSVC as the primary Windows C++ toolchain. Preserve portability for Apple
+  Clang and Android NDK Clang by keeping shared code in standard C++20 and C ABI.
 - Avoid editor automation, image-recognition-first QA, or a full UI framework.
 
 ## First Milestone

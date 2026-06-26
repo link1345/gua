@@ -10,6 +10,8 @@ When working in this repository:
 - Keep C++, ImGui, C#, MCP, Inspector, and .NET aligned with schema
   changes.
 - Keep the primary test API usable from C++ and C#.
+- Use MSVC as the Windows native reference toolchain, while preserving the C ABI
+  and standard C++20 portability for Apple Clang and Android NDK Clang.
 - Do not make Unity, Unreal, Godot, or MonoGame the first-class center of the
   design.
 - Do not introduce image-recognition as the primary automation model.
