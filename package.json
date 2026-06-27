@@ -9,6 +9,8 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "bun run --workspaces check"
+    "check": "bun run --workspaces check",
+    "inspector": "bun run --filter @gua/inspector dev",
+    "bridge:ws": "bun run --filter @gua/bridge-ws dev"
   }
 }

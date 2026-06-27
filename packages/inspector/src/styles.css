@@ -39,6 +39,21 @@ button:disabled {
   cursor: default;
 }
 
+input {
+  background: #0f141b;
+  border: 1px solid #354151;
+  color: #e8edf4;
+  font: inherit;
+  min-height: 30px;
+  min-width: 260px;
+  padding: 5px 8px;
+}
+
+input:focus {
+  border-color: #5d7da8;
+  outline: none;
+}
+
 .gua-app {
   min-height: 100vh;
   background: #0f1216;
@@ -68,6 +83,12 @@ button:disabled {
   align-items: center;
   display: flex;
   gap: 10px;
+}
+
+.gua-connect {
+  align-items: center;
+  display: flex;
+  gap: 6px;
 }
 
 .gua-error {
@@ -302,6 +323,18 @@ button:disabled {
   }
 
   .gua-topbar__actions {
+    align-items: stretch;
+    flex-direction: column;
     justify-content: space-between;
+  }
+
+  .gua-connect {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  input {
+    min-width: 0;
+    width: 100%;
   }
 }

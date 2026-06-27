@@ -43,6 +43,20 @@ Initial command types:
 - `get_logs`
 - `poll_events`
 
+For the Inspector WebSocket bridge, commands are sent as JSON text messages with
+a numeric `id`. Responses echo the same `id` and either include `result` or
+`error`.
+
+```json
+{ "id": 1, "type": "get_ui_tree" }
+{ "id": 2, "type": "click_node", "nodeId": "start" }
+```
+
+```json
+{ "id": 1, "ok": true, "result": { "screen": "title", "nodes": [] } }
+{ "id": 2, "ok": false, "error": "Gua node not found: start" }
+```
+
 ## Events
 
 Events are queued by the runtime core when commands should be observed by the

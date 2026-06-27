@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   type GuaInspectorClient,
   type GuaNode,
   type InspectorState,
   MockInspectorClient,
+  WebSocketInspectorClient,
   createInspectorState,
   getSelectedNode,
   readSnapshot,
@@ -16,11 +17,22 @@ export interface GuaInspectorAppProps {
   client?: GuaInspectorClient;
 }
 
+const defaultWebSocketUrl = "ws://127.0.0.1:8765";
+
 export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
-  const inspectorClient = useMemo(() => client ?? new MockInspectorClient(), [client]);
+  const [inspectorClient, setInspectorClient] = useState<GuaInspectorClient>(() => client ?? new MockInspectorClient());
+  const [clientLabel, setClientLabel] = useState(() => client === undefined ? "Mock runtime" : "Custom client");
+  const [webSocketUrl, setWebSocketUrl] = useState(() => window.localStorage.getItem("gua.inspector.wsUrl") ?? defaultWebSocketUrl);
   const [state, setState] = useState<InspectorState>(() => createInspectorState());
   const [status, setStatus] = useState<"idle" | "refreshing" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (client !== undefined) {
+      setInspectorClient(client);
+      setClientLabel("Custom client");
+    }
+  }, [client]);
 
   const refresh = useCallback(async () => {
     setStatus("refreshing");
@@ -38,6 +50,23 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const connectMock = () => {
+    closeClient(inspectorClient);
+    setState(createInspectorState());
+    setError(null);
+    setClientLabel("Mock runtime");
+    setInspectorClient(new MockInspectorClient());
+  };
+
+  const connectWebSocket = () => {
+    closeClient(inspectorClient);
+    window.localStorage.setItem("gua.inspector.wsUrl", webSocketUrl);
+    setState(createInspectorState());
+    setError(null);
+    setClientLabel(webSocketUrl);
+    setInspectorClient(new WebSocketInspectorClient(webSocketUrl));
+  };
 
   const selectedNode = getSelectedNode(state);
 
@@ -64,9 +93,26 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       <header className="gua-topbar">
         <div>
           <div className="gua-brand">Gua Inspector</div>
-          <div className="gua-screen">{state.uiTree.screen}</div>
+          <div className="gua-screen">{state.uiTree.screen} · {clientLabel}</div>
         </div>
         <div className="gua-topbar__actions">
+          {client === undefined ? (
+            <form
+              className="gua-connect"
+              onSubmit={(event) => {
+                event.preventDefault();
+                connectWebSocket();
+              }}
+            >
+              <input
+                aria-label="Gua WebSocket bridge URL"
+                value={webSocketUrl}
+                onChange={(event) => setWebSocketUrl(event.currentTarget.value)}
+              />
+              <button type="submit">Connect</button>
+              <button type="button" onClick={connectMock}>Mock</button>
+            </form>
+          ) : null}
           {error !== null ? <span className="gua-error">{error}</span> : null}
           <button type="button" onClick={() => void refresh()} disabled={status === "refreshing"}>
             {status === "refreshing" ? "Refreshing" : "Refresh"}
@@ -86,6 +132,11 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       </main>
     </div>
   );
+}
+
+function closeClient(client: GuaInspectorClient): void {
+  const maybeClosable = client as GuaInspectorClient & { close?: () => void };
+  maybeClosable.close?.();
 }
 
 interface TreePanelProps {

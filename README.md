@@ -81,6 +81,26 @@ Run the browser version:
 bun run --filter @gua/inspector dev
 ```
 
+Run the sample WebSocket bridge in another terminal:
+
+```powershell
+bun run bridge:ws
+```
+
+Then connect the Inspector to:
+
+```text
+ws://127.0.0.1:8765
+```
+
+The bridge speaks the same JSON command shape expected from a future game-side
+adapter:
+
+```json
+{ "id": 1, "type": "get_ui_tree" }
+{ "id": 2, "type": "click_node", "nodeId": "start" }
+```
+
 Build the static Inspector:
 
 ```powershell

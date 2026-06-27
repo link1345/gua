@@ -65,6 +65,24 @@ export interface GuaInspectorClient {
   focusNode(nodeId: string): Promise<void>;
 }
 
+export type GuaInspectorCommand =
+  | { id: number; type: "get_ui_tree" }
+  | { id: number; type: "get_logs" }
+  | { id: number; type: "get_screenshot" }
+  | { id: number; type: "click_node"; nodeId: string }
+  | { id: number; type: "focus_node"; nodeId: string };
+
+type GuaInspectorCommandInput =
+  | { type: "get_ui_tree" }
+  | { type: "get_logs" }
+  | { type: "get_screenshot" }
+  | { type: "click_node"; nodeId: string }
+  | { type: "focus_node"; nodeId: string };
+
+export type GuaInspectorResponse =
+  | { id: number; ok: true; result: GuaUiTree | GuaLogEntry[] | GuaScreenshot | null }
+  | { id: number; ok: false; error: string };
+
 export const initialPanels: InspectorPanel[] = [
   { id: "tree", title: "UI Tree" },
   { id: "node", title: "Node Detail" },
@@ -248,6 +266,147 @@ export class MockInspectorClient implements GuaInspectorClient {
         message: `focus_node(${nodeId})`,
       },
     ];
+  }
+}
+
+interface PendingRequest {
+  resolve(value: unknown): void;
+  reject(reason: Error): void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+export class WebSocketInspectorClient implements GuaInspectorClient {
+  private socket: WebSocket | null = null;
+  private connectPromise: Promise<WebSocket> | null = null;
+  private nextId = 1;
+  private pending = new Map<number, PendingRequest>();
+
+  constructor(
+    private readonly url: string,
+    private readonly requestTimeoutMs = 5000,
+  ) {
+  }
+
+  async getUiTree(): Promise<GuaUiTree> {
+    return this.request<GuaUiTree>({ type: "get_ui_tree" });
+  }
+
+  async getLogs(): Promise<GuaLogEntry[]> {
+    return this.request<GuaLogEntry[]>({ type: "get_logs" });
+  }
+
+  async getScreenshot(): Promise<GuaScreenshot> {
+    return this.request<GuaScreenshot>({ type: "get_screenshot" });
+  }
+
+  async clickNode(nodeId: string): Promise<void> {
+    await this.request<null>({ type: "click_node", nodeId });
+  }
+
+  async focusNode(nodeId: string): Promise<void> {
+    await this.request<null>({ type: "focus_node", nodeId });
+  }
+
+  close(): void {
+    this.rejectAll(new Error("Gua Inspector WebSocket client closed."));
+    this.socket?.close();
+    this.socket = null;
+    this.connectPromise = null;
+  }
+
+  private async request<T>(command: GuaInspectorCommandInput): Promise<T> {
+    const socket = await this.connect();
+    const id = this.nextId++;
+    const payload = { ...command, id } as GuaInspectorCommand;
+
+    return new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Timed out waiting for ${command.type}.`));
+      }, this.requestTimeoutMs);
+
+      this.pending.set(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timeoutId,
+      });
+
+      socket.send(JSON.stringify(payload));
+    });
+  }
+
+  private async connect(): Promise<WebSocket> {
+    if (this.socket !== null && this.socket.readyState === WebSocket.OPEN) {
+      return this.socket;
+    }
+
+    if (this.connectPromise !== null) {
+      return this.connectPromise;
+    }
+
+    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
+      const socket = new WebSocket(this.url);
+
+      socket.addEventListener("open", () => {
+        this.socket = socket;
+        this.connectPromise = null;
+        resolve(socket);
+      });
+
+      socket.addEventListener("message", (event) => {
+        this.handleMessage(event.data);
+      });
+
+      socket.addEventListener("close", () => {
+        this.socket = null;
+        this.connectPromise = null;
+        this.rejectAll(new Error("Gua Inspector WebSocket connection closed."));
+      });
+
+      socket.addEventListener("error", () => {
+        const error = new Error(`Failed to connect to Gua bridge at ${this.url}.`);
+        this.connectPromise = null;
+        reject(error);
+        this.rejectAll(error);
+      });
+    });
+
+    return this.connectPromise;
+  }
+
+  private handleMessage(data: unknown): void {
+    if (typeof data !== "string") {
+      return;
+    }
+
+    let response: GuaInspectorResponse;
+    try {
+      response = JSON.parse(data) as GuaInspectorResponse;
+    } catch {
+      return;
+    }
+
+    const pending = this.pending.get(response.id);
+    if (pending === undefined) {
+      return;
+    }
+
+    clearTimeout(pending.timeoutId);
+    this.pending.delete(response.id);
+
+    if (response.ok) {
+      pending.resolve(response.result);
+    } else {
+      pending.reject(new Error(response.error));
+    }
+  }
+
+  private rejectAll(error: Error): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
   }
 }
 
