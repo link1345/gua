@@ -24,6 +24,14 @@ typedef struct gua_node_state_t {
 } gua_node_state_t;
 
 enum {
+    GUA_LOG_TRACE = 0,
+    GUA_LOG_DEBUG = 1,
+    GUA_LOG_INFO = 2,
+    GUA_LOG_WARN = 3,
+    GUA_LOG_ERROR = 4
+};
+
+enum {
     GUA_EVENT_NONE = 0,
     GUA_EVENT_CLICK = 1,
     GUA_EVENT_FOCUS = 2
@@ -46,6 +54,10 @@ void gua_register_node(
 );
 
 const char* gua_get_ui_tree_json(gua_context_t* ctx);
+void gua_add_log(gua_context_t* ctx, int level, const char* message);
+const char* gua_get_logs_json(gua_context_t* ctx);
+void gua_set_screenshot(gua_context_t* ctx, const char* data_uri, int width, int height);
+const char* gua_get_screenshot_json(gua_context_t* ctx);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);

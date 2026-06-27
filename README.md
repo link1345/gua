@@ -11,7 +11,8 @@ await game.getByRole("button", { name: "Start Game" }).click()
 await expect(game.getById("loading")).toBeVisible()
 ```
 
-Current v0.2 helpers expose that shape for C++ and C# over the C ABI:
+Current v0.3 implementation exposes that shape for C++ and C# over the C ABI
+and adds Inspector payloads for UI tree, logs, and screenshots:
 
 ```cpp
 gua::testing::get_by_role(ctx, "button", "Start Game").click();
@@ -21,6 +22,15 @@ gua::testing::wait_for_text(ctx, "Loading...").to_be_visible();
 ```csharp
 GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
 GuaAssertions.WaitForText(ui, "Loading...").ToBeVisible();
+```
+
+```cpp
+context.log(gua::LogLevel::info, "title screen opened");
+context.set_screenshot("data:image/png;base64,...", 1280, 720);
+
+std::cout << context.ui_tree_json() << '\n';
+std::cout << context.logs_json() << '\n';
+std::cout << context.screenshot_json() << '\n';
 ```
 
 Gua is not a game engine.
@@ -38,8 +48,9 @@ The first implementation focuses on a small, stable core:
 - Thin C++ wrapper
 - ImGui adapter
 - C++ and C# testing helpers
-- Inspector and MCP server prototypes
-- .NET P/Invoke binding after the C ABI stabilizes
+- .NET P/Invoke binding over the C ABI
+- Inspector prototype for tree, node detail, screenshot, and logs
+- MCP server prototype
 
 Engine-specific integrations such as Unity, Unreal Engine, Godot, and MonoGame
 are expected to be adapters built on top of the protocol, not the center of the
@@ -56,6 +67,33 @@ cmake --build --preset windows-msvc-debug
 
 The portable boundary remains the C ABI. macOS and iOS should use Apple Clang,
 and Android should use Android NDK Clang when those targets are added.
+
+## Inspector
+
+The Inspector is a React application that consumes Gua protocol snapshots. It is
+not tied to MCP. The UI talks to a `GuaInspectorClient` abstraction so transport
+implementations can be added for mock data, WebSocket bridges, HTTP bridges,
+MCP, saved files, or a future native bridge.
+
+Run the browser version:
+
+```powershell
+bun run --filter @gua/inspector dev
+```
+
+Build the static Inspector:
+
+```powershell
+bun run --filter @gua/inspector build
+```
+
+The package is also prepared for a Tauri desktop shell:
+
+```powershell
+bun run --filter @gua/inspector tauri:dev
+```
+
+Tauri requires a Rust toolchain in addition to the JavaScript dependencies.
 
 ## Repository Layout
 

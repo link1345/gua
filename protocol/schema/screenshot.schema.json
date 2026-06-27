@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/screenshot.schema.json",
+  "title": "Gua Screenshot",
+  "type": "object",
+  "required": ["dataUri", "width", "height"],
+  "additionalProperties": false,
+  "properties": {
+    "dataUri": {
+      "type": "string"
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

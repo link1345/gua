@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/logs.schema.json",
+  "title": "Gua Logs",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["sequence", "level", "message"],
+    "additionalProperties": false,
+    "properties": {
+      "sequence": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "level": {
+        "type": "string",
+        "enum": ["trace", "debug", "info", "warn", "error"]
+      },
+      "message": {
+        "type": "string"
+      }
+    }
+  }
+}

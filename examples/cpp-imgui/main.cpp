@@ -129,15 +129,19 @@ int RunSmoke()
 {
     gua::Context context;
     context.begin_frame("title");
+    context.log(gua::LogLevel::info, "title screen opened");
     GuaImGui::Button(
         context,
         "start",
         "Start Game",
         GuaImGui::Rect { 100.0F, 200.0F, 240.0F, 64.0F },
         true);
+    context.set_screenshot("data:image/gif;base64,R0lGODlhAQABAAAAACw=", 1, 1);
     context.end_frame();
 
     std::cout << context.ui_tree_json() << '\n';
+    std::cout << context.logs_json() << '\n';
+    std::cout << context.screenshot_json() << '\n';
     DumpEvents(context);
     return EXIT_SUCCESS;
 }
@@ -252,7 +256,6 @@ int main(int argc, char** argv)
         ImGui::NewFrame();
 
         gua_context.begin_frame(loading ? "loading" : "title");
-
         ImGui::Begin("Gua Runtime UI");
         ImGui::TextUnformatted("This window behaves like a small in-game UI surface.");
         ImGui::Separator();
@@ -282,6 +285,7 @@ int main(int argc, char** argv)
         while (gua_context.poll_event(event)) {
             std::cout << "click:" << event.node_id << '\n';
             if (event.type == gua::EventType::click && event.node_id == "start") {
+                gua_context.log(gua::LogLevel::info, "start button clicked");
                 loading = true;
             }
         }

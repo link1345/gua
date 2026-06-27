@@ -25,6 +25,36 @@ struct Event {
     std::string node_id;
 };
 
+struct LogEntry {
+    int level;
+    std::string message;
+    unsigned long long sequence;
+};
+
+struct Screenshot {
+    std::string data_uri;
+    int width = 0;
+    int height = 0;
+};
+
+const char* log_level_name(int level)
+{
+    switch (level) {
+    case GUA_LOG_TRACE:
+        return "trace";
+    case GUA_LOG_DEBUG:
+        return "debug";
+    case GUA_LOG_INFO:
+        return "info";
+    case GUA_LOG_WARN:
+        return "warn";
+    case GUA_LOG_ERROR:
+        return "error";
+    default:
+        return "info";
+    }
+}
+
 std::string escape_json(const std::string& value)
 {
     std::string out;
@@ -70,7 +100,12 @@ struct gua_context_t {
     std::string screen = "unknown";
     std::vector<Node> nodes;
     std::deque<Event> events;
+    std::vector<LogEntry> logs;
+    Screenshot screenshot;
+    unsigned long long next_log_sequence = 1;
     std::string json_cache;
+    std::string logs_json_cache;
+    std::string screenshot_json_cache;
 };
 
 extern "C" gua_context_t* gua_create_context(void)
@@ -168,6 +203,77 @@ extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
     json += "]}";
     ctx->json_cache = std::move(json);
     return ctx->json_cache.c_str();
+}
+
+extern "C" void gua_add_log(gua_context_t* ctx, int level, const char* message)
+{
+    if (ctx == nullptr || message == nullptr) {
+        return;
+    }
+
+    ctx->logs.push_back(LogEntry {
+        level,
+        message,
+        ctx->next_log_sequence++,
+    });
+    ctx->logs_json_cache.clear();
+}
+
+extern "C" const char* gua_get_logs_json(gua_context_t* ctx)
+{
+    if (ctx == nullptr) {
+        return "[]";
+    }
+
+    std::string json = "[";
+    for (std::size_t i = 0; i < ctx->logs.size(); ++i) {
+        const LogEntry& entry = ctx->logs[i];
+        if (i > 0) {
+            json += ",";
+        }
+
+        json += "{\"sequence\":";
+        json += std::to_string(entry.sequence);
+        json += ",\"level\":\"";
+        json += log_level_name(entry.level);
+        json += "\",\"message\":\"";
+        json += escape_json(entry.message);
+        json += "\"}";
+    }
+    json += "]";
+
+    ctx->logs_json_cache = std::move(json);
+    return ctx->logs_json_cache.c_str();
+}
+
+extern "C" void gua_set_screenshot(gua_context_t* ctx, const char* data_uri, int width, int height)
+{
+    if (ctx == nullptr) {
+        return;
+    }
+
+    ctx->screenshot.data_uri = data_uri != nullptr ? data_uri : "";
+    ctx->screenshot.width = std::max(0, width);
+    ctx->screenshot.height = std::max(0, height);
+    ctx->screenshot_json_cache.clear();
+}
+
+extern "C" const char* gua_get_screenshot_json(gua_context_t* ctx)
+{
+    if (ctx == nullptr) {
+        return "{\"dataUri\":\"\",\"width\":0,\"height\":0}";
+    }
+
+    std::string json = "{\"dataUri\":\"";
+    json += escape_json(ctx->screenshot.data_uri);
+    json += "\",\"width\":";
+    json += std::to_string(ctx->screenshot.width);
+    json += ",\"height\":";
+    json += std::to_string(ctx->screenshot.height);
+    json += "}";
+
+    ctx->screenshot_json_cache = std::move(json);
+    return ctx->screenshot_json_cache.c_str();
 }
 
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)
