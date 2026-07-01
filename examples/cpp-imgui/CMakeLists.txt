@@ -53,6 +53,7 @@ target_link_libraries(gua-cpp-imgui-example
         imgui
         gua::core
         gua::imgui
+        gua::ws-bridge
 )
 
 target_compile_features(gua-cpp-imgui-example PRIVATE cxx_std_20)

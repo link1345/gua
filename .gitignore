@@ -31,6 +31,7 @@ Thumbs.db
 
 # Logs and local environment
 *.log
+imgui.ini
 .env
 .env.*
 !.env.example

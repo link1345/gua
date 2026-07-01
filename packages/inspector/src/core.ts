@@ -83,6 +83,11 @@ export type GuaInspectorResponse =
   | { id: number; ok: true; result: GuaUiTree | GuaLogEntry[] | GuaScreenshot | null }
   | { id: number; ok: false; error: string };
 
+export type GuaInspectorNotification =
+  | { type: "snapshot"; snapshot: InspectorSnapshot };
+
+export type SnapshotListener = (snapshot: InspectorSnapshot) => void;
+
 export const initialPanels: InspectorPanel[] = [
   { id: "tree", title: "UI Tree" },
   { id: "node", title: "Node Detail" },
@@ -280,6 +285,7 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   private connectPromise: Promise<WebSocket> | null = null;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
+  private snapshotListeners = new Set<SnapshotListener>();
 
   constructor(
     private readonly url: string,
@@ -312,6 +318,17 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     this.socket?.close();
     this.socket = null;
     this.connectPromise = null;
+    this.snapshotListeners.clear();
+  }
+
+  subscribeSnapshots(listener: SnapshotListener): () => void {
+    this.snapshotListeners.add(listener);
+    void this.connect().catch(() => {
+      this.snapshotListeners.delete(listener);
+    });
+    return () => {
+      this.snapshotListeners.delete(listener);
+    };
   }
 
   private async request<T>(command: GuaInspectorCommandInput): Promise<T> {
@@ -379,13 +396,21 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
       return;
     }
 
-    let response: GuaInspectorResponse;
+    let parsed: GuaInspectorResponse | GuaInspectorNotification;
     try {
-      response = JSON.parse(data) as GuaInspectorResponse;
+      parsed = JSON.parse(data) as GuaInspectorResponse | GuaInspectorNotification;
     } catch {
       return;
     }
 
+    if (isNotification(parsed)) {
+      for (const listener of this.snapshotListeners) {
+        listener(parsed.snapshot);
+      }
+      return;
+    }
+
+    const response = parsed;
     const pending = this.pending.get(response.id);
     if (pending === undefined) {
       return;
@@ -416,4 +441,8 @@ function parseJson<T>(json: string, description: string): T {
   } catch (error) {
     throw new Error(`Invalid ${description} JSON: ${(error as Error).message}`);
   }
+}
+
+function isNotification(value: GuaInspectorResponse | GuaInspectorNotification): value is GuaInspectorNotification {
+  return "type" in value && value.type === "snapshot";
 }

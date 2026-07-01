@@ -39,7 +39,7 @@ button:disabled {
   cursor: default;
 }
 
-input {
+.gua-connect input {
   background: #0f141b;
   border: 1px solid #354151;
   color: #e8edf4;
@@ -49,7 +49,7 @@ input {
   padding: 5px 8px;
 }
 
-input:focus {
+.gua-connect input:focus {
   border-color: #5d7da8;
   outline: none;
 }
@@ -89,6 +89,17 @@ input:focus {
   align-items: center;
   display: flex;
   gap: 6px;
+}
+
+.gua-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.gua-toggle input {
+  margin: 0;
 }
 
 .gua-error {
@@ -333,7 +344,7 @@ input:focus {
     flex-wrap: wrap;
   }
 
-  input {
+  .gua-connect input {
     min-width: 0;
     width: 100%;
   }

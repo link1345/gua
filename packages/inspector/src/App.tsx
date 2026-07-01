@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   type GuaInspectorClient,
   type GuaNode,
+  type InspectorSnapshot,
   type InspectorState,
   MockInspectorClient,
   WebSocketInspectorClient,
@@ -26,6 +27,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [state, setState] = useState<InspectorState>(() => createInspectorState());
   const [status, setStatus] = useState<"idle" | "refreshing" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   useEffect(() => {
     if (client !== undefined) {
@@ -50,6 +52,34 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const maybeSubscribable = inspectorClient as GuaInspectorClient & {
+      subscribeSnapshots?: (listener: (snapshot: InspectorSnapshot) => void) => () => void;
+    };
+
+    const unsubscribe = maybeSubscribable.subscribeSnapshots?.((snapshot) => {
+      setState((current) => updateInspectorState(current, snapshot));
+      setStatus("idle");
+      setError(null);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [inspectorClient]);
+
+  useEffect(() => {
+    if (!autoRefresh) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, 500);
+
+    return () => window.clearInterval(intervalId);
+  }, [autoRefresh, refresh]);
 
   const connectMock = () => {
     closeClient(inspectorClient);
@@ -113,6 +143,14 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
               <button type="button" onClick={connectMock}>Mock</button>
             </form>
           ) : null}
+          <label className="gua-toggle">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(event) => setAutoRefresh(event.currentTarget.checked)}
+            />
+            <span>Poll</span>
+          </label>
           {error !== null ? <span className="gua-error">{error}</span> : null}
           <button type="button" onClick={() => void refresh()} disabled={status === "refreshing"}>
             {status === "refreshing" ? "Refreshing" : "Refresh"}

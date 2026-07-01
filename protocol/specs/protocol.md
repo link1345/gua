@@ -57,6 +57,20 @@ a numeric `id`. Responses echo the same `id` and either include `result` or
 { "id": 2, "ok": false, "error": "Gua node not found: start" }
 ```
 
+Bridges may also push snapshots without a request. Inspectors should treat these
+as authoritative runtime updates and refresh the visible panels immediately.
+
+```json
+{
+  "type": "snapshot",
+  "snapshot": {
+    "uiTree": { "screen": "title", "nodes": [] },
+    "logs": [],
+    "screenshot": { "dataUri": "", "width": 0, "height": 0 }
+  }
+}
+```
+
 ## Events
 
 Events are queued by the runtime core when commands should be observed by the

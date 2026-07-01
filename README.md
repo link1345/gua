@@ -87,11 +87,31 @@ Run the sample WebSocket bridge in another terminal:
 bun run bridge:ws
 ```
 
+Or build and run the native C++ bridge that serves a real `gua::Context`:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --target gua-native-bridge-example
+.\build\windows-msvc-debug\examples\native-bridge\Debug\gua-native-bridge-example.exe
+```
+
+The ImGui example also hosts the same WebSocket bridge while the UI is running:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --target gua-cpp-imgui-example
+.\build\windows-msvc-debug\examples\cpp-imgui\Debug\gua-cpp-imgui-example.exe
+```
+
 Then connect the Inspector to:
 
 ```text
 ws://127.0.0.1:8765
 ```
+
+The ImGui bridge pushes snapshot notifications while the UI is running, so the
+Inspector updates without polling. The `Poll` toggle in the Inspector remains as
+a fallback for bridges that only implement request/response.
 
 The bridge speaks the same JSON command shape expected from a future game-side
 adapter:
