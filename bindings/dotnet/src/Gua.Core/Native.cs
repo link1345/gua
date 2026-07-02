@@ -1,9 +1,73 @@
 using System.Runtime.InteropServices;
+using System.Reflection;
 
 namespace Gua.Core;
 
 internal static partial class Native
 {
+    internal const int NodeIdBufferSize = 128;
+
+    internal unsafe struct GuaNativeEvent
+    {
+        public int Type;
+        public fixed byte NodeId[NodeIdBufferSize];
+    }
+
+    static Native()
+    {
+        NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, ResolveGuaLibrary);
+    }
+
+    private static nint ResolveGuaLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        if (!string.Equals(libraryName, "gua", StringComparison.Ordinal))
+        {
+            return nint.Zero;
+        }
+
+        var fileName = OperatingSystem.IsWindows()
+            ? "gua.dll"
+            : OperatingSystem.IsMacOS()
+                ? "libgua.dylib"
+                : "libgua.so";
+
+        foreach (var directory in CandidateNativeDirectories(assembly))
+        {
+            var candidate = Path.Combine(directory, fileName);
+            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+            {
+                return handle;
+            }
+        }
+
+        return NativeLibrary.TryLoad(libraryName, assembly, searchPath, out var fallbackHandle)
+            ? fallbackHandle
+            : nint.Zero;
+    }
+
+    private static IEnumerable<string> CandidateNativeDirectories(Assembly assembly)
+    {
+        var configured = Environment.GetEnvironmentVariable("GUA_NATIVE_DIR");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            yield return configured;
+        }
+
+        yield return AppContext.BaseDirectory;
+
+        var assemblyLocation = assembly.Location;
+        if (!string.IsNullOrWhiteSpace(assemblyLocation))
+        {
+            var assemblyDirectory = Path.GetDirectoryName(assemblyLocation);
+            if (!string.IsNullOrWhiteSpace(assemblyDirectory))
+            {
+                yield return assemblyDirectory;
+            }
+        }
+
+        yield return Environment.CurrentDirectory;
+    }
+
     [LibraryImport("gua")]
     internal static partial nint gua_create_context();
 
@@ -55,4 +119,7 @@ internal static partial class Native
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_enqueue_click(nint context, string nodeId);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_poll_event(nint context, GuaNativeEvent* outEvent);
 }

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -527,9 +528,18 @@ public:
         if (running_.exchange(true)) {
             return;
         }
-        thread_ = std::thread([this] {
-            run();
+
+        std::promise<bool> started;
+        std::future<bool> started_future = started.get_future();
+        thread_ = std::thread([this, started = std::move(started)]() mutable {
+            run(std::move(started));
         });
+
+        if (!started_future.get()) {
+            if (thread_.joinable()) {
+                thread_.join();
+            }
+        }
     }
 
     void stop()
@@ -602,12 +612,15 @@ public:
     }
 
 private:
-    void run()
+    void run(std::promise<bool> started)
     {
+        bool startup_reported = false;
         try {
             const WinsockSession winsock;
             Socket listen_socket = create_listen_socket(options_.port);
             listen_socket_ = listen_socket.get();
+            started.set_value(true);
+            startup_reported = true;
             std::cout << "Gua WebSocket bridge listening on ws://127.0.0.1:" << options_.port << std::endl;
 
             while (running_.load()) {
@@ -632,6 +645,9 @@ private:
         } catch (const std::exception& error) {
             std::cerr << "Gua bridge failed: " << error.what() << std::endl;
             running_.store(false);
+            if (!startup_reported) {
+                started.set_value(false);
+            }
         }
     }
 

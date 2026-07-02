@@ -11,6 +11,7 @@
   "scripts": {
     "check": "bun run --workspaces check",
     "inspector": "bun run --filter @gua/inspector dev",
+    "inspector:tauri": "bun run --filter @gua/inspector tauri:dev",
     "bridge:ws": "bun run --filter @gua/bridge-ws dev",
     "mcp": "bun packages/mcp/src/cli.ts mcp"
   }

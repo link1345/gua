@@ -11,12 +11,20 @@ if(MSVC)
 endif()
 
 option(GUA_BUILD_EXAMPLES "Build Gua examples." ON)
+option(GUA_BUILD_GODOT "Build the Godot GDExtension adapter." ON)
 
 add_subdirectory(native/gua-core)
 add_subdirectory(native/gua-imgui)
 add_subdirectory(native/gua-testing)
 if(WIN32)
     add_subdirectory(native/gua-ws-bridge)
+    add_subdirectory(native/gua-runtime)
+endif()
+
+if(GUA_BUILD_GODOT AND WIN32)
+    add_subdirectory(native/gua-godot)
+elseif(GUA_BUILD_GODOT)
+    message(STATUS "Skipping native/gua-godot because the shared runtime bridge currently requires Win32.")
 endif()
 
 if(GUA_BUILD_EXAMPLES)
