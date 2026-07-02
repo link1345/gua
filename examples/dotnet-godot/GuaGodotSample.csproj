@@ -1,0 +1,28 @@
+<Project Sdk="Godot.NET.Sdk/4.7.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NativeGuaPreset Condition="'$(Configuration)' == 'Release'">windows-msvc-release</NativeGuaPreset>
+    <NativeGuaPreset Condition="'$(NativeGuaPreset)' == ''">windows-msvc-debug</NativeGuaPreset>
+    <NativeGuaRuntimeDll>$(MSBuildProjectDirectory)\..\..\build\$(NativeGuaPreset)\native\gua-runtime\$(Configuration)\gua_runtime.dll</NativeGuaRuntimeDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Core\Gua.Core.csproj" />
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Testing\Gua.Testing.csproj" />
+  </ItemGroup>
+
+  <Target Name="BuildNativeGuaRuntimeDll" BeforeTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="cmake --preset $(NativeGuaPreset)" WorkingDirectory="$(MSBuildProjectDirectory)\..\.." Condition="!Exists('$(NativeGuaRuntimeDll)')" />
+    <Exec Command="cmake --build --preset $(NativeGuaPreset) --target gua-runtime --config $(Configuration)" WorkingDirectory="$(MSBuildProjectDirectory)\..\.." />
+  </Target>
+
+  <Target Name="CopyNativeGuaRuntimeDll" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+    <MakeDir Directories="$(MSBuildProjectDirectory)\addons\gua\bin" />
+    <Copy SourceFiles="$(NativeGuaRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(NativeGuaRuntimeDll)" DestinationFolder="$(MSBuildProjectDirectory)\addons\gua\bin" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

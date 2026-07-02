@@ -789,7 +789,7 @@ ui.timeline()
 
 * `packages/mcp`
 
-### v0.5: .NET Binding + MonoGame Sample
+### v0.5: .NET Binding + Godot Sample
 
 目的: C# 系ゲーム環境へ展開する。
 
@@ -798,12 +798,34 @@ ui.timeline()
 * P/Invoke binding
 * ergonomic C# wrapper
 * event polling
-* MonoGame sample
+* shared native runtime bridge for Godot C# and GDScript
+* Godot 4.7 C# sample
 
 成果物:
 
 * `bindings/dotnet`
-* `examples/dotnet-monogame`
+* `native/gua-runtime`
+* `examples/dotnet-godot`
+* `examples/dotnet-monogame` remains a future placeholder
+
+### v0.5.1: Godot GDScript Runtime Addon
+
+目的: Godot 4.7 の GDScript から Gua runtime automation protocol を利用できるようにする。
+
+実装:
+
+* Godot 4.7 GDExtension adapter
+* shared native runtime bridge reuse
+* `GuaContext : RefCounted`
+* GDScript 向け `begin_frame`, `register_node`, `end_frame`
+* `get_ui_tree_json`, `enqueue_click`, `poll_event`
+* `addons/gua` packaging
+* GDScript sample
+
+成果物:
+
+* `native/gua-godot`
+* `examples/godot-gdscript`
 
 ### v0.6: Animation Primitives
 

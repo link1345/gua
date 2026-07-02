@@ -11,8 +11,8 @@ await game.getByRole("button", { name: "Start Game" }).click()
 await expect(game.getById("loading")).toBeVisible()
 ```
 
-Current v0.3 implementation exposes that shape for C++ and C# over the C ABI
-and adds Inspector payloads for UI tree, logs, and screenshots:
+Current v0.5 implementation exposes that shape for C++ and C# over the C ABI,
+adds Inspector and MCP consumers, and includes a Godot 4.7 C# runtime sample:
 
 ```cpp
 gua::testing::get_by_role(ctx, "button", "Start Game").click();
@@ -33,6 +33,16 @@ std::cout << context.logs_json() << '\n';
 std::cout << context.screenshot_json() << '\n';
 ```
 
+```csharp
+while (ui.TryPollEvent(out var e))
+{
+    if (e.Type == GuaEventType.Click && e.NodeId == "start")
+    {
+        ShowLoading();
+    }
+}
+```
+
 Gua is not a game engine.
 Gua is not an editor MCP.
 Gua is not an image-recognition QA bot.
@@ -51,6 +61,8 @@ The first implementation focuses on a small, stable core:
 - .NET P/Invoke binding over the C ABI
 - Inspector prototype for tree, node detail, screenshot, and logs
 - MCP server prototype
+- Godot 4.7 C# sample using the shared native runtime bridge
+- Godot 4.7 GDScript sample using the same runtime bridge through GDExtension
 
 Engine-specific integrations such as Unity, Unreal Engine, Godot, and MonoGame
 are expected to be adapters built on top of the protocol, not the center of the
@@ -73,7 +85,7 @@ and Android should use Android NDK Clang when those targets are added.
 The Inspector is a React application that consumes Gua protocol snapshots. It is
 not tied to MCP. The UI talks to a `GuaInspectorClient` abstraction so transport
 implementations can be added for mock data, WebSocket bridges, HTTP bridges,
-MCP, saved files, or a future native bridge.
+MCP, saved files, or the native runtime bridge.
 
 Run the browser version:
 
@@ -177,17 +189,72 @@ bun run --filter @gua/inspector tauri:dev
 
 Tauri requires a Rust toolchain in addition to the JavaScript dependencies.
 
+## Godot 4.7 C# Sample
+
+The v0.5 C# runtime sample lives in `examples/dotnet-godot`. It is a minimal
+Godot 4.7 project using `Godot.NET.Sdk/4.7.0`, `net10.0`, project references to
+`Gua.Core` and `Gua.Testing`, and a runtime addon in `addons/gua`. The addon
+P/Invokes `gua_runtime.dll`, which owns both the Gua context and the Inspector
+WebSocket bridge.
+
+Build it with:
+
+```powershell
+dotnet build examples/dotnet-godot/GuaGodotSample.csproj -v:minimal
+```
+
+The sample uses `Gua.Godot.GuaGodotRuntime` from the addon, starts an Inspector
+bridge on `ws://127.0.0.1:8765`, registers a title-screen semantic tree, and
+consumes click events to transition to the loading screen. `examples/dotnet-monogame`
+is still present as a future placeholder, but Godot is the v0.5 C# engine sample.
+
+## Godot 4.7 GDScript Addon
+
+The GDScript-facing adapter lives in `native/gua-godot` and builds a thin
+GDExtension wrapper over `native/gua-runtime`. It exposes `GuaContext` to
+GDScript without reimplementing the runtime core or the Inspector bridge:
+
+```gdscript
+var ui := GuaContext.new()
+ui.begin_frame("title")
+ui.register_node("start", "button", "Start Game", Rect2(512, 312, 256, 56), true, true)
+ui.end_frame()
+ui.start_inspector_bridge(8765)
+ui.enqueue_click("start")
+
+while true:
+    var event := ui.poll_event()
+    if event.is_empty():
+        break
+```
+
+Build the Windows debug GDExtension:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --target gua-godot
+```
+
+The build writes the debug DLL into `examples/godot-gdscript/addons/gua/bin`.
+Open `examples/godot-gdscript` with Godot 4.7 and run the project. The running
+game process starts an Inspector bridge on `ws://127.0.0.1:8765`, which Gua
+Inspector can connect to while the game is open. The addon includes `plugin.cfg`
+only for standard Godot addon packaging; Gua's runtime API is provided by
+`gua.gdextension`, not by an editor MCP.
+
 ## Repository Layout
 
 ```text
 protocol/             Protocol specs and JSON schemas
 native/gua-core/      C ABI runtime core and C++ reference implementation
+native/gua-runtime/   Shared native runtime bridge for Godot C# and GDScript
 native/gua-imgui/     ImGui adapter layer
 native/gua-testing/   C++ testing helpers over the C ABI
+native/gua-godot/     Godot GDExtension adapter for GDScript
 bindings/dotnet/      .NET P/Invoke binding and C# testing helpers
 packages/mcp/         MCP server prototype
 packages/inspector/   Inspector UI prototype
-examples/             Minimal demos and samples
+examples/             Minimal demos and samples, including the Godot C# sample
 docs/                 Project planning and design notes
 ```
 

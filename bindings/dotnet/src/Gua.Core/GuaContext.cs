@@ -2,8 +2,6 @@ namespace Gua.Core;
 
 public sealed class GuaContext : IDisposable
 {
-    private const int NodeIdBufferSize = 128;
-
     private nint _handle;
 
     public GuaContext()
@@ -91,8 +89,8 @@ public sealed class GuaContext : IDisposable
         ThrowIfDisposed();
         unsafe
         {
-            var buffer = stackalloc byte[NodeIdBufferSize];
-            if (Native.gua_find_node_by_id(_handle, id, buffer, NodeIdBufferSize) == 0)
+            var buffer = stackalloc byte[Native.NodeIdBufferSize];
+            if (Native.gua_find_node_by_id(_handle, id, buffer, Native.NodeIdBufferSize) == 0)
             {
                 throw new InvalidOperationException($"Gua node not found by id: {id}");
             }
@@ -106,8 +104,8 @@ public sealed class GuaContext : IDisposable
         ThrowIfDisposed();
         unsafe
         {
-            var buffer = stackalloc byte[NodeIdBufferSize];
-            if (Native.gua_find_node_by_role(_handle, role, name, buffer, NodeIdBufferSize) == 0)
+            var buffer = stackalloc byte[Native.NodeIdBufferSize];
+            if (Native.gua_find_node_by_role(_handle, role, name, buffer, Native.NodeIdBufferSize) == 0)
             {
                 throw new InvalidOperationException(name is null
                     ? $"Gua node not found by role: {role}"
@@ -123,8 +121,8 @@ public sealed class GuaContext : IDisposable
         ThrowIfDisposed();
         unsafe
         {
-            var buffer = stackalloc byte[NodeIdBufferSize];
-            if (Native.gua_find_node_by_text(_handle, text, buffer, NodeIdBufferSize) == 0)
+            var buffer = stackalloc byte[Native.NodeIdBufferSize];
+            if (Native.gua_find_node_by_text(_handle, text, buffer, Native.NodeIdBufferSize) == 0)
             {
                 throw new InvalidOperationException($"Gua node not found by text: {text}");
             }
@@ -137,6 +135,26 @@ public sealed class GuaContext : IDisposable
     {
         ThrowIfDisposed();
         return Native.gua_enqueue_click(_handle, id) != 0;
+    }
+
+    public bool TryPollEvent(out GuaEvent e)
+    {
+        ThrowIfDisposed();
+
+        unsafe
+        {
+            Native.GuaNativeEvent nativeEvent;
+            if (Native.gua_poll_event(_handle, &nativeEvent) == 0)
+            {
+                e = default;
+                return false;
+            }
+
+            e = new GuaEvent(
+                (GuaEventType)nativeEvent.Type,
+                ReadNativeEventNodeId(&nativeEvent));
+            return true;
+        }
     }
 
     public void Dispose()
@@ -162,6 +180,12 @@ public sealed class GuaContext : IDisposable
     {
         return System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)buffer)
             ?? throw new InvalidOperationException("Native Gua returned an invalid node id.");
+    }
+
+    private static unsafe string ReadNativeEventNodeId(Native.GuaNativeEvent* nativeEvent)
+    {
+        return System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)nativeEvent->NodeId)
+            ?? throw new InvalidOperationException("Native Gua returned an invalid event node id.");
     }
 
     private static string ReadNativeUtf8(nint value)
