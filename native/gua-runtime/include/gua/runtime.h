@@ -24,10 +24,16 @@ void gua_runtime_register_node(
 );
 
 const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime);
+/* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
+int gua_runtime_copy_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 void gua_runtime_add_log(gua_runtime_t* runtime, int level, const char* message);
 const char* gua_runtime_get_logs_json(gua_runtime_t* runtime);
+/* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
+int gua_runtime_copy_logs_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 void gua_runtime_set_screenshot(gua_runtime_t* runtime, const char* data_uri, int width, int height);
 const char* gua_runtime_get_screenshot_json(gua_runtime_t* runtime);
+/* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
+int gua_runtime_copy_screenshot_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);
 int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_runtime_find_node_by_role(gua_runtime_t* runtime, const char* role, const char* name, char* out_node_id, int out_node_id_size);

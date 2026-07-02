@@ -5,6 +5,7 @@
 #include <deque>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -97,6 +98,7 @@ int write_node_id(const std::string& node_id, char* out_node_id, int out_node_id
 } // namespace
 
 struct gua_context_t {
+    mutable std::mutex mutex;
     std::string screen = "unknown";
     std::vector<Node> nodes;
     std::deque<Event> events;
@@ -108,68 +110,23 @@ struct gua_context_t {
     std::string screenshot_json_cache;
 };
 
-extern "C" gua_context_t* gua_create_context(void)
-{
-    return new gua_context_t();
-}
+namespace {
 
-extern "C" void gua_destroy_context(gua_context_t* ctx)
+int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 {
-    delete ctx;
-}
-
-extern "C" void gua_begin_frame(gua_context_t* ctx, const char* screen)
-{
-    if (ctx == nullptr) {
-        return;
+    const int required_size = static_cast<int>(json.size() + 1U);
+    if (out_json != nullptr && out_json_size > 0) {
+        std::snprintf(out_json, static_cast<std::size_t>(out_json_size), "%s", json.c_str());
     }
-
-    ctx->screen = screen != nullptr ? screen : "unknown";
-    ctx->nodes.clear();
+    return required_size;
 }
 
-extern "C" void gua_end_frame(gua_context_t* ctx)
+std::string build_ui_tree_json(const gua_context_t& ctx)
 {
-    if (ctx == nullptr) {
-        return;
-    }
+    std::string json = "{\"screen\":\"" + escape_json(ctx.screen) + "\",\"nodes\":[";
 
-    ctx->json_cache.clear();
-}
-
-extern "C" void gua_register_node(
-    gua_context_t* ctx,
-    const char* id,
-    const char* role,
-    const char* label,
-    gua_bounds_t bounds,
-    int visible,
-    int enabled)
-{
-    if (ctx == nullptr || id == nullptr || role == nullptr) {
-        return;
-    }
-
-    ctx->nodes.push_back(Node {
-        id,
-        role,
-        label != nullptr ? label : "",
-        bounds,
-        visible != 0,
-        enabled != 0,
-    });
-}
-
-extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
-{
-    if (ctx == nullptr) {
-        return "{}";
-    }
-
-    std::string json = "{\"screen\":\"" + escape_json(ctx->screen) + "\",\"nodes\":[";
-
-    for (std::size_t i = 0; i < ctx->nodes.size(); ++i) {
-        const Node& node = ctx->nodes[i];
+    for (std::size_t i = 0; i < ctx.nodes.size(); ++i) {
+        const Node& node = ctx.nodes[i];
         if (i > 0) {
             json += ",";
         }
@@ -201,8 +158,118 @@ extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
     }
 
     json += "]}";
-    ctx->json_cache = std::move(json);
+    return json;
+}
+
+std::string build_logs_json(const gua_context_t& ctx)
+{
+    std::string json = "[";
+    for (std::size_t i = 0; i < ctx.logs.size(); ++i) {
+        const LogEntry& entry = ctx.logs[i];
+        if (i > 0) {
+            json += ",";
+        }
+
+        json += "{\"sequence\":";
+        json += std::to_string(entry.sequence);
+        json += ",\"level\":\"";
+        json += log_level_name(entry.level);
+        json += "\",\"message\":\"";
+        json += escape_json(entry.message);
+        json += "\"}";
+    }
+    json += "]";
+    return json;
+}
+
+std::string build_screenshot_json(const gua_context_t& ctx)
+{
+    std::string json = "{\"dataUri\":\"";
+    json += escape_json(ctx.screenshot.data_uri);
+    json += "\",\"width\":";
+    json += std::to_string(ctx.screenshot.width);
+    json += ",\"height\":";
+    json += std::to_string(ctx.screenshot.height);
+    json += "}";
+    return json;
+}
+
+} // namespace
+
+extern "C" gua_context_t* gua_create_context(void)
+{
+    return new gua_context_t();
+}
+
+extern "C" void gua_destroy_context(gua_context_t* ctx)
+{
+    delete ctx;
+}
+
+extern "C" void gua_begin_frame(gua_context_t* ctx, const char* screen)
+{
+    if (ctx == nullptr) {
+        return;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    ctx->screen = screen != nullptr ? screen : "unknown";
+    ctx->nodes.clear();
+}
+
+extern "C" void gua_end_frame(gua_context_t* ctx)
+{
+    if (ctx == nullptr) {
+        return;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    ctx->json_cache.clear();
+}
+
+extern "C" void gua_register_node(
+    gua_context_t* ctx,
+    const char* id,
+    const char* role,
+    const char* label,
+    gua_bounds_t bounds,
+    int visible,
+    int enabled)
+{
+    if (ctx == nullptr || id == nullptr || role == nullptr) {
+        return;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    ctx->nodes.push_back(Node {
+        id,
+        role,
+        label != nullptr ? label : "",
+        bounds,
+        visible != 0,
+        enabled != 0,
+    });
+}
+
+extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
+{
+    if (ctx == nullptr) {
+        return "{}";
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    ctx->json_cache = build_ui_tree_json(*ctx);
     return ctx->json_cache.c_str();
+}
+
+extern "C" int gua_copy_ui_tree_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) {
+        return copy_json_string("{}", out_json, out_json_size);
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_ui_tree_json(*ctx), out_json, out_json_size);
 }
 
 extern "C" void gua_add_log(gua_context_t* ctx, int level, const char* message)
@@ -211,6 +278,7 @@ extern "C" void gua_add_log(gua_context_t* ctx, int level, const char* message)
         return;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     ctx->logs.push_back(LogEntry {
         level,
         message,
@@ -225,25 +293,19 @@ extern "C" const char* gua_get_logs_json(gua_context_t* ctx)
         return "[]";
     }
 
-    std::string json = "[";
-    for (std::size_t i = 0; i < ctx->logs.size(); ++i) {
-        const LogEntry& entry = ctx->logs[i];
-        if (i > 0) {
-            json += ",";
-        }
-
-        json += "{\"sequence\":";
-        json += std::to_string(entry.sequence);
-        json += ",\"level\":\"";
-        json += log_level_name(entry.level);
-        json += "\",\"message\":\"";
-        json += escape_json(entry.message);
-        json += "\"}";
-    }
-    json += "]";
-
-    ctx->logs_json_cache = std::move(json);
+    const std::lock_guard lock(ctx->mutex);
+    ctx->logs_json_cache = build_logs_json(*ctx);
     return ctx->logs_json_cache.c_str();
+}
+
+extern "C" int gua_copy_logs_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) {
+        return copy_json_string("[]", out_json, out_json_size);
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_logs_json(*ctx), out_json, out_json_size);
 }
 
 extern "C" void gua_set_screenshot(gua_context_t* ctx, const char* data_uri, int width, int height)
@@ -252,6 +314,7 @@ extern "C" void gua_set_screenshot(gua_context_t* ctx, const char* data_uri, int
         return;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     ctx->screenshot.data_uri = data_uri != nullptr ? data_uri : "";
     ctx->screenshot.width = std::max(0, width);
     ctx->screenshot.height = std::max(0, height);
@@ -264,16 +327,19 @@ extern "C" const char* gua_get_screenshot_json(gua_context_t* ctx)
         return "{\"dataUri\":\"\",\"width\":0,\"height\":0}";
     }
 
-    std::string json = "{\"dataUri\":\"";
-    json += escape_json(ctx->screenshot.data_uri);
-    json += "\",\"width\":";
-    json += std::to_string(ctx->screenshot.width);
-    json += ",\"height\":";
-    json += std::to_string(ctx->screenshot.height);
-    json += "}";
-
-    ctx->screenshot_json_cache = std::move(json);
+    const std::lock_guard lock(ctx->mutex);
+    ctx->screenshot_json_cache = build_screenshot_json(*ctx);
     return ctx->screenshot_json_cache.c_str();
+}
+
+extern "C" int gua_copy_screenshot_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) {
+        return copy_json_string("{\"dataUri\":\"\",\"width\":0,\"height\":0}", out_json, out_json_size);
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_screenshot_json(*ctx), out_json, out_json_size);
 }
 
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)
@@ -282,6 +348,7 @@ extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_n
         return 0;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
         return node.id == node_id;
     });
@@ -300,6 +367,7 @@ extern "C" int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char
         return 0;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
         return node.id == node_id;
     });
@@ -316,6 +384,7 @@ extern "C" int gua_find_node_by_role(gua_context_t* ctx, const char* role, const
         return 0;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
         if (node.role != role) {
             return false;
@@ -336,6 +405,7 @@ extern "C" int gua_find_node_by_text(gua_context_t* ctx, const char* text, char*
         return 0;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
         return node.label == text;
     });
@@ -352,6 +422,7 @@ extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)
         return 0;
     }
 
+    const std::lock_guard lock(ctx->mutex);
     const auto found = std::any_of(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
         return node.id == node_id && node.visible && node.enabled;
     });
@@ -365,7 +436,12 @@ extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)
 
 extern "C" int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event)
 {
-    if (ctx == nullptr || out_event == nullptr || ctx->events.empty()) {
+    if (ctx == nullptr || out_event == nullptr) {
+        return 0;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    if (ctx->events.empty()) {
         return 0;
     }
 

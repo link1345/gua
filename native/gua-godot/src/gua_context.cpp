@@ -1,6 +1,10 @@
 #include "gua/godot/gua_context.hpp"
 
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -17,6 +21,26 @@ const char* event_type_name(int type)
     }
 }
 
+godot::String copy_runtime_json(gua_runtime_t* runtime, int (*copy_json)(gua_runtime_t*, char*, int))
+{
+    int required_size = copy_json(runtime, nullptr, 0);
+    if (required_size <= 0) {
+        return godot::String();
+    }
+
+    for (;;) {
+        std::vector<char> buffer(static_cast<std::size_t>(required_size));
+        const int actual_size = copy_json(runtime, buffer.data(), static_cast<int>(buffer.size()));
+        if (actual_size <= 0) {
+            return godot::String();
+        }
+        if (actual_size <= static_cast<int>(buffer.size())) {
+            return godot::String::utf8(buffer.data());
+        }
+        required_size = actual_size;
+    }
+}
+
 } // namespace
 
 namespace godot {
@@ -24,6 +48,10 @@ namespace godot {
 GuaContext::GuaContext()
     : runtime_(gua_runtime_create())
 {
+    if (runtime_ == nullptr) {
+        UtilityFunctions::push_error(
+            "GuaContext failed to create a Gua runtime. Check that the Gua native library and dependent DLLs are available.");
+    }
 }
 
 GuaContext::~GuaContext()
@@ -72,7 +100,7 @@ void GuaContext::register_node(
 
 String GuaContext::get_ui_tree_json() const
 {
-    return String::utf8(gua_runtime_get_ui_tree_json(runtime_));
+    return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
 }
 
 bool GuaContext::enqueue_click(const String& node_id)
