@@ -13,6 +13,7 @@ struct BridgeHandlers {
     std::function<std::string()> get_screenshot_json;
     std::function<bool(std::string_view node_id)> click_node;
     std::function<bool(std::string_view node_id)> focus_node;
+    std::function<bool(std::string_view key)> press_key;
 };
 
 struct BridgeOptions {
