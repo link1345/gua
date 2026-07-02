@@ -2,6 +2,7 @@
 
 #include "gua/ws_bridge.hpp"
 
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -25,6 +26,15 @@ namespace {
 bool valid_runtime(gua_runtime_t* runtime)
 {
     return runtime != nullptr && runtime->context != nullptr;
+}
+
+int copy_json_string(const std::string& json, char* out_json, int out_json_size)
+{
+    const int required_size = static_cast<int>(json.size() + 1U);
+    if (out_json != nullptr && out_json_size > 0) {
+        std::snprintf(out_json, static_cast<std::size_t>(out_json_size), "%s", json.c_str());
+    }
+    return required_size;
 }
 
 std::string copy_ui_tree_json(gua_runtime_t* runtime)
@@ -125,6 +135,15 @@ extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
     return runtime->ui_tree_json.c_str();
 }
 
+extern "C" int gua_runtime_copy_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) {
+        return copy_json_string("{}", out_json, out_json_size);
+    }
+
+    return copy_json_string(copy_ui_tree_json(runtime), out_json, out_json_size);
+}
+
 extern "C" void gua_runtime_add_log(gua_runtime_t* runtime, int level, const char* message)
 {
     if (!valid_runtime(runtime)) {
@@ -145,6 +164,15 @@ extern "C" const char* gua_runtime_get_logs_json(gua_runtime_t* runtime)
     return runtime->logs_json.c_str();
 }
 
+extern "C" int gua_runtime_copy_logs_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) {
+        return copy_json_string("[]", out_json, out_json_size);
+    }
+
+    return copy_json_string(copy_logs_json(runtime), out_json, out_json_size);
+}
+
 extern "C" void gua_runtime_set_screenshot(gua_runtime_t* runtime, const char* data_uri, int width, int height)
 {
     if (!valid_runtime(runtime)) {
@@ -163,6 +191,15 @@ extern "C" const char* gua_runtime_get_screenshot_json(gua_runtime_t* runtime)
 
     runtime->screenshot_json = copy_screenshot_json(runtime);
     return runtime->screenshot_json.c_str();
+}
+
+extern "C" int gua_runtime_copy_screenshot_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) {
+        return copy_json_string("{\"dataUri\":\"\",\"width\":0,\"height\":0}", out_json, out_json_size);
+    }
+
+    return copy_json_string(copy_screenshot_json(runtime), out_json, out_json_size);
 }
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <future>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -28,6 +29,11 @@ struct Command {
     std::string type;
     std::string node_id;
     std::string key;
+};
+
+struct ClientConnection {
+    SOCKET socket = INVALID_SOCKET;
+    std::shared_ptr<std::mutex> send_mutex;
 };
 
 class Socket {
@@ -553,8 +559,8 @@ public:
         }
         {
             const std::lock_guard lock(clients_mutex_);
-            for (const SOCKET client : clients_) {
-                shutdown(client, SD_BOTH);
+            for (const ClientConnection& client : clients_) {
+                shutdown(client.socket, SD_BOTH);
             }
         }
         if (thread_.joinable()) {
@@ -588,17 +594,30 @@ public:
             return;
         }
 
-        const std::lock_guard lock(clients_mutex_);
-        auto write = clients_.begin();
-        for (auto read = clients_.begin(); read != clients_.end(); ++read) {
+        std::vector<ClientConnection> clients;
+        {
+            const std::lock_guard lock(clients_mutex_);
+            clients = clients_;
+        }
+
+        std::vector<SOCKET> failed_clients;
+        for (const ClientConnection& client : clients) {
             try {
-                send_text_frame(*read, message);
-                *write++ = *read;
+                send_text_frame(client, message);
             } catch (...) {
-                closesocket(*read);
+                failed_clients.push_back(client.socket);
+                closesocket(client.socket);
             }
         }
-        clients_.erase(write, clients_.end());
+
+        if (!failed_clients.empty()) {
+            const std::lock_guard lock(clients_mutex_);
+            clients_.erase(
+                std::remove_if(clients_.begin(), clients_.end(), [&](const ClientConnection& client) {
+                    return std::find(failed_clients.begin(), failed_clients.end(), client.socket) != failed_clients.end();
+                }),
+                clients_.end());
+        }
     }
 
     [[nodiscard]] bool running() const
@@ -654,9 +673,13 @@ private:
     void serve_client(SOCKET client)
     {
         perform_handshake(client);
+        ClientConnection connection {
+            client,
+            std::make_shared<std::mutex>(),
+        };
         {
             const std::lock_guard lock(clients_mutex_);
-            clients_.push_back(client);
+            clients_.push_back(connection);
         }
         std::cout << "Inspector connected." << std::endl;
         publish_snapshot();
@@ -668,14 +691,24 @@ private:
             }
 
             const std::string response = handle_command(*message);
-            send_text_frame(client, response);
+            send_text_frame(connection, response);
         }
 
         {
             const std::lock_guard lock(clients_mutex_);
-            clients_.erase(std::remove(clients_.begin(), clients_.end(), client), clients_.end());
+            clients_.erase(
+                std::remove_if(clients_.begin(), clients_.end(), [&](const ClientConnection& entry) {
+                    return entry.socket == client;
+                }),
+                clients_.end());
         }
         std::cout << "Inspector disconnected." << std::endl;
+    }
+
+    static void send_text_frame(const ClientConnection& client, std::string_view text)
+    {
+        const std::lock_guard lock(*client.send_mutex);
+        ::send_text_frame(client.socket, text);
     }
 
     [[nodiscard]] std::string handle_command(std::string_view message)
@@ -722,7 +755,7 @@ private:
     std::thread thread_;
     std::atomic<SOCKET> listen_socket_ = INVALID_SOCKET;
     std::mutex clients_mutex_;
-    std::vector<SOCKET> clients_;
+    std::vector<ClientConnection> clients_;
 };
 
 BridgeServer::BridgeServer(BridgeHandlers handlers, BridgeOptions options)

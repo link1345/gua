@@ -47,7 +47,7 @@ public sealed class GuaContext : IDisposable
     public string GetUiTreeJson()
     {
         ThrowIfDisposed();
-        return ReadNativeUtf8(Native.gua_get_ui_tree_json(_handle));
+        return ReadCopiedJson(JsonSource.UiTree, _handle);
     }
 
     public void AddLog(GuaLogLevel level, string message)
@@ -59,7 +59,7 @@ public sealed class GuaContext : IDisposable
     public string GetLogsJson()
     {
         ThrowIfDisposed();
-        return ReadNativeUtf8(Native.gua_get_logs_json(_handle));
+        return ReadCopiedJson(JsonSource.Logs, _handle);
     }
 
     public void SetScreenshot(string dataUri, int width, int height)
@@ -71,7 +71,7 @@ public sealed class GuaContext : IDisposable
     public string GetScreenshotJson()
     {
         ThrowIfDisposed();
-        return ReadNativeUtf8(Native.gua_get_screenshot_json(_handle));
+        return ReadCopiedJson(JsonSource.Screenshot, _handle);
     }
 
     public GuaNodeState GetNodeState(string id)
@@ -188,9 +188,51 @@ public sealed class GuaContext : IDisposable
             ?? throw new InvalidOperationException("Native Gua returned an invalid event node id.");
     }
 
-    private static string ReadNativeUtf8(nint value)
+    private static unsafe string ReadCopiedJson(JsonSource source, nint handle)
     {
-        return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(value)
-            ?? throw new InvalidOperationException("Native Gua returned an invalid UTF-8 string.");
+        var requiredSize = CopyJson(source, handle, null, 0);
+        if (requiredSize <= 0)
+        {
+            throw new InvalidOperationException("Native Gua returned an invalid JSON size.");
+        }
+
+        while (true)
+        {
+            var buffer = new byte[requiredSize];
+            fixed (byte* bufferPointer = buffer)
+            {
+                var actualSize = CopyJson(source, handle, bufferPointer, buffer.Length);
+                if (actualSize <= 0)
+                {
+                    throw new InvalidOperationException("Native Gua returned an invalid JSON size.");
+                }
+
+                if (actualSize <= buffer.Length)
+                {
+                    return System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)bufferPointer)
+                        ?? throw new InvalidOperationException("Native Gua returned an invalid UTF-8 string.");
+                }
+
+                requiredSize = actualSize;
+            }
+        }
+    }
+
+    private static unsafe int CopyJson(JsonSource source, nint handle, byte* buffer, int bufferSize)
+    {
+        return source switch
+        {
+            JsonSource.UiTree => Native.gua_copy_ui_tree_json(handle, buffer, bufferSize),
+            JsonSource.Logs => Native.gua_copy_logs_json(handle, buffer, bufferSize),
+            JsonSource.Screenshot => Native.gua_copy_screenshot_json(handle, buffer, bufferSize),
+            _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
+        };
+    }
+
+    private enum JsonSource
+    {
+        UiTree,
+        Logs,
+        Screenshot,
     }
 }

@@ -93,17 +93,26 @@ internal static partial class Native
     [LibraryImport("gua")]
     internal static partial nint gua_get_ui_tree_json(nint context);
 
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_ui_tree_json(nint context, byte* outJson, int outJsonSize);
+
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void gua_add_log(nint context, int level, string message);
 
     [LibraryImport("gua")]
     internal static partial nint gua_get_logs_json(nint context);
 
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_logs_json(nint context, byte* outJson, int outJsonSize);
+
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void gua_set_screenshot(nint context, string dataUri, int width, int height);
 
     [LibraryImport("gua")]
     internal static partial nint gua_get_screenshot_json(nint context);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_screenshot_json(nint context, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_get_node_state(nint context, string nodeId, out GuaNodeState state);

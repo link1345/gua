@@ -122,7 +122,7 @@ public:
 
     [[nodiscard]] std::string ui_tree_json() const
     {
-        return gua_get_ui_tree_json(context_);
+        return copy_json(gua_copy_ui_tree_json);
     }
 
     void log(LogLevel level, std::string_view message)
@@ -133,7 +133,7 @@ public:
 
     [[nodiscard]] std::string logs_json() const
     {
-        return gua_get_logs_json(context_);
+        return copy_json(gua_copy_logs_json);
     }
 
     void set_screenshot(std::string_view data_uri, int width, int height)
@@ -144,7 +144,7 @@ public:
 
     [[nodiscard]] std::string screenshot_json() const
     {
-        return gua_get_screenshot_json(context_);
+        return copy_json(gua_copy_screenshot_json);
     }
 
     [[nodiscard]] bool enqueue_click(std::string_view node_id)
@@ -166,6 +166,28 @@ public:
     }
 
 private:
+    template <typename CopyJson>
+    [[nodiscard]] std::string copy_json(CopyJson copy) const
+    {
+        int required_size = copy(context_, nullptr, 0);
+        if (required_size <= 0) {
+            throw std::runtime_error("Failed to copy Gua JSON");
+        }
+
+        for (;;) {
+            std::string json(static_cast<std::size_t>(required_size), '\0');
+            const int actual_size = copy(context_, json.data(), static_cast<int>(json.size()));
+            if (actual_size <= 0) {
+                throw std::runtime_error("Failed to copy Gua JSON");
+            }
+            if (actual_size <= static_cast<int>(json.size())) {
+                json.resize(static_cast<std::size_t>(actual_size - 1));
+                return json;
+            }
+            required_size = actual_size;
+        }
+    }
+
     void reset() noexcept
     {
         gua_destroy_context(context_);
