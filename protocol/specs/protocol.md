@@ -13,6 +13,18 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
 
+## Inspector Snapshots
+
+The v0.3 Inspector consumes three protocol payloads:
+
+- UI tree: the current semantic UI snapshot, matching `ui-tree.schema.json`
+- Screenshot: the latest runtime screenshot, matching `screenshot.schema.json`
+- Logs: ordered runtime log entries, matching `logs.schema.json`
+
+The screenshot payload stores an already encoded `dataUri` plus `width` and
+`height`. This keeps the C ABI small and avoids forcing the core protocol to own
+PNG encoding, GPU readback, or platform-specific capture code.
+
 ## Commands
 
 Commands are external automation requests.
@@ -30,6 +42,34 @@ Initial command types:
 - `get_screenshot`
 - `get_logs`
 - `poll_events`
+
+For the Inspector WebSocket bridge, commands are sent as JSON text messages with
+a numeric `id`. Responses echo the same `id` and either include `result` or
+`error`.
+
+```json
+{ "id": 1, "type": "get_ui_tree" }
+{ "id": 2, "type": "click_node", "nodeId": "start" }
+```
+
+```json
+{ "id": 1, "ok": true, "result": { "screen": "title", "nodes": [] } }
+{ "id": 2, "ok": false, "error": "Gua node not found: start" }
+```
+
+Bridges may also push snapshots without a request. Inspectors should treat these
+as authoritative runtime updates and refresh the visible panels immediately.
+
+```json
+{
+  "type": "snapshot",
+  "snapshot": {
+    "uiTree": { "screen": "title", "nodes": [] },
+    "logs": [],
+    "screenshot": { "dataUri": "", "width": 0, "height": 0 }
+  }
+}
+```
 
 ## Events
 

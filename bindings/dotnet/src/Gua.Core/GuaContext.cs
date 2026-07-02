@@ -46,6 +46,36 @@ public sealed class GuaContext : IDisposable
             enabled ? 1 : 0);
     }
 
+    public string GetUiTreeJson()
+    {
+        ThrowIfDisposed();
+        return ReadNativeUtf8(Native.gua_get_ui_tree_json(_handle));
+    }
+
+    public void AddLog(GuaLogLevel level, string message)
+    {
+        ThrowIfDisposed();
+        Native.gua_add_log(_handle, (int)level, message);
+    }
+
+    public string GetLogsJson()
+    {
+        ThrowIfDisposed();
+        return ReadNativeUtf8(Native.gua_get_logs_json(_handle));
+    }
+
+    public void SetScreenshot(string dataUri, int width, int height)
+    {
+        ThrowIfDisposed();
+        Native.gua_set_screenshot(_handle, dataUri, width, height);
+    }
+
+    public string GetScreenshotJson()
+    {
+        ThrowIfDisposed();
+        return ReadNativeUtf8(Native.gua_get_screenshot_json(_handle));
+    }
+
     public GuaNodeState GetNodeState(string id)
     {
         ThrowIfDisposed();
@@ -132,5 +162,11 @@ public sealed class GuaContext : IDisposable
     {
         return System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)buffer)
             ?? throw new InvalidOperationException("Native Gua returned an invalid node id.");
+    }
+
+    private static string ReadNativeUtf8(nint value)
+    {
+        return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(value)
+            ?? throw new InvalidOperationException("Native Gua returned an invalid UTF-8 string.");
     }
 }

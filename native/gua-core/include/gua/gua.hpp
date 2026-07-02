@@ -21,6 +21,14 @@ enum class EventType {
     focus = GUA_EVENT_FOCUS,
 };
 
+enum class LogLevel {
+    trace = GUA_LOG_TRACE,
+    debug = GUA_LOG_DEBUG,
+    info = GUA_LOG_INFO,
+    warn = GUA_LOG_WARN,
+    error = GUA_LOG_ERROR,
+};
+
 struct Event {
     EventType type = EventType::none;
     std::string node_id;
@@ -117,6 +125,28 @@ public:
         return gua_get_ui_tree_json(context_);
     }
 
+    void log(LogLevel level, std::string_view message)
+    {
+        message_buffer_.assign(message);
+        gua_add_log(context_, static_cast<int>(level), message_buffer_.c_str());
+    }
+
+    [[nodiscard]] std::string logs_json() const
+    {
+        return gua_get_logs_json(context_);
+    }
+
+    void set_screenshot(std::string_view data_uri, int width, int height)
+    {
+        screenshot_buffer_.assign(data_uri);
+        gua_set_screenshot(context_, screenshot_buffer_.c_str(), width, height);
+    }
+
+    [[nodiscard]] std::string screenshot_json() const
+    {
+        return gua_get_screenshot_json(context_);
+    }
+
     [[nodiscard]] bool enqueue_click(std::string_view node_id)
     {
         id_buffer_.assign(node_id);
@@ -146,6 +176,8 @@ private:
     mutable std::string id_buffer_;
     mutable std::string role_buffer_;
     mutable std::string label_buffer_;
+    mutable std::string message_buffer_;
+    std::string screenshot_buffer_;
     std::string screen_buffer_;
 };
 
@@ -172,6 +204,16 @@ inline void text(Context& context, std::string_view id, std::string_view label, 
 inline void panel(Context& context, std::string_view id, std::string_view label, Rect bounds, bool visible = true)
 {
     context.panel(id, label, bounds, visible);
+}
+
+inline void log(Context& context, LogLevel level, std::string_view message)
+{
+    context.log(level, message);
+}
+
+inline void set_screenshot(Context& context, std::string_view data_uri, int width, int height)
+{
+    context.set_screenshot(data_uri, width, height);
 }
 
 } // namespace gua

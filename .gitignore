@@ -4,10 +4,12 @@ out/
 dist/
 bin/
 obj/
+target/
 CMakeFiles/
 CMakeCache.txt
 cmake-build-*/
 compile_commands.json
+packages/inspector/src-tauri/gen/
 
 # Package managers
 node_modules/
@@ -29,6 +31,7 @@ Thumbs.db
 
 # Logs and local environment
 *.log
+imgui.ini
 .env
 .env.*
 !.env.example

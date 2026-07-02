@@ -1,0 +1,351 @@
+:root {
+  color: #e8edf4;
+  background: #0f1216;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button {
+  border: 1px solid #354151;
+  background: #202833;
+  color: #e8edf4;
+  cursor: pointer;
+  font: inherit;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+button:hover:not(:disabled) {
+  border-color: #5d7da8;
+  background: #263247;
+}
+
+button:disabled {
+  color: #6f7b89;
+  cursor: default;
+}
+
+.gua-connect input {
+  background: #0f141b;
+  border: 1px solid #354151;
+  color: #e8edf4;
+  font: inherit;
+  min-height: 30px;
+  min-width: 260px;
+  padding: 5px 8px;
+}
+
+.gua-connect input:focus {
+  border-color: #5d7da8;
+  outline: none;
+}
+
+.gua-app {
+  min-height: 100vh;
+  background: #0f1216;
+}
+
+.gua-topbar {
+  align-items: center;
+  border-bottom: 1px solid #2b333d;
+  display: flex;
+  gap: 16px;
+  height: 48px;
+  justify-content: space-between;
+  padding: 0 14px;
+}
+
+.gua-brand {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.gua-screen {
+  color: #9ba8b8;
+  font-size: 12px;
+}
+
+.gua-topbar__actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.gua-connect {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.gua-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.gua-toggle input {
+  margin: 0;
+}
+
+.gua-error {
+  color: #ffb86b;
+}
+
+.gua-layout {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(300px, 1fr) minmax(380px, 1.35fr);
+  grid-template-rows: minmax(360px, calc(100vh - 230px)) 181px;
+  min-height: calc(100vh - 48px);
+}
+
+.gua-panel {
+  background: #171c22;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.gua-panel__header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.gua-panel__header h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.gua-panel__header span,
+.gua-muted {
+  color: #96a3b3;
+}
+
+.gua-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gua-tree__node {
+  align-items: center;
+  background: transparent;
+  border-color: transparent;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 74px minmax(0, 1fr) minmax(0, auto);
+  min-height: 36px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.gua-tree__node[data-depth="1"] {
+  padding-left: 18px;
+}
+
+.gua-tree__node[aria-selected="true"] {
+  background: #223044;
+  border-color: #496b9f;
+}
+
+.gua-role {
+  color: #7dcfff;
+  font-variant-numeric: tabular-nums;
+}
+
+.gua-tree__label {
+  display: grid;
+  min-width: 0;
+}
+
+.gua-tree__label span,
+.gua-tree__label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gua-tree__label small {
+  color: #8491a1;
+}
+
+.gua-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: end;
+}
+
+.gua-flags span {
+  border: 1px solid #384657;
+  color: #aeb9c8;
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+.gua-command-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gua-detail {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.gua-detail th,
+.gua-detail td {
+  border-bottom: 1px solid #2b333d;
+  padding: 7px 4px;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.gua-detail th {
+  color: #96a3b3;
+  font-weight: 500;
+  width: 92px;
+}
+
+.gua-screenshot-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.gua-screenshot {
+  align-items: center;
+  background: #0a0d10;
+  border: 1px solid #2b333d;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 260px;
+  overflow: hidden;
+  position: relative;
+}
+
+.gua-screenshot__stage {
+  display: inline-block;
+  max-height: 100%;
+  max-width: 100%;
+  position: relative;
+}
+
+.gua-screenshot img {
+  display: block;
+  height: auto;
+  max-height: calc(100vh - 150px);
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.gua-bounds {
+  border: 2px solid #f7c86b;
+  box-shadow: 0 0 0 1px #000;
+  pointer-events: none;
+  position: absolute;
+}
+
+.gua-placeholder {
+  align-items: center;
+  color: #96a3b3;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.gua-placeholder strong {
+  color: #d8e0ea;
+}
+
+.gua-log-panel {
+  grid-column: 1 / -1;
+}
+
+.gua-log-list {
+  display: grid;
+}
+
+.gua-log {
+  border-top: 1px solid #2b333d;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 72px 72px minmax(0, 1fr);
+  min-height: 30px;
+  padding: 6px 0;
+}
+
+.gua-log__level {
+  font-variant-numeric: tabular-nums;
+}
+
+.gua-log__level--warn,
+.gua-log__level--error {
+  color: #ffcc66;
+}
+
+.gua-log__level--info {
+  color: #8fd6a4;
+}
+
+.gua-log__level--debug,
+.gua-log__level--trace {
+  color: #82cfff;
+}
+
+@media (max-width: 980px) {
+  .gua-layout {
+    display: block;
+  }
+
+  .gua-panel {
+    min-height: 240px;
+  }
+
+  .gua-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    height: auto;
+    padding: 10px 12px;
+  }
+
+  .gua-topbar__actions {
+    align-items: stretch;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .gua-connect {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .gua-connect input {
+    min-width: 0;
+    width: 100%;
+  }
+}
