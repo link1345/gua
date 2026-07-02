@@ -36,6 +36,9 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
       case "focus_node":
         runtime.focusNode(command.nodeId);
         return ok(command.id, null);
+      case "press_key":
+        runtime.pressKey(command.key);
+        return ok(command.id, null);
     }
   } catch (error) {
     return { id: command.id, ok: false, error: (error as Error).message };
@@ -103,6 +106,14 @@ class DemoRuntime {
     this.assertNodeExists(nodeId);
     this.focusedNodeId = nodeId;
     this.log("debug", `focus_node(${nodeId})`);
+  }
+
+  pressKey(key: string): void {
+    if (key.length === 0) {
+      throw new Error("Gua key must not be empty.");
+    }
+
+    this.log("info", `press_key(${key})`);
   }
 
   log(level: GuaLogEntry["level"], message: string): void {
@@ -178,7 +189,7 @@ const server = Bun.serve({
     return Response.json({
       name: "Gua WebSocket bridge",
       websocket: `ws://127.0.0.1:${port}`,
-      commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node"],
+      commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node", "press_key"],
     });
   },
   websocket: {

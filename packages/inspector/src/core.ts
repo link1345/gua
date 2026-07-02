@@ -70,7 +70,8 @@ export type GuaInspectorCommand =
   | { id: number; type: "get_logs" }
   | { id: number; type: "get_screenshot" }
   | { id: number; type: "click_node"; nodeId: string }
-  | { id: number; type: "focus_node"; nodeId: string };
+  | { id: number; type: "focus_node"; nodeId: string }
+  | { id: number; type: "press_key"; key: string };
 
 type GuaInspectorCommandInput =
   | { type: "get_ui_tree" }

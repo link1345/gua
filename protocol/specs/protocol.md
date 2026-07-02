@@ -71,6 +71,27 @@ as authoritative runtime updates and refresh the visible panels immediately.
 }
 ```
 
+## MCP Tools
+
+The v0.4 MCP server is a protocol consumer. It does not own runtime state and it
+does not replace the Inspector bridge. By default it connects to the same Gua
+WebSocket bridge at `ws://127.0.0.1:8765`; set `GUA_BRIDGE_URL` to target another
+runtime adapter. The npm-ready CLI entrypoint is `gui-mcp mcp`, so a published
+package can be launched with `bunx gui-mcp@latest mcp`.
+
+Initial MCP tools:
+
+- `get_ui_tree`: returns the current semantic UI tree
+- `click_node`: sends a click command for a node id
+- `press_key`: sends a key command when the connected bridge supports it
+- `wait_for_node`: polls `get_ui_tree` until a node id appears
+- `get_screenshot`: returns the latest screenshot payload
+- `get_logs`: returns ordered runtime logs
+- `run_test`: executes a small list of `wait_for_node` and `click_node` steps
+
+The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua
+request/response WebSocket payloads for the runtime side.
+
 ## Events
 
 Events are queued by the runtime core when commands should be observed by the

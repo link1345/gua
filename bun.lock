@@ -34,9 +34,13 @@
       },
     },
     "packages/mcp": {
-      "name": "@gua/mcp",
+      "name": "gui-mcp",
       "version": "0.0.0",
+      "bin": {
+        "gui-mcp": "./dist/cli.js",
+      },
       "devDependencies": {
+        "bun-types": "^1.3.0",
         "typescript": "^5.5.0",
       },
     },
@@ -135,8 +139,6 @@
     "@gua/bridge-ws": ["@gua/bridge-ws@workspace:packages/bridge-ws"],
 
     "@gua/inspector": ["@gua/inspector@workspace:packages/inspector"],
-
-    "@gua/mcp": ["@gua/mcp@workspace:packages/mcp"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
@@ -269,6 +271,8 @@
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "gensync": ["gensync@1.0.0-beta.2", "", {}, "sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg=="],
+
+    "gui-mcp": ["gui-mcp@workspace:packages/mcp"],
 
     "js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 

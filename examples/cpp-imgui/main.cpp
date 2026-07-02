@@ -307,6 +307,11 @@ int main(int argc, char** argv)
                 gua_context.log(gua::LogLevel::debug, "focus_node(" + id + ")");
                 return true;
             },
+            .press_key = [&](std::string_view key) {
+                const std::lock_guard lock(gua_mutex);
+                gua_context.log(gua::LogLevel::info, "press_key(" + std::string(key) + ")");
+                return !key.empty();
+            },
         },
         gua::ws::BridgeOptions { .port = 8765 });
     bridge.start();

@@ -1,12 +1,25 @@
 {
-  "name": "@gua/mcp",
+  "name": "gui-mcp",
   "version": "0.0.0",
+  "description": "MCP server for the Gua runtime UI automation protocol.",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "bin": {
+    "gui-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
   "scripts": {
-    "check": "tsc --noEmit"
+    "dev": "bun run src/cli.ts mcp",
+    "check": "tsc --noEmit",
+    "build": "bun build src/cli.ts --target bun --outfile dist/cli.js",
+    "prepack": "bun run build"
   },
   "devDependencies": {
+    "bun-types": "^1.3.0",
     "typescript": "^5.5.0"
   }
 }

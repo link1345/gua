@@ -121,6 +121,48 @@ adapter:
 { "id": 2, "type": "click_node", "nodeId": "start" }
 ```
 
+## MCP
+
+The MCP server is a thin protocol consumer over the same bridge used by the
+Inspector. Start a runtime bridge first:
+
+```powershell
+bun run bridge:ws
+```
+
+Then run the MCP server over stdio:
+
+```powershell
+bun run mcp
+```
+
+The package is shaped for npm publishing as `gui-mcp`. After publishing, MCP
+clients can start it with:
+
+```powershell
+bunx gui-mcp@latest mcp
+```
+
+By default it connects to `ws://127.0.0.1:8765`. Override that for another
+runtime adapter:
+
+```powershell
+$env:GUA_BRIDGE_URL = "ws://127.0.0.1:8765"
+bunx gui-mcp@latest mcp
+```
+
+The v0.4 tool surface is:
+
+```text
+get_ui_tree
+click_node
+press_key
+wait_for_node
+get_screenshot
+get_logs
+run_test
+```
+
 Build the static Inspector:
 
 ```powershell

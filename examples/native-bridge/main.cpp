@@ -27,6 +27,7 @@ struct Command {
     int id = 0;
     std::string type;
     std::string node_id;
+    std::string key;
 };
 
 class Socket {
@@ -474,6 +475,7 @@ Command parse_command(std::string_view json)
     command.id = json_int_field(json, "id").value_or(0);
     command.type = json_string_field(json, "type").value_or("");
     command.node_id = json_string_field(json, "nodeId").value_or("");
+    command.key = json_string_field(json, "key").value_or("");
     return command;
 }
 
@@ -570,6 +572,16 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool press_key(std::string_view key)
+    {
+        if (key.empty()) {
+            return false;
+        }
+
+        context_.log(gua::LogLevel::info, "press_key(" + std::string(key) + ")");
+        return true;
+    }
+
 private:
     void render_frame()
     {
@@ -644,6 +656,12 @@ std::string handle_command(DemoRuntime& runtime, std::string_view message)
         if (command.type == "focus_node") {
             if (!runtime.focus_node(command.node_id)) {
                 return error_response(command.id, "Gua node not found: " + command.node_id);
+            }
+            return ok_null_response(command.id);
+        }
+        if (command.type == "press_key") {
+            if (!runtime.press_key(command.key)) {
+                return error_response(command.id, "Gua key was not accepted: " + command.key);
             }
             return ok_null_response(command.id);
         }
