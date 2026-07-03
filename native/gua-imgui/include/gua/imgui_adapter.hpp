@@ -10,6 +10,23 @@
 
 namespace gua::imgui {
 
+inline std::string visible_label(std::string_view label)
+{
+    const std::size_t marker = label.find("##");
+    return std::string(marker == std::string_view::npos ? label : label.substr(0, marker));
+}
+
+inline std::string semantic_id_from_label(std::string_view label)
+{
+    const std::size_t marker = label.find("##");
+    if (marker != std::string_view::npos && marker + 2U < label.size()) {
+        return std::string(label.substr(marker + 2U));
+    }
+
+    const std::string label_buffer(label);
+    return "imgui:" + std::to_string(static_cast<unsigned int>(ImGui::GetID(label_buffer.c_str())));
+}
+
 inline void register_button(
     gua_context_t* context,
     const char* id,
@@ -39,7 +56,34 @@ inline bool button(
 {
     context.button(id, label, bounds, visible, enabled);
     if (clicked && visible && enabled) {
-        return context.enqueue_click(id);
+        return context.emit_click(id);
+    }
+
+    return false;
+}
+
+inline bool button(Context& context, std::string_view label)
+{
+    const std::string label_buffer(label);
+    const std::string id = semantic_id_from_label(label);
+    const std::string visible_label_buffer = visible_label(label);
+    const bool clicked = ImGui::Button(label_buffer.c_str());
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const bool visible = ImGui::IsItemVisible();
+    const bool enabled = true;
+
+    context.button(
+        id,
+        visible_label_buffer,
+        Rect { min.x, min.y, max.x - min.x, max.y - min.y },
+        visible,
+        enabled);
+
+    const bool requested = context.consume_click_request(id);
+    if ((clicked || requested) && visible && enabled) {
+        (void)context.emit_click(id);
+        return true;
     }
 
     return false;
@@ -47,24 +91,46 @@ inline bool button(
 
 inline bool button(Context& context, std::string_view id, std::string_view label)
 {
+    const std::string id_buffer(id);
     const std::string label_buffer(label);
+    const std::string visible_label_buffer = visible_label(label);
+    ImGui::PushID(id_buffer.c_str());
     const bool clicked = ImGui::Button(label_buffer.c_str());
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
     const bool visible = ImGui::IsItemVisible();
+    const bool enabled = true;
+    ImGui::PopID();
 
     context.button(
         id,
-        label,
+        visible_label_buffer,
         Rect { min.x, min.y, max.x - min.x, max.y - min.y },
         visible,
-        true);
+        enabled);
 
-    if (clicked && visible) {
-        return context.enqueue_click(id);
+    const bool requested = context.consume_click_request(id);
+    if ((clicked || requested) && visible && enabled) {
+        (void)context.emit_click(id);
+        return true;
     }
 
     return false;
+}
+
+inline void text(Context& context, std::string_view label)
+{
+    const std::string label_buffer(label);
+    const std::string id = semantic_id_from_label(label);
+    const std::string visible_label_buffer = visible_label(label);
+    ImGui::TextUnformatted(visible_label_buffer.c_str());
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    context.text(
+        id,
+        visible_label_buffer,
+        Rect { min.x, min.y, max.x - min.x, max.y - min.y },
+        ImGui::IsItemVisible());
 }
 
 } // namespace gua::imgui
@@ -88,6 +154,16 @@ inline bool Button(
 inline bool Button(gua::Context& context, std::string_view id, std::string_view label)
 {
     return gua::imgui::button(context, id, label);
+}
+
+inline bool Button(gua::Context& context, std::string_view label)
+{
+    return gua::imgui::button(context, label);
+}
+
+inline void Text(gua::Context& context, std::string_view label)
+{
+    gua::imgui::text(context, label);
 }
 
 } // namespace GuaImGui

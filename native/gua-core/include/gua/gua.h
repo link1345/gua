@@ -69,6 +69,8 @@ int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);
 int gua_enqueue_click(gua_context_t* ctx, const char* node_id);
+int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
+int gua_emit_click(gua_context_t* ctx, const char* node_id);
 int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event);
 
 #ifdef __cplusplus

@@ -153,6 +153,18 @@ public:
         return gua_enqueue_click(context_, id_buffer_.c_str()) != 0;
     }
 
+    [[nodiscard]] bool consume_click_request(std::string_view node_id)
+    {
+        id_buffer_.assign(node_id);
+        return gua_consume_click_request(context_, id_buffer_.c_str()) != 0;
+    }
+
+    [[nodiscard]] bool emit_click(std::string_view node_id)
+    {
+        id_buffer_.assign(node_id);
+        return gua_emit_click(context_, id_buffer_.c_str()) != 0;
+    }
+
     [[nodiscard]] bool poll_event(Event& out_event)
     {
         gua_event_t native_event {};

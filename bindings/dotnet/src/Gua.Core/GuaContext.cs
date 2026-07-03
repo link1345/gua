@@ -137,6 +137,18 @@ public sealed class GuaContext : IDisposable
         return Native.gua_enqueue_click(_handle, id) != 0;
     }
 
+    public bool ConsumeClickRequest(string id)
+    {
+        ThrowIfDisposed();
+        return Native.gua_consume_click_request(_handle, id) != 0;
+    }
+
+    public bool EmitClick(string id)
+    {
+        ThrowIfDisposed();
+        return Native.gua_emit_click(_handle, id) != 0;
+    }
+
     public bool TryPollEvent(out GuaEvent e)
     {
         ThrowIfDisposed();

@@ -10,7 +10,8 @@ cmake --build --preset windows-msvc-debug --target gua-godot
 ```
 
 Then open this directory in the Godot 4.7 editor. The extension exposes
-`GuaContext` to GDScript through `addons/gua/gua.gdextension`.
+`GuaContext` to GDScript through `addons/gua/gua.gdextension`, and
+`addons/gua/gua_auto_adapter.gd` provides the standard-Control auto collector.
 
 Run the project from Godot. The sample starts the Inspector bridge inside the
 running game process on:
@@ -24,6 +25,7 @@ listen, Godot prints a `Failed to start Gua Inspector bridge` warning, usually
 because another process already owns the port or the native extension was not
 rebuilt.
 
-The sample registers a title-screen semantic UI tree, publishes snapshots to the
-Inspector, polls Gua events, and transitions to a loading screen when the
-Inspector or the in-game UI clicks the `start` node.
+The sample attaches `GuaAutoAdapter` to the root Godot `Control`; the adapter
+collects standard labels and buttons into the semantic UI tree, publishes
+snapshots, observes button clicks, and dispatches Inspector `click_node` requests
+through the normal Godot button signal.

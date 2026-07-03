@@ -6,6 +6,10 @@ namespace Gua.Godot;
 public sealed class GuaGodotRuntime : IDisposable
 {
     private nint _runtime;
+    private Control? _attachedRoot;
+    private readonly Dictionary<string, BaseButton> _buttonsById = new(StringComparer.Ordinal);
+    private readonly HashSet<ulong> _connectedButtons = new();
+    private readonly HashSet<string> _suppressedButtonSignals = new(StringComparer.Ordinal);
 
     public GuaGodotRuntime()
     {
@@ -86,10 +90,43 @@ public sealed class GuaGodotRuntime : IDisposable
             enabled && !disabled);
     }
 
+    public void Attach(Control root)
+    {
+        ThrowIfDisposed();
+        _attachedRoot = root ?? throw new ArgumentNullException(nameof(root));
+    }
+
+    public void SyncAttachedTree(string screen)
+    {
+        ThrowIfDisposed();
+        if (_attachedRoot is null)
+        {
+            throw new InvalidOperationException("Gua Godot runtime is not attached to a root Control.");
+        }
+
+        BeginFrame(screen);
+        _buttonsById.Clear();
+        CollectControl(_attachedRoot, _attachedRoot);
+        EndFrame();
+        DispatchClickRequests();
+    }
+
     public bool EnqueueClick(string id)
     {
         ThrowIfDisposed();
         return GuaRuntimeNative.gua_runtime_enqueue_click(_runtime, id) != 0;
+    }
+
+    public bool ConsumeClickRequest(string id)
+    {
+        ThrowIfDisposed();
+        return GuaRuntimeNative.gua_runtime_consume_click_request(_runtime, id) != 0;
+    }
+
+    public bool EmitClick(string id)
+    {
+        ThrowIfDisposed();
+        return GuaRuntimeNative.gua_runtime_emit_click(_runtime, id) != 0;
     }
 
     public void ClickByRole(string role, string label)
@@ -163,5 +200,122 @@ public sealed class GuaGodotRuntime : IDisposable
     {
         return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(value)
             ?? throw new InvalidOperationException("Native Gua runtime returned an invalid UTF-8 string.");
+    }
+
+    private void CollectControl(Control root, Control control)
+    {
+        var id = GetControlId(root, control);
+        var role = GetControlRole(control);
+        var label = GetControlLabel(control);
+        var enabled = IsControlEnabled(control);
+        RegisterNode(
+            id,
+            role,
+            label,
+            new Rect2(control.GlobalPosition, control.Size),
+            control.IsVisibleInTree(),
+            enabled);
+
+        if (control is BaseButton button)
+        {
+            _buttonsById[id] = button;
+            ConnectButtonPressed(button, id);
+        }
+
+        foreach (var child in control.GetChildren())
+        {
+            if (child is Control childControl)
+            {
+                CollectControl(root, childControl);
+            }
+        }
+    }
+
+    private void DispatchClickRequests()
+    {
+        foreach (var (id, button) in _buttonsById.ToArray())
+        {
+            while (ConsumeClickRequest(id))
+            {
+                if (button.Disabled || !button.IsVisibleInTree())
+                {
+                    continue;
+                }
+
+                EmitClick(id);
+                _suppressedButtonSignals.Add(id);
+                button.EmitSignal(BaseButton.SignalName.Pressed);
+            }
+        }
+    }
+
+    private void ConnectButtonPressed(BaseButton button, string id)
+    {
+        if (!_connectedButtons.Add(button.GetInstanceId()))
+        {
+            return;
+        }
+
+        button.Pressed += () =>
+        {
+            if (_suppressedButtonSignals.Remove(id))
+            {
+                return;
+            }
+
+            EmitClick(id);
+        };
+    }
+
+    private static string GetControlId(Control root, Control control)
+    {
+        if (control.HasMeta("gua_id"))
+        {
+            return control.GetMeta("gua_id").AsString();
+        }
+
+        if (control == root)
+        {
+            return "root";
+        }
+
+        return root.GetPathTo(control).ToString();
+    }
+
+    private static string GetControlRole(Control control)
+    {
+        return control switch
+        {
+            CheckBox => "checkbox",
+            BaseButton => "button",
+            Label => "text",
+            LineEdit => "textbox",
+            TextEdit => "textbox",
+            Slider => "slider",
+            _ => "panel",
+        };
+    }
+
+    private static string GetControlLabel(Control control)
+    {
+        return control switch
+        {
+            Button button => button.Text,
+            Label label => label.Text,
+            LineEdit lineEdit => lineEdit.Text,
+            TextEdit textEdit => textEdit.Text,
+            _ => control.Name,
+        };
+    }
+
+    private static bool IsControlEnabled(Control control)
+    {
+        return control switch
+        {
+            BaseButton button => !button.Disabled,
+            LineEdit lineEdit => lineEdit.Editable,
+            TextEdit textEdit => textEdit.Editable,
+            _ => false,
+        };
     }
 }
