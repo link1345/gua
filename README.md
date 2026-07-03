@@ -189,6 +189,19 @@ bun run --filter @gua/inspector tauri:dev
 
 Tauri requires a Rust toolchain in addition to the JavaScript dependencies.
 
+## Release automation
+
+GitHub Actions publishes runtime artifacts from `main` when the relevant protocol
+consumer changes:
+
+- Inspector changes build the Tauri Inspector on Windows and attach the bundle
+  outputs to a GitHub Release tagged as `inspector-<short-sha>`.
+- MCP changes build and publish `gui-mcp` to npm as
+  `0.0.0-main.<run-number>.<short-sha>` with the `latest` dist-tag.
+
+The MCP workflow requires an `NPM_TOKEN` repository secret with permission to
+publish `gui-mcp`.
+
 ## Godot 4.7 C# Sample
 
 The v0.5 C# runtime sample lives in `examples/dotnet-godot`. It is a minimal
