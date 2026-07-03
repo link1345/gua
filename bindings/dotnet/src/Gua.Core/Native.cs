@@ -129,6 +129,12 @@ internal static partial class Native
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_enqueue_click(nint context, string nodeId);
 
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int gua_consume_click_request(nint context, string nodeId);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int gua_emit_click(nint context, string nodeId);
+
     [LibraryImport("gua")]
     internal static unsafe partial int gua_poll_event(nint context, GuaNativeEvent* outEvent);
 }

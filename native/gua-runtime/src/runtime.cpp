@@ -257,6 +257,26 @@ extern "C" int gua_runtime_enqueue_click(gua_runtime_t* runtime, const char* nod
     return gua_enqueue_click(runtime->context, node_id);
 }
 
+extern "C" int gua_runtime_consume_click_request(gua_runtime_t* runtime, const char* node_id)
+{
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_consume_click_request(runtime->context, node_id);
+}
+
+extern "C" int gua_runtime_emit_click(gua_runtime_t* runtime, const char* node_id)
+{
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_emit_click(runtime->context, node_id);
+}
+
 extern "C" int gua_runtime_poll_event(gua_runtime_t* runtime, gua_event_t* out_event)
 {
     if (!valid_runtime(runtime)) {

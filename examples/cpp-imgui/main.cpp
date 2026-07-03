@@ -170,21 +170,43 @@ void DumpEvents(gua::Context& context)
 int RunSmoke()
 {
     gua::Context context;
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1280.0F, 720.0F);
+    unsigned char* pixels = nullptr;
+    int font_width = 0;
+    int font_height = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &font_width, &font_height);
+
     context.begin_frame("title");
     context.log(gua::LogLevel::info, "title screen opened");
-    GuaImGui::Button(
-        context,
-        "start",
-        "Start Game",
-        GuaImGui::Rect { 100.0F, 200.0F, 240.0F, 64.0F },
-        true);
+    ImGui::NewFrame();
+    GuaImGui::Button(context, "Start Game##start");
+    ImGui::EndFrame();
     context.set_screenshot("data:image/gif;base64,R0lGODlhAQABAAAAACw=", 1, 1);
     context.end_frame();
 
     std::cout << context.ui_tree_json() << '\n';
+
+    (void)context.enqueue_click("start");
+    context.begin_frame("title");
+    ImGui::NewFrame();
+    const bool requested_click = GuaImGui::Button(context, "Start Game##start");
+    ImGui::EndFrame();
+    context.end_frame();
+    std::cout << "button-return:" << (requested_click ? "true" : "false") << '\n';
+
+    context.begin_frame("loading");
+    ImGui::NewFrame();
+    GuaImGui::Text(context, "Loading...##loading");
+    ImGui::EndFrame();
+    context.end_frame();
+    std::cout << context.ui_tree_json() << '\n';
     std::cout << context.logs_json() << '\n';
     std::cout << context.screenshot_json() << '\n';
     DumpEvents(context);
+    ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
 
@@ -341,17 +363,17 @@ int main(int argc, char** argv)
             const std::lock_guard lock(gua_mutex);
             gua_context.begin_frame(loading ? "loading" : "title");
             ImGui::Begin("Gua Runtime UI");
-            ImGui::TextUnformatted("This window behaves like a small in-game UI surface.");
-            ImGui::TextUnformatted("Inspector bridge: ws://127.0.0.1:8765");
+            GuaImGui::Text(gua_context, "This window behaves like a small in-game UI surface.##sample-description");
+            GuaImGui::Text(gua_context, "Inspector bridge: ws://127.0.0.1:8765##bridge-url");
             ImGui::Separator();
 
             if (!loading) {
-                GuaImGui::Button(gua_context, "start", "Start Game");
+                if (GuaImGui::Button(gua_context, "Start Game##start")) {
+                    gua_context.log(gua::LogLevel::info, "start button clicked");
+                    loading = true;
+                }
             } else {
-                ImGui::TextUnformatted("Loading...");
-                const ImVec2 min = ImGui::GetItemRectMin();
-                const ImVec2 max = ImGui::GetItemRectMax();
-                gua_context.text("loading", "Loading...", gua::Rect { min.x, min.y, max.x - min.x, max.y - min.y });
+                GuaImGui::Text(gua_context, "Loading...##loading");
             }
 
             if (ImGui::Button("Dump UI Tree")) {
@@ -374,7 +396,6 @@ int main(int argc, char** argv)
             while (gua_context.poll_event(event)) {
                 std::cout << "click:" << event.node_id << '\n';
                 if (event.type == gua::EventType::click && event.node_id == "start") {
-                    gua_context.log(gua::LogLevel::info, "start button clicked");
                     loading = true;
                 }
             }

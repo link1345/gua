@@ -21,7 +21,8 @@ public partial class Main : Control
     {
         _loading = false;
         BuildUi();
-        RebuildGuaFrame();
+        _gua.Attach(this);
+        _gua.SyncAttachedTree(CurrentScreen);
 
         if (StartInspectorBridgeOnReady)
         {
@@ -32,8 +33,7 @@ public partial class Main : Control
 
     public override void _Process(double delta)
     {
-        RebuildGuaFrame();
-        PollGuaEvents();
+        _gua.SyncAttachedTree(CurrentScreen);
     }
 
     public override void _ExitTree()
@@ -45,6 +45,7 @@ public partial class Main : Control
     {
         _titleLabel = new Label
         {
+            Name = "title",
             Text = "Gua C# Sample",
             Position = new Vector2(420, 220),
             Size = new Vector2(440, 56),
@@ -54,24 +55,26 @@ public partial class Main : Control
 
         _startButton = new Button
         {
+            Name = "start",
             Text = "Start Game",
             Position = new Vector2(512, 312),
             Size = new Vector2(256, 56),
         };
-        _startButton.Pressed += () => _gua.EnqueueClick("start");
+        _startButton.Pressed += ShowLoading;
         AddChild(_startButton);
 
         _settingsButton = new Button
         {
+            Name = "settings",
             Text = "Settings",
             Position = new Vector2(512, 384),
             Size = new Vector2(256, 56),
         };
-        _settingsButton.Pressed += () => _gua.EnqueueClick("settings");
         AddChild(_settingsButton);
 
         _loadingLabel = new Label
         {
+            Name = "loading",
             Text = "Loading...",
             Position = new Vector2(544, 328),
             Size = new Vector2(192, 48),
@@ -79,50 +82,6 @@ public partial class Main : Control
             Visible = false,
         };
         AddChild(_loadingLabel);
-    }
-
-    private void RebuildGuaFrame()
-    {
-        _gua.BeginFrame(_loading ? "loading" : "title");
-        _gua.RegisterNode(
-            "root",
-            "screen",
-            _loading ? "Loading Screen" : "Title Screen",
-            new Rect2(Vector2.Zero, Size),
-            visible: true,
-            enabled: false);
-
-        if (_loading)
-        {
-            RegisterControlNode("loading", "text", "Loading...", _loadingLabel, enabled: false);
-        }
-        else
-        {
-            RegisterControlNode("title", "text", "Gua C# Sample", _titleLabel, enabled: false);
-            RegisterControlNode("start", "button", "Start Game", _startButton, enabled: true);
-            RegisterControlNode("settings", "button", "Settings", _settingsButton, enabled: true);
-        }
-
-        _gua.EndFrame();
-    }
-
-    private void RegisterControlNode(string id, string role, string label, Control? control, bool enabled)
-    {
-        if (control is not null)
-        {
-            _gua.RegisterControlNode(id, role, label, control, enabled);
-        }
-    }
-
-    private void PollGuaEvents()
-    {
-        while (_gua.TryPollEvent(out var e))
-        {
-            if (e.Type == GuaEventType.Click && e.NodeId == "start")
-            {
-                ShowLoading();
-            }
-        }
     }
 
     private void ShowLoading()
@@ -151,8 +110,10 @@ public partial class Main : Control
             _loadingLabel.Visible = true;
         }
 
-        RebuildGuaFrame();
+        _gua.SyncAttachedTree(CurrentScreen);
     }
+
+    private string CurrentScreen => _loading ? "loading" : "title";
 
     private void StartInspectorBridge()
     {

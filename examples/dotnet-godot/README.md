@@ -23,7 +23,8 @@ Inspector bridge inside the running game process on:
 ws://127.0.0.1:8765
 ```
 
-Connect Gua Inspector to that URL while the game is running. The sample registers
-a title-screen semantic UI tree, publishes snapshots to the Inspector, polls Gua
-events, and transitions to a loading screen when the Inspector or the in-game UI
-clicks the `start` node.
+Connect Gua Inspector to that URL while the game is running. The sample attaches
+the Gua adapter to the root Godot `Control`; the adapter collects standard
+labels and buttons into the semantic UI tree, publishes snapshots, observes
+button clicks, and dispatches Inspector `click_node` requests through the normal
+Godot button signal.

@@ -101,6 +101,7 @@ struct gua_context_t {
     mutable std::mutex mutex;
     std::string screen = "unknown";
     std::vector<Node> nodes;
+    std::deque<std::string> click_requests;
     std::deque<Event> events;
     std::vector<LogEntry> logs;
     Screenshot screenshot;
@@ -430,6 +431,40 @@ extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)
         return 0;
     }
 
+    ctx->click_requests.push_back(node_id);
+    return 1;
+}
+
+extern "C" int gua_consume_click_request(gua_context_t* ctx, const char* node_id)
+{
+    if (ctx == nullptr || node_id == nullptr) {
+        return 0;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    const auto node_found = std::any_of(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
+        return node.id == node_id && node.visible && node.enabled;
+    });
+    if (!node_found) {
+        return 0;
+    }
+
+    const auto request = std::find(ctx->click_requests.begin(), ctx->click_requests.end(), node_id);
+    if (request == ctx->click_requests.end()) {
+        return 0;
+    }
+
+    ctx->click_requests.erase(request);
+    return 1;
+}
+
+extern "C" int gua_emit_click(gua_context_t* ctx, const char* node_id)
+{
+    if (ctx == nullptr || node_id == nullptr) {
+        return 0;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
     ctx->events.push_back(Event { GUA_EVENT_CLICK, node_id });
     return 1;
 }

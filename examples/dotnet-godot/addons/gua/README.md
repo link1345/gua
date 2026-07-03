@@ -12,7 +12,13 @@ private readonly GuaGodotRuntime _gua = new();
 
 public override void _Ready()
 {
+    _gua.Attach(this);
     _gua.StartInspectorBridge(8765);
+}
+
+public override void _Process(double delta)
+{
+    _gua.SyncAttachedTree("title");
 }
 ```
 
