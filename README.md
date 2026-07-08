@@ -199,8 +199,9 @@ consumer changes:
 - MCP changes build and publish `gui-mcp` to npm as
   `0.0.0-main.<run-number>.<short-sha>` with the `latest` dist-tag.
 
-The MCP workflow requires an `NPM_TOKEN` repository secret with permission to
-publish `gui-mcp`.
+The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
+`gui-mcp` package must be configured on npm with this repository, the
+`.github/workflows/mcp-publish.yml` workflow, and the `release` environment.
 
 ## Godot 4.7 C# Sample
 
