@@ -1,0 +1,69 @@
+name: MCP npm Publish
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/mcp-publish.yml
+      - bun.lock
+      - package.json
+      - tsconfig.base.json
+      - packages/mcp/**
+      - packages/bridge-ws/**
+      - native/gua-ws-bridge/**
+      - protocol/**
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mcp-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish gui-mcp to npm
+    runs-on: ubuntu-latest
+    environment: release
+    defaults:
+      run:
+        working-directory: packages/mcp
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Node.js for npm publish
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          registry-url: https://registry.npmjs.org
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        working-directory: .
+        run: bun install --frozen-lockfile
+
+      - name: Check
+        run: bun run check
+
+      - name: Build
+        run: bun run build
+
+      - name: Stamp CI package version
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          npm version "0.0.0-main.${GITHUB_RUN_NUMBER}.${short_sha}" --no-git-tag-version
+
+      - name: Verify package contents
+        run: bun pm pack --dry-run
+
+      - name: Publish to npm
+        run: npm publish --access public --tag latest
