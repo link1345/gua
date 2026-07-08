@@ -544,6 +544,12 @@ public:
         if (!context_.enqueue_click(node_id)) {
             return false;
         }
+        if (!context_.consume_click_request(node_id)) {
+            return false;
+        }
+        if (!context_.emit_click(node_id)) {
+            return false;
+        }
 
         context_.log(gua::LogLevel::info, "click_node(" + std::string(node_id) + ")");
         gua::Event event;

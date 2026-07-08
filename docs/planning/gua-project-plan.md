@@ -37,6 +37,23 @@ await page.getByText("Start").click()
 await expect(page.getByText("Loading")).toBeVisible()
 ```
 
+## Adapter-owned UI reflection update
+
+Gua adapters should prefer collecting the host UI automatically instead of
+asking game code to restate every semantic node. The core keeps the C ABI stable:
+`gua_enqueue_click` records an external automation request, adapters consume it
+with `gua_consume_click_request`, and observed host UI input is recorded with
+`gua_emit_click`.
+
+Initial adapter policy:
+
+* ImGui uses a `GuaImGui` facade such as `GuaImGui::Button(context, "Start Game##start")`.
+  It draws the ImGui widget, registers the Gua node, consumes pending click
+  requests, and emits click events.
+* Godot adapters attach to a root `Control`, collect standard controls from the
+  scene tree, connect `BaseButton.pressed` once, and dispatch external click
+  requests through the normal Godot button signal.
+
 一方で、ゲーム UI は一般的に以下の問題を持つ。
 
 * UI が Canvas / Texture / RenderTarget に描画され、DOM のような意味ツリーがない

@@ -13,6 +13,22 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
 
+## Adapter-Owned Reflection
+
+Runtime adapters should rebuild the semantic tree from the host UI every frame
+or snapshot. Game code should not have to restate its visible buttons, labels,
+and controls as separate Gua calls when the adapter can observe those controls.
+
+- If a host UI element disappears, the next adapter snapshot omits its Gua node.
+- If a host UI element is clicked by the user, the adapter emits a Gua event.
+- If automation requests `click_node`, the core records a pending click request.
+  The adapter consumes that request when it reaches the matching host UI element
+  and then activates the host control through the same path normal game code
+  already uses.
+
+This keeps the C ABI as the stable protocol boundary while letting ImGui, Godot,
+and later engine adapters own the engine-specific reflection details.
+
 ## Inspector Snapshots
 
 The v0.3 Inspector consumes three protocol payloads:
@@ -94,9 +110,11 @@ request/response WebSocket payloads for the runtime side.
 
 ## Events
 
-Events are queued by the runtime core when commands should be observed by the
-game code. Language bindings should poll events instead of passing callbacks
-across ABI boundaries.
+Events are queued by the runtime core when adapters observe host UI input.
+Language bindings should poll events instead of passing callbacks across ABI
+boundaries. External commands such as `click_node` are requests first; adapters
+consume them and emit events only after the corresponding host UI action has
+been applied.
 
 Initial event types:
 

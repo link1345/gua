@@ -109,6 +109,18 @@ bool GuaContext::enqueue_click(const String& node_id)
     return gua_runtime_enqueue_click(runtime_, node_id_utf8.get_data()) != 0;
 }
 
+bool GuaContext::consume_click_request(const String& node_id)
+{
+    const CharString node_id_utf8 = node_id.utf8();
+    return gua_runtime_consume_click_request(runtime_, node_id_utf8.get_data()) != 0;
+}
+
+bool GuaContext::emit_click(const String& node_id)
+{
+    const CharString node_id_utf8 = node_id.utf8();
+    return gua_runtime_emit_click(runtime_, node_id_utf8.get_data()) != 0;
+}
+
 Dictionary GuaContext::poll_event()
 {
     gua_event_t event {};
@@ -158,6 +170,8 @@ void GuaContext::_bind_methods()
         DEFVAL(true));
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
     ClassDB::bind_method(D_METHOD("enqueue_click", "node_id"), &GuaContext::enqueue_click);
+    ClassDB::bind_method(D_METHOD("consume_click_request", "node_id"), &GuaContext::consume_click_request);
+    ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);
     ClassDB::bind_method(D_METHOD("poll_event"), &GuaContext::poll_event);
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);

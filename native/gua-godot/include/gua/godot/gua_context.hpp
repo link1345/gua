@@ -28,6 +28,8 @@ public:
 
     String get_ui_tree_json() const;
     bool enqueue_click(const String& node_id);
+    bool consume_click_request(const String& node_id);
+    bool emit_click(const String& node_id);
     Dictionary poll_event();
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();

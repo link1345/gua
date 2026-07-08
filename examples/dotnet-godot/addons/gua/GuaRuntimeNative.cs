@@ -115,6 +115,12 @@ internal static class GuaRuntimeNative
     internal static extern int gua_runtime_enqueue_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
 
     [DllImport("gua_runtime")]
+    internal static extern int gua_runtime_consume_click_request(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
+
+    [DllImport("gua_runtime")]
+    internal static extern int gua_runtime_emit_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
+
+    [DllImport("gua_runtime")]
     internal static unsafe extern int gua_runtime_poll_event(nint runtime, NativeEvent* outEvent);
 
     [DllImport("gua_runtime")]
