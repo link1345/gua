@@ -49,6 +49,10 @@ public sealed class GodotSceneTestHost : IDisposable
     public void Click(string nodeId, string? nextScene = null, TimeSpan? timeout = null)
     {
         ThrowIfDisposed();
+        var previousScreen = nextScene is null
+            ? null
+            : ((GuaRemoteContext)Context).GetCurrentScreen();
+
         if (!Context.EnqueueClick(nodeId))
         {
             throw new InvalidOperationException($"Failed to click Gua node: {nodeId}");
@@ -56,7 +60,11 @@ public sealed class GodotSceneTestHost : IDisposable
 
         if (nextScene is not null)
         {
-            ((GuaRemoteContext)Context).WaitForScreen(ToExpectedScreen(nextScene), timeout ?? _options.SceneTimeout);
+            ((GuaRemoteContext)Context).WaitForScreenTransition(
+                ToExpectedScreens(nextScene),
+                previousScreen,
+                IsScenePath(nextScene),
+                timeout ?? _options.SceneTimeout);
         }
     }
 
@@ -177,20 +185,53 @@ public sealed class GodotSceneTestHost : IDisposable
         return "res://" + normalized.TrimStart('/');
     }
 
-    private static string ToExpectedScreen(string scenePath)
+    private static IReadOnlySet<string> ToExpectedScreens(string scenePath)
     {
+        var expected = new HashSet<string>(StringComparer.Ordinal);
         var normalized = scenePath.Replace('\\', '/');
         if (normalized.StartsWith("res://", StringComparison.Ordinal))
         {
-            return normalized;
+            expected.Add(normalized);
+            expected.Add(normalized["res://".Length..]);
+            AddSceneStem(expected, normalized);
+            return expected;
         }
 
         if (normalized.StartsWith("game/", StringComparison.Ordinal))
         {
-            return "res://" + normalized["game/".Length..];
+            var projectRelative = normalized["game/".Length..];
+            expected.Add("res://" + projectRelative);
+            expected.Add(projectRelative);
+            AddSceneStem(expected, normalized);
+            return expected;
         }
 
-        return normalized;
+        expected.Add(normalized);
+        AddSceneStem(expected, normalized);
+        return expected;
+    }
+
+    private static void AddSceneStem(HashSet<string> expected, string scenePath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(scenePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        expected.Add(fileName);
+        if (fileName.EndsWith("_screen", StringComparison.Ordinal) && fileName.Length > "_screen".Length)
+        {
+            expected.Add(fileName[..^"_screen".Length]);
+        }
+    }
+
+    private static bool IsScenePath(string scene)
+    {
+        return scene.Contains('/', StringComparison.Ordinal) ||
+            scene.Contains('\\', StringComparison.Ordinal) ||
+            Path.GetExtension(scene).Length > 0 ||
+            scene.StartsWith("res://", StringComparison.Ordinal);
     }
 
     private static void KillProcess(Process process)

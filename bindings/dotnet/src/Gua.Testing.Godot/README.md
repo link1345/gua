@@ -20,3 +20,9 @@ GuaAssertions.GetByRole(host.Context, "button", "Create").ToBeVisible();
 Set `GODOT_EXECUTABLE` or pass `GodotSceneTestHostOptions.GodotExecutablePath`
 when Godot is not on `PATH`. The running game must start a Gua bridge, normally
 at `ws://127.0.0.1:8765`.
+
+`nextScene` may be a logical Gua screen name such as `loading` or a Godot scene
+path such as `game/scenes/village_list.tscn`. Scene paths are matched against
+common logical screen names derived from the file name, and also accept a screen
+change from the previous value because Godot adapters often publish logical
+screen names instead of resource paths.

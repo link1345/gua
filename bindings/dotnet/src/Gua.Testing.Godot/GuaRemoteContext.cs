@@ -97,14 +97,25 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         throw new TimeoutException($"Timed out connecting to Gua bridge at {_bridgeUri}.", lastError);
     }
 
-    public void WaitForScreen(string screen, TimeSpan timeout)
+    public string GetCurrentScreen()
+    {
+        return GetUiTree().Screen;
+    }
+
+    public void WaitForScreenTransition(
+        IReadOnlySet<string> expectedScreens,
+        string? previousScreen,
+        bool allowAnyScreenChange,
+        TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         do
         {
             var tree = GetUiTree();
-            if (string.Equals(tree.Screen, screen, StringComparison.Ordinal) ||
-                string.Equals(tree.Screen, screen.Replace("res://", "", StringComparison.Ordinal), StringComparison.Ordinal))
+            if (expectedScreens.Contains(tree.Screen) ||
+                (allowAnyScreenChange &&
+                    previousScreen is not null &&
+                    !string.Equals(tree.Screen, previousScreen, StringComparison.Ordinal)))
             {
                 return;
             }
@@ -113,7 +124,8 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         }
         while (DateTime.UtcNow < deadline);
 
-        throw new TimeoutException($"Timed out waiting for Godot scene: {screen}");
+        var expected = string.Join(", ", expectedScreens);
+        throw new TimeoutException($"Timed out waiting for Godot scene. Expected screen [{expected}], current screen did not change from '{previousScreen}'.");
     }
 
     public void Dispose()
