@@ -4,6 +4,11 @@
   "description": "MCP server for the Gua runtime UI automation protocol.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/link1345/gua",
+    "directory": "packages/mcp"
+  },
   "bin": {
     "gui-mcp": "./dist/cli.js"
   },
