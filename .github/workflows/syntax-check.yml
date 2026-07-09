@@ -33,10 +33,10 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore
-        run: dotnet restore bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj
+        run: dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
 
       - name: Build
-        run: dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --no-restore
+        run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore
 
   typescript:
     name: TypeScript / tsc

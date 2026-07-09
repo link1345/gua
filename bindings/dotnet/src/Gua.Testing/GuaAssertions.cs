@@ -4,22 +4,22 @@ namespace Gua.Testing;
 
 public static class GuaAssertions
 {
-    public static GuaNodeExpectation GetById(GuaContext context, string id)
+    public static GuaNodeExpectation GetById(IGuaContext context, string id)
     {
         return new GuaNodeExpectation(context, context.FindNodeById(id));
     }
 
-    public static GuaNodeExpectation GetByRole(GuaContext context, string role, string? name = null)
+    public static GuaNodeExpectation GetByRole(IGuaContext context, string role, string? name = null)
     {
         return new GuaNodeExpectation(context, context.FindNodeByRole(role, name));
     }
 
-    public static GuaNodeExpectation GetByText(GuaContext context, string text)
+    public static GuaNodeExpectation GetByText(IGuaContext context, string text)
     {
         return new GuaNodeExpectation(context, context.FindNodeByText(text));
     }
 
-    public static GuaNodeExpectation ExpectNode(GuaContext context, string id)
+    public static GuaNodeExpectation ExpectNode(IGuaContext context, string id)
     {
         return GetById(context, id);
     }
@@ -29,17 +29,17 @@ public static class GuaAssertions
         expectation.WaitFor(timeout);
     }
 
-    public static GuaNodeExpectation WaitForId(GuaContext context, string id, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForId(IGuaContext context, string id, TimeSpan? timeout = null)
     {
         return WaitForQuery(() => GetById(context, id), $"id: {id}", timeout);
     }
 
-    public static GuaNodeExpectation WaitForRole(GuaContext context, string role, string? name = null, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForRole(IGuaContext context, string role, string? name = null, TimeSpan? timeout = null)
     {
         return WaitForQuery(() => GetByRole(context, role, name), name is null ? $"role: {role}" : $"role and name: {role}, {name}", timeout);
     }
 
-    public static GuaNodeExpectation WaitForText(GuaContext context, string text, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForText(IGuaContext context, string text, TimeSpan? timeout = null)
     {
         return WaitForQuery(() => GetByText(context, text), $"text: {text}", timeout);
     }
@@ -66,10 +66,10 @@ public static class GuaAssertions
 
 public sealed class GuaNodeExpectation
 {
-    private readonly GuaContext _context;
+    private readonly IGuaContext _context;
     private readonly string _id;
 
-    internal GuaNodeExpectation(GuaContext context, string id)
+    internal GuaNodeExpectation(IGuaContext context, string id)
     {
         _context = context;
         _id = id;

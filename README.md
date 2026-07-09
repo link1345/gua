@@ -24,6 +24,17 @@ GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
 GuaAssertions.WaitForText(ui, "Loading...").ToBeVisible();
 ```
 
+Godot scene tests can use the `Gua.Testing.Godot` package to start a Godot
+process and assert against the live Gua bridge:
+
+```csharp
+using var host = GodotSceneTestHost.Load("game/scenes/title_screen.tscn");
+
+GuaAssertions.GetByRole(host.Context, "button", "開始").ToBeVisible();
+host.Click("CenterPanel/Content/ButtonBox/StartButton", nextScene: "game/scenes/village_list.tscn");
+GuaAssertions.GetByRole(host.Context, "button", "Create").ToBeVisible();
+```
+
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
 context.set_screenshot("data:image/png;base64,...", 1280, 720);
@@ -289,6 +300,8 @@ native/gua-imgui/     ImGui adapter layer
 native/gua-testing/   C++ testing helpers over the C ABI
 native/gua-godot/     Godot GDExtension adapter for GDScript
 bindings/dotnet/      .NET P/Invoke binding and C# testing helpers
+bindings/dotnet/src/Gua.Testing.Godot/
+                      Godot process test helpers over Gua.Testing
 packages/mcp/         MCP server prototype
 packages/inspector/   Inspector UI prototype
 examples/             Minimal demos and samples, including the Godot C# sample
