@@ -6,7 +6,19 @@ public sealed class GuaContext : IGuaContext, IDisposable
 
     public GuaContext()
     {
-        _handle = Native.gua_create_context();
+        try
+        {
+            _handle = Native.gua_create_context();
+        }
+        catch (DllNotFoundException ex)
+        {
+            throw new InvalidOperationException(Native.NativeLoadErrorMessage(ex), ex);
+        }
+        catch (BadImageFormatException ex)
+        {
+            throw new InvalidOperationException(Native.NativeLoadErrorMessage(ex), ex);
+        }
+
         if (_handle == nint.Zero)
         {
             throw new InvalidOperationException("Failed to create a Gua context.");

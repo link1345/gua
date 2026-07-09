@@ -13,12 +13,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageId>Gua.Testing.Godot</PackageId>
-    <Version>0.5.0</Version>
-    <Authors>Gua</Authors>
+    <Version>$(GuaPackageVersion)</Version>
+    <Authors>Gua contributors</Authors>
+    <Title>Gua Testing Godot</Title>
     <Description>Godot process test host for Gua runtime UI automation assertions.</Description>
+    <PackageProjectUrl>https://github.com/link1345/gua</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/link1345/gua</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>godot;testing;ui-automation;gua</PackageTags>
+    <PackageTags>gua;godot;game-ui;automation;testing</PackageTags>
     <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageOutputPath>$(GuaPackageOutputPath)</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 </Project>

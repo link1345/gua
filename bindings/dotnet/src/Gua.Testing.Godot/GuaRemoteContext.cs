@@ -26,6 +26,11 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return new GuaNodeState(node.Visible, node.Enabled);
     }
 
+    public string GetUiTreeJson()
+    {
+        return RequestRawResult(new { type = "get_ui_tree" });
+    }
+
     public string FindNodeById(string id)
     {
         return GetUiTree().FindNodeById(id)?.Id
@@ -62,6 +67,12 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     {
         Request<object?>(new { type = "click_node", nodeId = id }, allowNullResult: true);
         return true;
+    }
+
+    public bool TryPollEvent(out GuaEvent e)
+    {
+        e = default;
+        return false;
     }
 
     public void WaitUntilAvailable(TimeSpan timeout)
@@ -161,6 +172,43 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
             }
 
             return result!;
+        }
+    }
+
+    private string RequestRawResult(object command)
+    {
+        EnsureConnected();
+        var id = _nextId++;
+        var payload = JsonSerializer.Serialize(command, command.GetType());
+        using var document = JsonDocument.Parse(payload);
+        using var output = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(output))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("id", id);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                property.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+
+        Send(output.ToArray());
+        while (true)
+        {
+            var responseJson = ReceiveString();
+            using var response = JsonDocument.Parse(responseJson);
+            if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
+            {
+                continue;
+            }
+
+            if (!response.RootElement.GetProperty("ok").GetBoolean())
+            {
+                throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
+            }
+
+            return response.RootElement.GetProperty("result").GetRawText();
         }
     }
 

@@ -2,6 +2,8 @@ namespace Gua.Core;
 
 public interface IGuaContext
 {
+    string GetUiTreeJson();
+
     GuaNodeState GetNodeState(string id);
 
     string FindNodeById(string id);
@@ -11,4 +13,6 @@ public interface IGuaContext
     string FindNodeByText(string text);
 
     bool EnqueueClick(string id);
+
+    bool TryPollEvent(out GuaEvent e);
 }
