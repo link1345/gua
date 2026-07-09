@@ -102,6 +102,26 @@ host.Click("CenterPanel/Content/ButtonBox/StartButton", nextScene: "game/scenes/
 GuaAssertions.GetByRole(host.Context, "button", "Create").ToBeVisible();
 ```
 
+Want to try that in GitHub Actions without wiring every setup step by hand?
+[`link1345/gua-tester`](https://github.com/link1345/gua-tester) provides
+reusable Actions for Godot GDScript projects. It downloads Godot on the runner,
+links the released Gua Godot addon into your project, sets `GODOT_EXECUTABLE`,
+and runs your .NET tests that use `Gua.Testing.Godot`.
+
+For a typical consumer repository, the workflow can be as small as:
+
+```yaml
+- uses: link1345/gua-tester@v1
+  with:
+    project-path: game
+    test-project: tests/GuaTester.Tests.csproj
+    godot-version: "4.7"
+    godot-status: stable
+```
+
+If you have a Godot project that starts the Gua bridge, give it a spin in CI and
+see whether the semantic UI tree catches regressions before they land.
+
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
 context.set_screenshot("data:image/png;base64,...", 1280, 720);
