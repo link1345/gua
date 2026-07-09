@@ -14,14 +14,14 @@ public static class GuaAssertions
         set => CurrentOptions.Value = value ?? throw new ArgumentNullException(nameof(value));
     }
 
-    public static GuaNodeExpectation GetById(GuaContext context, string id)
+    public static GuaNodeExpectation GetById(IGuaContext context, string id)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         return new GuaNodeExpectation(context, id, $"id '{id}'");
     }
 
-    public static GuaNodeExpectation GetByRole(GuaContext context, string role, string? name = null)
+    public static GuaNodeExpectation GetByRole(IGuaContext context, string role, string? name = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(role);
@@ -31,14 +31,14 @@ public static class GuaAssertions
         return new GuaNodeExpectation(context, id, description);
     }
 
-    public static GuaNodeExpectation GetByText(GuaContext context, string text)
+    public static GuaNodeExpectation GetByText(IGuaContext context, string text)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         return new GuaNodeExpectation(context, context.FindNodeByText(text), $"text '{text}'");
     }
 
-    public static GuaNodeExpectation ExpectNode(GuaContext context, string id)
+    public static GuaNodeExpectation ExpectNode(IGuaContext context, string id)
     {
         return GetById(context, id);
     }
@@ -49,18 +49,18 @@ public static class GuaAssertions
         expectation.WaitFor(timeout);
     }
 
-    public static GuaNodeExpectation WaitForId(GuaContext context, string id, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForId(IGuaContext context, string id, TimeSpan? timeout = null)
     {
         return WaitForQuery(() => GetById(context, id).RequireExistingSnapshot(), $"id '{id}'", timeout);
     }
 
-    public static GuaNodeExpectation WaitForRole(GuaContext context, string role, string? name = null, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForRole(IGuaContext context, string role, string? name = null, TimeSpan? timeout = null)
     {
         var description = name is null ? $"role '{role}'" : $"role '{role}' and label '{name}'";
         return WaitForQuery(() => GetByRole(context, role, name).RequireExistingSnapshot(), description, timeout);
     }
 
-    public static GuaNodeExpectation WaitForText(GuaContext context, string text, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForText(IGuaContext context, string text, TimeSpan? timeout = null)
     {
         return WaitForQuery(() => GetByText(context, text).RequireExistingSnapshot(), $"text '{text}'", timeout);
     }
@@ -96,7 +96,7 @@ public static class GuaAssertions
         throw new GuaAssertionException(message);
     }
 
-    internal static GuaNodeSnapshot? TryGetSnapshot(GuaContext context, string id)
+    internal static GuaNodeSnapshot? TryGetSnapshot(IGuaContext context, string id)
     {
         using var document = JsonDocument.Parse(context.GetUiTreeJson());
         if (!document.RootElement.TryGetProperty("nodes", out var nodes) || nodes.ValueKind != JsonValueKind.Array)
@@ -136,7 +136,7 @@ public static class GuaAssertions
         return null;
     }
 
-    internal static string DescribeTree(GuaContext context)
+    internal static string DescribeTree(IGuaContext context)
     {
         try
         {
@@ -176,7 +176,7 @@ public static class GuaAssertions
             {
                 return query();
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or GuaAssertionException)
             {
                 lastException = ex;
                 Thread.Sleep(10);
@@ -196,11 +196,11 @@ public static class GuaAssertions
 
 public sealed class GuaNodeExpectation
 {
-    private readonly GuaContext _context;
+    private readonly IGuaContext _context;
     private readonly string _id;
     private readonly string _description;
 
-    internal GuaNodeExpectation(GuaContext context, string id, string description)
+    internal GuaNodeExpectation(IGuaContext context, string id, string description)
     {
         _context = context;
         _id = id;

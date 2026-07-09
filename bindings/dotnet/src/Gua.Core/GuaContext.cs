@@ -1,6 +1,6 @@
 namespace Gua.Core;
 
-public sealed class GuaContext : IDisposable
+public sealed class GuaContext : IGuaContext, IDisposable
 {
     private nint _handle;
 

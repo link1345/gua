@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Gua.Core\Gua.Core.csproj" />
+    <ProjectReference Include="..\Gua.Testing\Gua.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>Gua.Testing.Godot</PackageId>
+    <Version>$(GuaPackageVersion)</Version>
+    <Authors>Gua contributors</Authors>
+    <Title>Gua Testing Godot</Title>
+    <Description>Godot process test host for Gua runtime UI automation assertions.</Description>
+    <PackageProjectUrl>https://github.com/link1345/gua</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/link1345/gua</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>gua;godot;game-ui;automation;testing</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageOutputPath>$(GuaPackageOutputPath)</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+</Project>
