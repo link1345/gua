@@ -172,7 +172,7 @@ dependency on the matching `Gua.Core` package, so a test project only needs the
 testing package:
 
 ```xml
-<PackageReference Include="Gua.Testing" Version="0.5.0-preview.2" />
+<PackageReference Include="Gua.Testing" Version="0.5.0-preview.3" />
 ```
 
 `Gua.Core` is also delivered as a NuGet package and `Gua.Testing` depends on the

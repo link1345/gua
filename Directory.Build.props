@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <GuaPackageVersion>0.5.0-preview.2</GuaPackageVersion>
+    <GuaPackageVersion>0.5.0-preview.3</GuaPackageVersion>
     <GuaPackageOutputPath>$(MSBuildThisFileDirectory)artifacts\packages</GuaPackageOutputPath>
   </PropertyGroup>
 </Project>
