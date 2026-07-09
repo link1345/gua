@@ -27,9 +27,6 @@ jobs:
     name: Publish gui-mcp to npm
     runs-on: ubuntu-latest
     environment: release
-    defaults:
-      run:
-        working-directory: packages/mcp
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -48,19 +45,47 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Check
-        run: bun run check
+        run: bun run --filter gui-mcp check
 
       - name: Build
-        run: bun run build
+        run: bun run --filter gui-mcp build
 
-      - name: Stamp CI package version
+      - name: Prepare publish package
+        id: prepare
         shell: bash
         run: |
           short_sha="${GITHUB_SHA::12}"
-          npm version "0.0.0-main.${GITHUB_RUN_NUMBER}.${short_sha}" --no-git-tag-version
+          package_version="0.0.0-main.${GITHUB_RUN_NUMBER}.${short_sha}"
+          publish_dir="${RUNNER_TEMP}/gui-mcp-package"
+
+          rm -rf "${publish_dir}"
+          mkdir -p "${publish_dir}/dist"
+          cp packages/mcp/README.md "${publish_dir}/README.md"
+          cp -R packages/mcp/dist/. "${publish_dir}/dist/"
+
+          PACKAGE_VERSION="${package_version}" PUBLISH_DIR="${publish_dir}" node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const packageJson = JSON.parse(fs.readFileSync("packages/mcp/package.json", "utf8"));
+          packageJson.version = process.env.PACKAGE_VERSION;
+          delete packageJson.scripts;
+          delete packageJson.devDependencies;
+
+          fs.writeFileSync(
+            path.join(process.env.PUBLISH_DIR, "package.json"),
+            `${JSON.stringify(packageJson, null, 2)}\n`,
+          );
+          NODE
+
+          echo "publish_dir=${publish_dir}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify package contents
-        run: bun pm pack --dry-run
+        run: |
+          cd "${{ steps.prepare.outputs.publish_dir }}"
+          npm pack --dry-run
 
       - name: Publish to npm
-        run: npm publish --access public --tag latest
+        run: |
+          cd "${{ steps.prepare.outputs.publish_dir }}"
+          npm publish --access public --tag latest
