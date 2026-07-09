@@ -1,0 +1,8 @@
+namespace Gua.Testing;
+
+public sealed class GuaAssertionOptions
+{
+    public static GuaAssertionOptions Default { get; } = new();
+
+    public Action<string> Fail { get; init; } = message => throw new GuaAssertionException(message);
+}
