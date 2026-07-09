@@ -148,18 +148,36 @@ public sealed class GodotSceneTestHost : IDisposable
         }
 
         var normalized = scenePath.Replace('\\', '/');
-        var gameIndex = normalized.IndexOf("/game/", StringComparison.Ordinal);
-        if (gameIndex >= 0)
+        if (normalized.StartsWith("res://", StringComparison.Ordinal))
         {
-            return Path.GetFullPath(normalized[..(gameIndex + "/game".Length)]);
+            throw new InvalidOperationException(
+                "GodotSceneTestHostOptions.ProjectPath is required when loading a res:// scene path.");
         }
 
-        if (normalized.StartsWith("game/", StringComparison.Ordinal))
+        var sceneFullPath = Path.GetFullPath(scenePath);
+        var sceneDirectory = Path.GetDirectoryName(sceneFullPath)
+            ?? throw new InvalidOperationException($"Could not resolve a directory for Godot scene: {scenePath}");
+
+        var projectPath = FindGodotProjectDirectory(sceneDirectory);
+        return projectPath
+            ?? throw new InvalidOperationException(
+                $"Could not locate project.godot for scene '{scenePath}'. Set GodotSceneTestHostOptions.ProjectPath explicitly.");
+    }
+
+    private static string? FindGodotProjectDirectory(string startDirectory)
+    {
+        var directory = new DirectoryInfo(startDirectory);
+        while (directory is not null)
         {
-            return Path.GetFullPath("game");
+            if (File.Exists(Path.Combine(directory.FullName, "project.godot")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
         }
 
-        return Environment.CurrentDirectory;
+        return null;
     }
 
     private static string ToGodotScenePath(string scenePath, string projectPath)
@@ -175,11 +193,6 @@ public sealed class GodotSceneTestHost : IDisposable
         if (!relative.StartsWith("..", StringComparison.Ordinal))
         {
             return "res://" + relative;
-        }
-
-        if (normalized.StartsWith("game/", StringComparison.Ordinal))
-        {
-            return "res://" + normalized["game/".Length..];
         }
 
         return "res://" + normalized.TrimStart('/');

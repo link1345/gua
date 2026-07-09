@@ -1,6 +1,6 @@
 namespace Gua.Testing.Godot;
 
-internal sealed class GuaRemoteUiTree
+public sealed class GuaRemoteUiTree
 {
     public string Screen { get; set; } = "";
 
@@ -12,7 +12,7 @@ internal sealed class GuaRemoteUiTree
     }
 }
 
-internal sealed class GuaRemoteNode
+public sealed class GuaRemoteNode
 {
     public string Id { get; set; } = "";
 

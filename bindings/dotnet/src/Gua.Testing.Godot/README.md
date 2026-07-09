@@ -21,6 +21,10 @@ Set `GODOT_EXECUTABLE` or pass `GodotSceneTestHostOptions.GodotExecutablePath`
 when Godot is not on `PATH`. The running game must start a Gua bridge, normally
 at `ws://127.0.0.1:8765`.
 
+When `ProjectPath` is omitted, the host walks up from the scene file to the
+nearest `project.godot` and uses that directory as Godot's `--path`. Pass
+`ProjectPath` explicitly when loading a `res://` scene path.
+
 `nextScene` may be a logical Gua screen name such as `loading` or a Godot scene
 path such as `game/scenes/village_list.tscn`. Scene paths are matched against
 common logical screen names derived from the file name, and also accept a screen
