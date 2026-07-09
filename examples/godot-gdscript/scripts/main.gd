@@ -1,9 +1,11 @@
 extends Control
 
+const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
+
 @export var start_inspector_bridge_on_ready := true
 @export var inspector_bridge_port := 8765
 
-var ui := GuaAutoAdapter.new()
+var ui := GuaAutoAdapterScript.new()
 var loading := false
 var title_label: Label
 var start_button: Button

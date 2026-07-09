@@ -12,6 +12,24 @@ cmake --build --preset windows-msvc-debug --target gua-godot
 Then open this directory in the Godot 4.7 editor. The extension exposes
 `GuaContext` to GDScript through `addons/gua/gua.gdextension`, and
 `addons/gua/gua_auto_adapter.gd` provides the standard-Control auto collector.
+Game scripts should instantiate the adapter from an explicit preload instead of
+depending on Godot's global `class_name` registration order:
+
+```gdscript
+const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
+
+var ui := GuaAutoAdapterScript.new()
+```
+
+The adapter resolves the native `GuaContext` class through `ClassDB` when it is
+first used. If the GDExtension is not loaded, or if the vendored DLL is stale and
+does not expose a required method such as `consume_click_request`, the adapter
+prints an actionable error and stops before Godot raises a generic invalid-call
+error. Rebuild the vendored DLL with:
+
+```powershell
+cmake --build --preset windows-msvc-debug --target gua-godot
+```
 
 Run the project from Godot. The sample starts the Inspector bridge inside the
 running game process on:
@@ -29,3 +47,9 @@ The sample attaches `GuaAutoAdapter` to the root Godot `Control`; the adapter
 collects standard labels and buttons into the semantic UI tree, publishes
 snapshots, observes button clicks, and dispatches Inspector `click_node` requests
 through the normal Godot button signal.
+
+For a headless smoke check of the load-order-safe path:
+
+```powershell
+C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+```

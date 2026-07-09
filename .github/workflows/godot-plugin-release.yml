@@ -1,0 +1,84 @@
+name: Godot Plugin Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/godot-plugin-release.yml
+      - CMakeLists.txt
+      - CMakePresets.json
+      - examples/godot-gdscript/addons/gua/**
+      - native/gua-core/**
+      - native/gua-runtime/**
+      - native/gua-godot/**
+      - native/gua-ws-bridge/**
+      - protocol/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: godot-plugin-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build Godot plugin and attach release asset
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure native build
+        run: cmake --preset windows-msvc-debug
+
+      - name: Build Godot GDExtension
+        run: cmake --build --preset windows-msvc-debug --target gua-godot
+
+      - name: Package Godot plugin
+        id: package
+        shell: pwsh
+        run: |
+          $shortSha = "${env:GITHUB_SHA}".Substring(0, 12)
+          $packageRoot = Join-Path $env:RUNNER_TEMP "gua-godot-plugin"
+          $addonSource = "examples/godot-gdscript/addons/gua"
+          $addonTarget = Join-Path $packageRoot "addons/gua"
+          $zipPath = Join-Path $env:RUNNER_TEMP "gua-godot-plugin-windows-debug-$shortSha.zip"
+
+          Remove-Item -Recurse -Force $packageRoot, $zipPath -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $addonTarget | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $addonTarget "bin") | Out-Null
+
+          Copy-Item "$addonSource/gua.gdextension" $addonTarget
+          Copy-Item "$addonSource/gua.gdextension.uid" $addonTarget
+          Copy-Item "$addonSource/gua_auto_adapter.gd" $addonTarget
+          Copy-Item "$addonSource/plugin.cfg" $addonTarget
+          Copy-Item "$addonSource/plugin.gd" $addonTarget
+          Copy-Item "$addonSource/plugin.gd.uid" $addonTarget
+          Copy-Item "$addonSource/bin/*.dll" (Join-Path $addonTarget "bin")
+
+          Compress-Archive -Path (Join-Path $packageRoot "addons") -DestinationPath $zipPath -CompressionLevel Optimal
+
+          "asset=$zipPath" >> $env:GITHUB_OUTPUT
+          "tag=godot-plugin-$shortSha" >> $env:GITHUB_OUTPUT
+          "name=Gua Godot Plugin $shortSha" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-godot-plugin-windows-debug
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.package.outputs.tag }}
+          name: ${{ steps.package.outputs.name }}
+          body: |
+            Automated Gua Godot plugin build from `${{ github.sha }}`.
+
+            This release contains `addons/gua` with the Windows debug GDExtension DLLs built by `cmake --build --preset windows-msvc-debug --target gua-godot`.
+          files: ${{ steps.package.outputs.asset }}
+          fail_on_unmatched_files: true
