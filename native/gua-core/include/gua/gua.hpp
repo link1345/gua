@@ -3,6 +3,7 @@
 #include "gua/gua.h"
 
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -32,6 +33,17 @@ enum class LogLevel {
 struct Event {
     EventType type = EventType::none;
     std::string node_id;
+};
+
+struct NodeProperties {
+    std::optional<std::string_view> parent_id;
+    std::optional<std::string_view> text;
+    std::optional<std::string_view> value;
+    std::optional<bool> focused;
+    std::optional<bool> hovered;
+    std::optional<bool> pressed;
+    std::optional<bool> checked;
+    std::optional<bool> selected;
 };
 
 class Context {
@@ -103,6 +115,55 @@ public:
             gua_bounds_t { bounds.x, bounds.y, bounds.w, bounds.h },
             visible ? 1 : 0,
             enabled ? 1 : 0);
+    }
+
+    void node_v2(
+        std::string_view id,
+        std::string_view role,
+        std::string_view label,
+        Rect bounds,
+        const NodeProperties& properties = {},
+        bool visible = true,
+        bool enabled = true)
+    {
+        id_buffer_.assign(id);
+        role_buffer_.assign(role);
+        label_buffer_.assign(label);
+        parent_id_buffer_ = properties.parent_id ? std::string(*properties.parent_id) : std::string();
+        text_buffer_ = properties.text ? std::string(*properties.text) : std::string();
+        value_buffer_ = properties.value ? std::string(*properties.value) : std::string();
+
+        unsigned long long known_mask = 0;
+        if (properties.parent_id) known_mask |= GUA_NODE_KNOWN_PARENT_ID;
+        if (properties.text) known_mask |= GUA_NODE_KNOWN_TEXT;
+        if (properties.value) known_mask |= GUA_NODE_KNOWN_VALUE;
+        if (properties.focused) known_mask |= GUA_NODE_KNOWN_FOCUSED;
+        if (properties.hovered) known_mask |= GUA_NODE_KNOWN_HOVERED;
+        if (properties.pressed) known_mask |= GUA_NODE_KNOWN_PRESSED;
+        if (properties.checked) known_mask |= GUA_NODE_KNOWN_CHECKED;
+        if (properties.selected) known_mask |= GUA_NODE_KNOWN_SELECTED;
+
+        const gua_node_descriptor_v2_t descriptor {
+            sizeof(gua_node_descriptor_v2_t),
+            known_mask,
+            id_buffer_.c_str(),
+            properties.parent_id ? parent_id_buffer_.c_str() : nullptr,
+            role_buffer_.c_str(),
+            label_buffer_.c_str(),
+            properties.text ? text_buffer_.c_str() : nullptr,
+            properties.value ? value_buffer_.c_str() : nullptr,
+            gua_bounds_t { bounds.x, bounds.y, bounds.w, bounds.h },
+            visible ? 1 : 0,
+            enabled ? 1 : 0,
+            properties.focused.value_or(false) ? 1 : 0,
+            properties.hovered.value_or(false) ? 1 : 0,
+            properties.pressed.value_or(false) ? 1 : 0,
+            properties.checked.value_or(false) ? 1 : 0,
+            properties.selected.value_or(false) ? 1 : 0,
+        };
+        if (gua_register_node_v2(context_, &descriptor) == 0) {
+            throw std::runtime_error("Failed to register Gua v2 node");
+        }
     }
 
     void button(std::string_view id, std::string_view label, Rect bounds, bool visible = true, bool enabled = true)
@@ -210,6 +271,9 @@ private:
     mutable std::string id_buffer_;
     mutable std::string role_buffer_;
     mutable std::string label_buffer_;
+    mutable std::string parent_id_buffer_;
+    mutable std::string text_buffer_;
+    mutable std::string value_buffer_;
     mutable std::string message_buffer_;
     std::string screenshot_buffer_;
     std::string screen_buffer_;

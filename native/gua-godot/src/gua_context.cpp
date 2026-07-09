@@ -98,6 +98,61 @@ void GuaContext::register_node(
         enabled ? 1 : 0);
 }
 
+bool GuaContext::register_node_v2(const Dictionary& source)
+{
+    if (!source.has("id") || !source.has("role") || !source.has("bounds")) {
+        UtilityFunctions::push_error("GuaContext.register_node_v2 requires id, role, and bounds.");
+        return false;
+    }
+
+    const String id = source["id"];
+    const String role = source["role"];
+    const String label = source.get("label", String());
+    const String parent_id = source.get("parent_id", String());
+    const String text = source.get("text", String());
+    const String value = source.get("value", String());
+    const Rect2 bounds = source["bounds"];
+    const CharString id_utf8 = id.utf8();
+    const CharString parent_id_utf8 = parent_id.utf8();
+    const CharString role_utf8 = role.utf8();
+    const CharString label_utf8 = label.utf8();
+    const CharString text_utf8 = text.utf8();
+    const CharString value_utf8 = value.utf8();
+
+    unsigned long long known_mask = 0;
+    if (source.has("parent_id")) known_mask |= GUA_NODE_KNOWN_PARENT_ID;
+    if (source.has("text")) known_mask |= GUA_NODE_KNOWN_TEXT;
+    if (source.has("value")) known_mask |= GUA_NODE_KNOWN_VALUE;
+    if (source.has("focused")) known_mask |= GUA_NODE_KNOWN_FOCUSED;
+    if (source.has("hovered")) known_mask |= GUA_NODE_KNOWN_HOVERED;
+    if (source.has("pressed")) known_mask |= GUA_NODE_KNOWN_PRESSED;
+    if (source.has("checked")) known_mask |= GUA_NODE_KNOWN_CHECKED;
+    if (source.has("selected")) known_mask |= GUA_NODE_KNOWN_SELECTED;
+
+    const gua_node_descriptor_v2_t descriptor {
+        sizeof(gua_node_descriptor_v2_t),
+        known_mask,
+        id_utf8.get_data(),
+        source.has("parent_id") ? parent_id_utf8.get_data() : nullptr,
+        role_utf8.get_data(),
+        label_utf8.get_data(),
+        source.has("text") ? text_utf8.get_data() : nullptr,
+        source.has("value") ? value_utf8.get_data() : nullptr,
+        gua_bounds_t {
+            static_cast<float>(bounds.position.x), static_cast<float>(bounds.position.y),
+            static_cast<float>(bounds.size.x), static_cast<float>(bounds.size.y),
+        },
+        source.get("visible", true) ? 1 : 0,
+        source.get("enabled", true) ? 1 : 0,
+        source.get("focused", false) ? 1 : 0,
+        source.get("hovered", false) ? 1 : 0,
+        source.get("pressed", false) ? 1 : 0,
+        source.get("checked", false) ? 1 : 0,
+        source.get("selected", false) ? 1 : 0,
+    };
+    return gua_runtime_register_node_v2(runtime_, &descriptor) != 0;
+}
+
 String GuaContext::get_ui_tree_json() const
 {
     return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
@@ -168,6 +223,7 @@ void GuaContext::_bind_methods()
         &GuaContext::register_node,
         DEFVAL(true),
         DEFVAL(true));
+    ClassDB::bind_method(D_METHOD("register_node_v2", "descriptor"), &GuaContext::register_node_v2);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
     ClassDB::bind_method(D_METHOD("enqueue_click", "node_id"), &GuaContext::enqueue_click);
     ClassDB::bind_method(D_METHOD("consume_click_request", "node_id"), &GuaContext::consume_click_request);

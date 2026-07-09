@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,6 +24,51 @@ typedef struct gua_node_state_t {
     int visible;
     int enabled;
 } gua_node_state_t;
+
+enum {
+    GUA_NODE_KNOWN_PARENT_ID = 1ULL << 0,
+    GUA_NODE_KNOWN_TEXT = 1ULL << 1,
+    GUA_NODE_KNOWN_VALUE = 1ULL << 2,
+    GUA_NODE_KNOWN_FOCUSED = 1ULL << 3,
+    GUA_NODE_KNOWN_HOVERED = 1ULL << 4,
+    GUA_NODE_KNOWN_PRESSED = 1ULL << 5,
+    GUA_NODE_KNOWN_CHECKED = 1ULL << 6,
+    GUA_NODE_KNOWN_SELECTED = 1ULL << 7
+};
+
+typedef struct gua_node_descriptor_v2_t {
+    uint32_t struct_size;
+    uint64_t known_mask;
+    const char* id;
+    const char* parent_id;
+    const char* role;
+    const char* label;
+    const char* text;
+    const char* value;
+    gua_bounds_t bounds;
+    int visible;
+    int enabled;
+    int focused;
+    int hovered;
+    int pressed;
+    int checked;
+    int selected;
+} gua_node_descriptor_v2_t;
+
+typedef struct gua_node_state_v2_t {
+    uint32_t struct_size;
+    uint64_t known_mask;
+    int visible;
+    int enabled;
+    int focused;
+    int hovered;
+    int pressed;
+    int checked;
+    int selected;
+    char parent_id[128];
+    char text[256];
+    char value[256];
+} gua_node_state_v2_t;
 
 enum {
     GUA_LOG_TRACE = 0,
@@ -52,6 +99,7 @@ void gua_register_node(
     int visible,
     int enabled
 );
+int gua_register_node_v2(gua_context_t* ctx, const gua_node_descriptor_v2_t* descriptor);
 
 const char* gua_get_ui_tree_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -65,6 +113,7 @@ const char* gua_get_screenshot_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_copy_screenshot_json(gua_context_t* ctx, char* out_json, int out_json_size);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
+int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);

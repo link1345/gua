@@ -3,9 +3,12 @@
   "$id": "https://gua.dev/schema/ui-tree.schema.json",
   "title": "Gua UI Tree",
   "type": "object",
-  "required": ["screen", "nodes"],
+  "required": ["schemaVersion", "frameSequence", "revision", "screen", "nodes"],
   "additionalProperties": false,
   "properties": {
+    "schemaVersion": { "const": 2 },
+    "frameSequence": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 0 },
     "screen": {
       "type": "string",
       "minLength": 1
@@ -52,10 +55,15 @@
             "screen",
             "dialog",
             "menu",
-            "menuitem"
+            "menuitem",
+            "combobox",
+            "tablist",
+            "tab"
           ]
         },
         "label": { "type": "string" },
+        "text": { "type": "string" },
+        "value": { "type": ["number", "string", "boolean", "null"] },
         "visible": { "type": "boolean" },
         "enabled": { "type": "boolean" },
         "bounds": { "$ref": "#/$defs/bounds" },
@@ -67,6 +75,7 @@
             "hovered": { "type": "boolean" },
             "pressed": { "type": "boolean" },
             "checked": { "type": "boolean" },
+            "selected": { "type": "boolean" },
             "value": {
               "type": ["number", "string", "boolean", "null"]
             }

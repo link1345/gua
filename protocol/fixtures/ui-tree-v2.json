@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "frameSequence": 12,
+  "revision": 4,
+  "screen": "settings",
+  "nodes": [
+    {
+      "id": "remember",
+      "parentId": "form",
+      "role": "checkbox",
+      "label": "Remember me",
+      "text": "Remember me",
+      "visible": true,
+      "enabled": true,
+      "bounds": { "x": 10, "y": 20, "w": 100, "h": 24 },
+      "state": { "focused": false, "checked": false },
+      "actions": ["click", "focus"]
+    },
+    {
+      "id": "difficulty",
+      "parentId": "form",
+      "role": "combobox",
+      "label": "Difficulty",
+      "value": "Hard",
+      "visible": true,
+      "enabled": true,
+      "bounds": { "x": 10, "y": 50, "w": 100, "h": 24 },
+      "actions": ["focus", "set_value"]
+    }
+  ]
+}

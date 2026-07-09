@@ -25,6 +25,7 @@ public:
         const Rect2& bounds,
         bool visible = true,
         bool enabled = true);
+    bool register_node_v2(const Dictionary& descriptor);
 
     String get_ui_tree_json() const;
     bool enqueue_click(const String& node_id);
