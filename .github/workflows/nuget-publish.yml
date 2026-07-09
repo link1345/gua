@@ -1,0 +1,94 @@
+name: NuGet Publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/nuget-publish.yml
+      - Directory.Build.props
+      - CMakeLists.txt
+      - CMakePresets.json
+      - bindings/dotnet/src/Gua.Core/**
+      - bindings/dotnet/src/Gua.Testing/**
+      - bindings/dotnet/src/Gua.Testing.Godot/**
+      - native/gua-core/**
+      - protocol/**
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Pack and publish .NET packages
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Configure native runtime
+        run: cmake --preset windows-msvc-release
+
+      - name: Build native runtime
+        run: cmake --build --preset windows-msvc-release --target gua --config Release
+
+      - name: Restore
+        run: dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
+
+      - name: Build
+        run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore
+
+      - name: Pack Gua.Core
+        run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build
+
+      - name: Pack Gua.Testing
+        run: dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --no-build
+
+      - name: Pack Gua.Testing.Godot
+        run: dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-build
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-nuget-packages
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      - name: Check NuGet trusted publisher user
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace("${{ vars.NUGET_USER }}")) {
+            throw "Set the NUGET_USER repository variable to the nuget.org profile name used by the trusted publishing policy."
+          }
+
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish packages to NuGet
+        shell: pwsh
+        run: |
+          Push-Location artifacts/packages
+          Get-ChildItem . -Filter *.nupkg | ForEach-Object {
+            dotnet nuget push $_.FullName `
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" `
+              --source https://api.nuget.org/v3/index.json `
+              --skip-duplicate
+          }
+          Pop-Location
