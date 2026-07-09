@@ -6,6 +6,8 @@ namespace Gua.Core;
 internal static partial class Native
 {
     internal const int NodeIdBufferSize = 128;
+    private static readonly object ResolveLock = new();
+    private static string[] _lastCandidateDirectories = [];
 
     internal unsafe struct GuaNativeEvent
     {
@@ -31,7 +33,13 @@ internal static partial class Native
                 ? "libgua.dylib"
                 : "libgua.so";
 
-        foreach (var directory in CandidateNativeDirectories(assembly))
+        var directories = CandidateNativeDirectories(assembly).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        lock (ResolveLock)
+        {
+            _lastCandidateDirectories = directories;
+        }
+
+        foreach (var directory in directories)
         {
             var candidate = Path.Combine(directory, fileName);
             if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
@@ -43,6 +51,31 @@ internal static partial class Native
         return NativeLibrary.TryLoad(libraryName, assembly, searchPath, out var fallbackHandle)
             ? fallbackHandle
             : nint.Zero;
+    }
+
+    internal static string NativeLoadErrorMessage(Exception exception)
+    {
+        var fileName = OperatingSystem.IsWindows()
+            ? "gua.dll"
+            : OperatingSystem.IsMacOS()
+                ? "libgua.dylib"
+                : "libgua.so";
+
+        string[] directories;
+        lock (ResolveLock)
+        {
+            directories = _lastCandidateDirectories;
+        }
+
+        if (directories.Length == 0)
+        {
+            directories = CandidateNativeDirectories(typeof(Native).Assembly).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        var searched = string.Join(Environment.NewLine, directories.Select(directory => $"  - {Path.Combine(directory, fileName)}"));
+        return
+            $"Failed to load the native Gua runtime '{fileName}'. Build native/gua-core and make the library discoverable with GUA_NATIVE_DIR, the .NET output directory, or the current directory." +
+            $"{Environment.NewLine}Searched:{Environment.NewLine}{searched}{Environment.NewLine}Original error: {exception.Message}";
     }
 
     private static IEnumerable<string> CandidateNativeDirectories(Assembly assembly)

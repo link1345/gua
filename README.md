@@ -24,6 +24,73 @@ GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
 GuaAssertions.WaitForText(ui, "Loading...").ToBeVisible();
 ```
 
+`Click()` intentionally enqueues a click request; it does not directly mutate
+the game. A game adapter, such as the ImGui or Godot adapter, must consume the
+request on a later frame and emit the observed click event. Tests that do not
+run a real engine adapter can use `GuaTestHost` for the same loop:
+
+```csharp
+using var ui = new GuaContext();
+var host = new GuaTestHost(ui);
+var loading = false;
+
+host.Frame("title", frame =>
+{
+    frame.Button("start", "Start Game", new GuaBounds(100, 100, 240, 64));
+});
+
+GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
+
+host.Frame("title", frame =>
+{
+    frame.Button("start", "Start Game", new GuaBounds(100, 100, 240, 64));
+});
+
+host.DrainClickEvents(id => loading = id == "start");
+
+host.Frame("loading", frame =>
+{
+    if (loading)
+    {
+        frame.Text("loading", "Loading...", new GuaBounds(100, 180, 240, 24));
+    }
+});
+
+GuaAssertions.WaitForText(ui, "Loading...").ToBeVisible();
+```
+
+Real .NET tests should use an existing test runner such as NUnit. `Gua.Testing`
+does not try to become a Vitest-style runner; it provides Gua-specific locators,
+waits, assertions, and adapter test loops inside normal NUnit tests. One C# file
+can contain multiple `[Test]` methods:
+
+```csharp
+using Gua.Core;
+using Gua.Testing;
+using NUnit.Framework;
+
+[TestFixture]
+public sealed class TitleScreenTests
+{
+    [Test]
+    public void StartClickShowsLoadingText()
+    {
+        using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);
+        using var ui = new GuaContext();
+        var host = new GuaTestHost(ui);
+
+        host.Frame("title", frame =>
+        {
+            frame.Button("start", "Start Game", new GuaBounds(100, 100, 240, 64));
+        });
+
+        GuaAssertions.GetByRole(ui, "button", "Start Game").Click();
+    }
+}
+```
+
+The repository includes a runnable NUnit sample in `examples/dotnet-nunit`.
+
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
 context.set_screenshot("data:image/png;base64,...", 1280, 720);
@@ -79,6 +146,49 @@ cmake --build --preset windows-msvc-debug
 
 The portable boundary remains the C ABI. macOS and iOS should use Apple Clang,
 and Android should use Android NDK Clang when those targets are added.
+
+## .NET Testing
+
+The .NET packages are prepared for local NuGet packing:
+
+```powershell
+dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+```
+
+The packages are written to `artifacts/packages`. `Gua.Testing` declares a NuGet
+dependency on the matching `Gua.Core` package, so a test project only needs the
+testing package:
+
+```xml
+<PackageReference Include="Gua.Testing" Version="0.5.0-preview.2" />
+```
+
+`Gua.Core` is also delivered as a NuGet package and `Gua.Testing` depends on the
+matching version. The Windows x64 native runtime is included in `Gua.Core` under
+`runtimes/win-x64/native/gua.dll`, so a normal package restore/build copies it to
+the consuming app or test output. `GUA_NATIVE_DIR` remains as an override for
+locally built native runtimes. A missing or wrong architecture native library is
+reported with the exact checked paths.
+
+Run the standalone testing sample:
+
+```powershell
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug --target gua
+$env:GUA_NATIVE_DIR = "$PWD\build\windows-msvc-debug\native\gua-core\Debug"
+dotnet run --project examples/dotnet-testing/GuaDotNetTestingSample.csproj
+```
+
+Run the NUnit testing sample:
+
+```powershell
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release --target gua
+dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
+```
 
 ## Inspector
 

@@ -7,5 +7,23 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>Gua.Testing</PackageId>
+    <Version>$(GuaPackageVersion)</Version>
+    <Authors>Gua contributors</Authors>
+    <Title>Gua Testing</Title>
+    <Description>Assertion, locator, wait, and test-host helpers for Gua runtime UI automation.</Description>
+    <PackageTags>gua;game-ui;automation;testing;xunit;nunit;mstest</PackageTags>
+    <PackageProjectUrl>https://github.com/link1345/gua</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/link1345/gua</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(GuaPackageOutputPath)</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>
