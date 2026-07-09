@@ -9,9 +9,24 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 
 - `screen`: logical screen name, such as `title` or `settings`
 - `nodes`: flat list of semantic UI nodes
+- `schemaVersion`: currently `2`
+- `frameSequence`: increments once for every completed host frame
+- `revision`: increments only when the semantic screen or node content changes
 
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
+
+Version 2 adds `parentId`, `text`, `value`, and optional boolean state. An
+omitted property means that the adapter cannot observe that state. A present
+property whose value is `false` means that the adapter observed the state and
+it was false. Adapters must not fill unsupported state with false. Values
+crossing the initial C ABI are normalized to UTF-8 strings; the schema also
+allows native JSON scalar values for future transports.
+
+`frameSequence` and `revision` have different purposes. Rebuilding the same
+semantic tree in consecutive frames increments `frameSequence` but leaves
+`revision` unchanged. Changing the screen, node membership, hierarchy, bounds,
+text, value, state, or actions increments `revision` at `end_frame`.
 
 ## Adapter-Owned Reflection
 
@@ -20,6 +35,8 @@ or snapshot. Game code should not have to restate its visible buttons, labels,
 and controls as separate Gua calls when the adapter can observe those controls.
 
 - If a host UI element disappears, the next adapter snapshot omits its Gua node.
+- If a host UI element remains in the host tree but becomes hidden, the adapter
+  keeps the node and publishes `visible: false`.
 - If a host UI element is clicked by the user, the adapter emits a Gua event.
 - If automation requests `click_node`, the core records a pending click request.
   The adapter consumes that request when it reaches the matching host UI element
@@ -28,6 +45,26 @@ and controls as separate Gua calls when the adapter can observe those controls.
 
 This keeps the C ABI as the stable protocol boundary while letting ImGui, Godot,
 and later engine adapters own the engine-specific reflection details.
+
+### Initial adapter mapping
+
+| Host control | Gua role | Adapter-owned fields |
+| --- | --- | --- |
+| ImGui `Button` facade | `button` | text, visible, enabled, focused, hovered, pressed |
+| ImGui `Text` facade | `text` | text, visible |
+| Godot `Button` | `button` | parentId, text, visible, enabled, focused |
+| Godot `CheckBox` | `checkbox` | parentId, text, focused, checked |
+| Godot `LineEdit` / `TextEdit` | `textbox` | parentId, text, value, focused |
+| Godot `OptionButton` | `combobox` | parentId, value, focused |
+| Godot `ItemList` | `list` + `listitem` children | stable derived child id, parentId, text, selected |
+| Godot `TabContainer` | `tablist` + `tab` children | stable derived child id, parentId, text, selected |
+
+The legacy `gua_register_node` and `gua_get_node_state` C exports remain valid.
+New integrations use `gua_node_descriptor_v2_t` / `gua_node_state_v2_t`, whose
+`struct_size` protects ABI versioning and whose `known_mask` distinguishes
+unsupported properties from observed false or empty values. Readers should
+continue accepting legacy payloads that contain only `screen` and `nodes`
+during migration.
 
 ## Inspector Snapshots
 

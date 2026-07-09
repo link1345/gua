@@ -54,7 +54,14 @@ inline bool button(
     bool visible = true,
     bool enabled = true)
 {
-    context.button(id, label, bounds, visible, enabled);
+    context.node_v2(
+        id,
+        "button",
+        label,
+        bounds,
+        NodeProperties { .text = label, .pressed = clicked },
+        visible,
+        enabled);
     if (clicked && visible && enabled) {
         return context.emit_click(id);
     }
@@ -72,11 +79,16 @@ inline bool button(Context& context, std::string_view label)
     const ImVec2 max = ImGui::GetItemRectMax();
     const bool visible = ImGui::IsItemVisible();
     const bool enabled = true;
+    const bool focused = ImGui::IsItemFocused();
+    const bool hovered = ImGui::IsItemHovered();
+    const bool pressed = ImGui::IsItemActive();
 
-    context.button(
+    context.node_v2(
         id,
+        "button",
         visible_label_buffer,
         Rect { min.x, min.y, max.x - min.x, max.y - min.y },
+        NodeProperties { .text = visible_label_buffer, .focused = focused, .hovered = hovered, .pressed = pressed },
         visible,
         enabled);
 
@@ -100,12 +112,17 @@ inline bool button(Context& context, std::string_view id, std::string_view label
     const ImVec2 max = ImGui::GetItemRectMax();
     const bool visible = ImGui::IsItemVisible();
     const bool enabled = true;
+    const bool focused = ImGui::IsItemFocused();
+    const bool hovered = ImGui::IsItemHovered();
+    const bool pressed = ImGui::IsItemActive();
     ImGui::PopID();
 
-    context.button(
+    context.node_v2(
         id,
+        "button",
         visible_label_buffer,
         Rect { min.x, min.y, max.x - min.x, max.y - min.y },
+        NodeProperties { .text = visible_label_buffer, .focused = focused, .hovered = hovered, .pressed = pressed },
         visible,
         enabled);
 
@@ -126,11 +143,14 @@ inline void text(Context& context, std::string_view label)
     ImGui::TextUnformatted(visible_label_buffer.c_str());
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
-    context.text(
+    context.node_v2(
         id,
+        "text",
         visible_label_buffer,
         Rect { min.x, min.y, max.x - min.x, max.y - min.y },
-        ImGui::IsItemVisible());
+        NodeProperties { .text = visible_label_buffer },
+        ImGui::IsItemVisible(),
+        false);
 }
 
 } // namespace gua::imgui

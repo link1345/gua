@@ -15,6 +15,44 @@ internal static partial class Native
         public fixed byte NodeId[NodeIdBufferSize];
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeNodeDescriptorV2
+    {
+        public uint StructSize;
+        public ulong KnownMask;
+        public nint Id;
+        public nint ParentId;
+        public nint Role;
+        public nint Label;
+        public nint Text;
+        public nint Value;
+        public GuaBounds Bounds;
+        public int Visible;
+        public int Enabled;
+        public int Focused;
+        public int Hovered;
+        public int Pressed;
+        public int Checked;
+        public int Selected;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeNodeStateV2
+    {
+        public uint StructSize;
+        public ulong KnownMask;
+        public int Visible;
+        public int Enabled;
+        public int Focused;
+        public int Hovered;
+        public int Pressed;
+        public int Checked;
+        public int Selected;
+        public fixed byte ParentId[128];
+        public fixed byte Text[256];
+        public fixed byte Value[256];
+    }
+
     static Native()
     {
         NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, ResolveGuaLibrary);
@@ -124,6 +162,9 @@ internal static partial class Native
         int enabled);
 
     [LibraryImport("gua")]
+    internal static partial int gua_register_node_v2(nint context, in GuaNativeNodeDescriptorV2 descriptor);
+
+    [LibraryImport("gua")]
     internal static partial nint gua_get_ui_tree_json(nint context);
 
     [LibraryImport("gua")]
@@ -149,6 +190,9 @@ internal static partial class Native
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_get_node_state(nint context, string nodeId, out GuaNodeState state);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial int gua_get_node_state_v2(nint context, string nodeId, GuaNativeNodeStateV2* state);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static unsafe partial int gua_find_node_by_id(nint context, string nodeId, byte* outNodeId, int outNodeIdSize);

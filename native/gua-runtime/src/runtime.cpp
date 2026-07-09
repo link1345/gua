@@ -125,6 +125,16 @@ extern "C" void gua_runtime_register_node(
     gua_register_node(runtime->context, id, role, label, bounds, visible, enabled);
 }
 
+extern "C" int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_node_descriptor_v2_t* descriptor)
+{
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_register_node_v2(runtime->context, descriptor);
+}
+
 extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
 {
     if (!valid_runtime(runtime)) {
@@ -210,6 +220,16 @@ extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* no
 
     const std::lock_guard lock(runtime->context_mutex);
     return gua_get_node_state(runtime->context, node_id, out_state);
+}
+
+extern "C" int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, gua_node_state_v2_t* out_state)
+{
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_get_node_state_v2(runtime->context, node_id, out_state);
 }
 
 extern "C" int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size)

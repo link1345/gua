@@ -119,6 +119,18 @@ public static class GuaAssertions
                 actions.AddRange(actionValues.EnumerateArray().Select(action => action.GetString() ?? string.Empty));
             }
 
+            JsonElement state = default;
+            var hasState = node.TryGetProperty("state", out state) && state.ValueKind == JsonValueKind.Object;
+            bool? OptionalBoolean(string name) => hasState && state.TryGetProperty(name, out var value)
+                ? value.GetBoolean()
+                : null;
+            string? OptionalString(string name) => node.TryGetProperty(name, out var value)
+                ? value.GetString()
+                : null;
+            ulong? OptionalRootUInt64(string name) => document.RootElement.TryGetProperty(name, out var value)
+                ? value.GetUInt64()
+                : null;
+
             return new GuaNodeSnapshot(
                 Id: id,
                 Role: node.GetProperty("role").GetString() ?? string.Empty,
@@ -130,7 +142,18 @@ public static class GuaAssertions
                     bounds.GetProperty("h").GetSingle()),
                 Visible: node.GetProperty("visible").GetBoolean(),
                 Enabled: node.GetProperty("enabled").GetBoolean(),
-                Actions: actions);
+                Actions: actions,
+                ParentId: OptionalString("parentId"),
+                Text: OptionalString("text"),
+                Value: OptionalString("value"),
+                Focused: OptionalBoolean("focused"),
+                Hovered: OptionalBoolean("hovered"),
+                Pressed: OptionalBoolean("pressed"),
+                Checked: OptionalBoolean("checked"),
+                Selected: OptionalBoolean("selected"),
+                SchemaVersion: document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ? schemaVersion.GetInt32() : null,
+                FrameSequence: OptionalRootUInt64("frameSequence"),
+                Revision: OptionalRootUInt64("revision"));
         }
 
         return null;

@@ -58,3 +58,10 @@ else()
             -Wpedantic
     )
 endif()
+
+if(BUILD_TESTING)
+    add_executable(gua-core-state-tests tests/state_model_tests.cpp)
+    target_link_libraries(gua-core-state-tests PRIVATE gua-core)
+    target_compile_features(gua-core-state-tests PRIVATE cxx_std_20)
+    add_test(NAME gua-core-state-tests COMMAND gua-core-state-tests)
+endif()

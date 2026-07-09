@@ -19,6 +19,15 @@ struct Node {
     gua_bounds_t bounds;
     bool visible;
     bool enabled;
+    unsigned long long known_mask = 0;
+    std::string parent_id;
+    std::string text;
+    std::string value;
+    bool focused = false;
+    bool hovered = false;
+    bool pressed = false;
+    bool checked = false;
+    bool selected = false;
 };
 
 struct Event {
@@ -109,6 +118,9 @@ struct gua_context_t {
     std::string json_cache;
     std::string logs_json_cache;
     std::string screenshot_json_cache;
+    unsigned long long frame_sequence = 0;
+    unsigned long long revision = 0;
+    std::string previous_semantic_snapshot;
 };
 
 namespace {
@@ -122,7 +134,7 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
     return required_size;
 }
 
-std::string build_ui_tree_json(const gua_context_t& ctx)
+std::string build_semantic_snapshot_json(const gua_context_t& ctx)
 {
     std::string json = "{\"screen\":\"" + escape_json(ctx.screen) + "\",\"nodes\":[";
 
@@ -143,16 +155,50 @@ std::string build_ui_tree_json(const gua_context_t& ctx)
             node.bounds.h);
 
         json += "{\"id\":\"" + escape_json(node.id) + "\"";
+        if ((node.known_mask & GUA_NODE_KNOWN_PARENT_ID) != 0U) {
+            json += ",\"parentId\":\"" + escape_json(node.parent_id) + "\"";
+        }
         json += ",\"role\":\"" + escape_json(node.role) + "\"";
         json += ",\"label\":\"" + escape_json(node.label) + "\"";
+        if ((node.known_mask & GUA_NODE_KNOWN_TEXT) != 0U) {
+            json += ",\"text\":\"" + escape_json(node.text) + "\"";
+        }
+        if ((node.known_mask & GUA_NODE_KNOWN_VALUE) != 0U) {
+            json += ",\"value\":\"" + escape_json(node.value) + "\"";
+        }
         json += ",\"visible\":";
         json += node.visible ? "true" : "false";
         json += ",\"enabled\":";
         json += node.enabled ? "true" : "false";
         json += ",\"bounds\":";
         json += bounds;
-        if (node.role == "button" && node.enabled) {
+        const unsigned long long boolean_state_mask =
+            GUA_NODE_KNOWN_FOCUSED | GUA_NODE_KNOWN_HOVERED | GUA_NODE_KNOWN_PRESSED |
+            GUA_NODE_KNOWN_CHECKED | GUA_NODE_KNOWN_SELECTED;
+        if ((node.known_mask & boolean_state_mask) != 0U) {
+            json += ",\"state\":{";
+            bool wrote_state = false;
+            const auto append_state = [&](const char* name, bool value) {
+                if (wrote_state) {
+                    json += ",";
+                }
+                json += "\"";
+                json += name;
+                json += "\":";
+                json += value ? "true" : "false";
+                wrote_state = true;
+            };
+            if ((node.known_mask & GUA_NODE_KNOWN_FOCUSED) != 0U) append_state("focused", node.focused);
+            if ((node.known_mask & GUA_NODE_KNOWN_HOVERED) != 0U) append_state("hovered", node.hovered);
+            if ((node.known_mask & GUA_NODE_KNOWN_PRESSED) != 0U) append_state("pressed", node.pressed);
+            if ((node.known_mask & GUA_NODE_KNOWN_CHECKED) != 0U) append_state("checked", node.checked);
+            if ((node.known_mask & GUA_NODE_KNOWN_SELECTED) != 0U) append_state("selected", node.selected);
+            json += "}";
+        }
+        if ((node.role == "button" || node.role == "checkbox" || node.role == "radio" || node.role == "tab") && node.enabled) {
             json += ",\"actions\":[\"click\",\"focus\"]}";
+        } else if ((node.role == "textbox" || node.role == "slider" || node.role == "combobox") && node.enabled) {
+            json += ",\"actions\":[\"focus\",\"set_value\"]}";
         } else {
             json += ",\"actions\":[]}";
         }
@@ -160,6 +206,14 @@ std::string build_ui_tree_json(const gua_context_t& ctx)
 
     json += "]}";
     return json;
+}
+
+std::string build_ui_tree_json(const gua_context_t& ctx)
+{
+    std::string semantic = build_semantic_snapshot_json(ctx);
+    semantic.erase(semantic.begin());
+    return "{\"schemaVersion\":2,\"frameSequence\":" + std::to_string(ctx.frame_sequence) +
+        ",\"revision\":" + std::to_string(ctx.revision) + "," + semantic;
 }
 
 std::string build_logs_json(const gua_context_t& ctx)
@@ -225,6 +279,12 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
     }
 
     const std::lock_guard lock(ctx->mutex);
+    const std::string semantic_snapshot = build_semantic_snapshot_json(*ctx);
+    ++ctx->frame_sequence;
+    if (semantic_snapshot != ctx->previous_semantic_snapshot) {
+        ++ctx->revision;
+        ctx->previous_semantic_snapshot = semantic_snapshot;
+    }
     ctx->json_cache.clear();
 }
 
@@ -250,6 +310,34 @@ extern "C" void gua_register_node(
         visible != 0,
         enabled != 0,
     });
+}
+
+extern "C" int gua_register_node_v2(gua_context_t* ctx, const gua_node_descriptor_v2_t* descriptor)
+{
+    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v2_t) ||
+        descriptor->id == nullptr || descriptor->role == nullptr) {
+        return 0;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    ctx->nodes.push_back(Node {
+        descriptor->id,
+        descriptor->role,
+        descriptor->label != nullptr ? descriptor->label : "",
+        descriptor->bounds,
+        descriptor->visible != 0,
+        descriptor->enabled != 0,
+        descriptor->known_mask,
+        descriptor->parent_id != nullptr ? descriptor->parent_id : "",
+        descriptor->text != nullptr ? descriptor->text : "",
+        descriptor->value != nullptr ? descriptor->value : "",
+        descriptor->focused != 0,
+        descriptor->hovered != 0,
+        descriptor->pressed != 0,
+        descriptor->checked != 0,
+        descriptor->selected != 0,
+    });
+    return 1;
 }
 
 extern "C" const char* gua_get_ui_tree_json(gua_context_t* ctx)
@@ -359,6 +447,32 @@ extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_n
 
     out_state->visible = found->visible ? 1 : 0;
     out_state->enabled = found->enabled ? 1 : 0;
+    return 1;
+}
+
+extern "C" int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state)
+{
+    if (ctx == nullptr || node_id == nullptr || out_state == nullptr || out_state->struct_size < sizeof(gua_node_state_v2_t)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) { return node.id == node_id; });
+    if (found == ctx->nodes.end()) {
+        return 0;
+    }
+
+    out_state->known_mask = found->known_mask;
+    out_state->visible = found->visible ? 1 : 0;
+    out_state->enabled = found->enabled ? 1 : 0;
+    out_state->focused = found->focused ? 1 : 0;
+    out_state->hovered = found->hovered ? 1 : 0;
+    out_state->pressed = found->pressed ? 1 : 0;
+    out_state->checked = found->checked ? 1 : 0;
+    out_state->selected = found->selected ? 1 : 0;
+    std::snprintf(out_state->parent_id, sizeof(out_state->parent_id), "%s", found->parent_id.c_str());
+    std::snprintf(out_state->text, sizeof(out_state->text), "%s", found->text.c_str());
+    std::snprintf(out_state->value, sizeof(out_state->value), "%s", found->value.c_str());
     return 1;
 }
 

@@ -8,6 +8,7 @@ const REBUILD_COMMAND := "cmake --build --preset windows-msvc-debug --target gua
 const REQUIRED_CONTEXT_METHODS := [
 	"begin_frame",
 	"register_node",
+	"register_node_v2",
 	"end_frame",
 	"get_ui_tree_json",
 	"enqueue_click",
@@ -42,7 +43,7 @@ func update(screen: String) -> void:
 
 	context.begin_frame(screen)
 	buttons_by_id.clear()
-	_collect_control(root)
+	_collect_control(root, "")
 	context.end_frame()
 	_dispatch_click_requests()
 
@@ -137,26 +138,74 @@ func _mark_unavailable(message: String) -> void:
 	push_error(message)
 
 
-func _collect_control(control: Control) -> void:
+func _collect_control(control: Control, parent_id: String) -> void:
 	var id := _control_id(control)
 	var role := _control_role(control)
 	var label := _control_label(control)
-	context.register_node(
-		id,
-		role,
-		label,
-		Rect2(control.global_position, control.size),
-		control.is_visible_in_tree(),
-		_control_enabled(control)
-	)
+	var descriptor := {
+		"id": id,
+		"role": role,
+		"label": label,
+		"bounds": Rect2(control.global_position, control.size),
+		"visible": control.is_visible_in_tree(),
+		"enabled": _control_enabled(control),
+		"focused": control.has_focus(),
+	}
+	if not parent_id.is_empty():
+		descriptor["parent_id"] = parent_id
+	var text := _control_text(control)
+	if text != null:
+		descriptor["text"] = text
+	var value := _control_value(control)
+	if value != null:
+		descriptor["value"] = value
+	if control is CheckBox:
+		descriptor["checked"] = (control as CheckBox).button_pressed
+	context.register_node_v2(descriptor)
 
 	if control is BaseButton:
 		buttons_by_id[id] = control
 		_connect_button(control as BaseButton, id)
+	if control is ItemList:
+		_collect_item_list_items(control as ItemList, id)
+	if control is TabContainer:
+		_collect_tab_items(control as TabContainer, id)
 
 	for child in control.get_children():
 		if child is Control:
-			_collect_control(child as Control)
+			_collect_control(child as Control, id)
+
+
+func _collect_item_list_items(item_list: ItemList, parent_id: String) -> void:
+	for index in range(item_list.item_count):
+		var label := item_list.get_item_text(index)
+		context.register_node_v2({
+			"id": "%s$item:%d" % [parent_id, index],
+			"parent_id": parent_id,
+			"role": "listitem",
+			"label": label,
+			"text": label,
+			"bounds": Rect2(item_list.global_position, item_list.size),
+			"visible": item_list.is_visible_in_tree(),
+			"enabled": not item_list.is_item_disabled(index),
+			"selected": item_list.is_selected(index),
+		})
+
+
+func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
+	for index in range(tab_container.get_tab_count()):
+		var label := tab_container.get_tab_title(index)
+		context.register_node_v2({
+			"id": "%s$tab:%d" % [parent_id, index],
+			"parent_id": parent_id,
+			"role": "tab",
+			"label": label,
+			"text": label,
+			"bounds": Rect2(tab_container.global_position, tab_container.size),
+			"visible": tab_container.is_visible_in_tree(),
+			"enabled": not tab_container.is_tab_disabled(index),
+			"selected": tab_container.current_tab == index,
+		})
 
 
 func _dispatch_click_requests() -> void:
@@ -196,6 +245,12 @@ func _control_id(control: Control) -> String:
 
 
 func _control_role(control: Control) -> String:
+	if control is OptionButton:
+		return "combobox"
+	if control is ItemList:
+		return "list"
+	if control is TabContainer:
+		return "tablist"
 	if control is CheckBox:
 		return "checkbox"
 	if control is BaseButton:
@@ -210,6 +265,8 @@ func _control_role(control: Control) -> String:
 
 
 func _control_label(control: Control) -> String:
+	if control is OptionButton:
+		return control.name
 	if control is BaseButton:
 		return (control as BaseButton).text
 	if control is Label:
@@ -221,6 +278,31 @@ func _control_label(control: Control) -> String:
 	return control.name
 
 
+func _control_text(control: Control) -> Variant:
+	if control is BaseButton:
+		return (control as BaseButton).text
+	if control is Label:
+		return (control as Label).text
+	if control is LineEdit:
+		return (control as LineEdit).text
+	if control is TextEdit:
+		return (control as TextEdit).text
+	return null
+
+
+func _control_value(control: Control) -> Variant:
+	if control is OptionButton:
+		var option := control as OptionButton
+		return option.get_item_text(option.selected) if option.selected >= 0 else ""
+	if control is LineEdit:
+		return (control as LineEdit).text
+	if control is TextEdit:
+		return (control as TextEdit).text
+	if control is Range:
+		return str((control as Range).value)
+	return null
+
+
 func _control_enabled(control: Control) -> bool:
 	if control is BaseButton:
 		return not (control as BaseButton).disabled
@@ -228,4 +310,10 @@ func _control_enabled(control: Control) -> bool:
 		return (control as LineEdit).editable
 	if control is TextEdit:
 		return (control as TextEdit).editable
-	return false
+	if control is ItemList:
+		return true
+	if control is TabContainer:
+		return true
+	if control is Slider:
+		return (control as Slider).editable
+	return control.mouse_filter != Control.MOUSE_FILTER_IGNORE

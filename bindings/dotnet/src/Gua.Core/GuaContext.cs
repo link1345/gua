@@ -56,6 +56,58 @@ public sealed class GuaContext : IGuaContext, IDisposable
             enabled ? 1 : 0);
     }
 
+    public void RegisterNode(GuaNodeDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ThrowIfDisposed();
+
+        var known = GuaNodeKnownState.None;
+        if (descriptor.ParentId is not null) known |= GuaNodeKnownState.ParentId;
+        if (descriptor.Text is not null) known |= GuaNodeKnownState.Text;
+        if (descriptor.Value is not null) known |= GuaNodeKnownState.Value;
+        if (descriptor.Focused.HasValue) known |= GuaNodeKnownState.Focused;
+        if (descriptor.Hovered.HasValue) known |= GuaNodeKnownState.Hovered;
+        if (descriptor.Pressed.HasValue) known |= GuaNodeKnownState.Pressed;
+        if (descriptor.Checked.HasValue) known |= GuaNodeKnownState.Checked;
+        if (descriptor.Selected.HasValue) known |= GuaNodeKnownState.Selected;
+
+        var strings = new[] { descriptor.Id, descriptor.ParentId, descriptor.Role, descriptor.Label, descriptor.Text, descriptor.Value };
+        var pointers = strings.Select(value => value is null ? nint.Zero : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+        try
+        {
+            var native = new Native.GuaNativeNodeDescriptorV2
+            {
+                StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.GuaNativeNodeDescriptorV2>(),
+                KnownMask = (ulong)known,
+                Id = pointers[0],
+                ParentId = pointers[1],
+                Role = pointers[2],
+                Label = pointers[3],
+                Text = pointers[4],
+                Value = pointers[5],
+                Bounds = descriptor.Bounds,
+                Visible = descriptor.Visible ? 1 : 0,
+                Enabled = descriptor.Enabled ? 1 : 0,
+                Focused = descriptor.Focused == true ? 1 : 0,
+                Hovered = descriptor.Hovered == true ? 1 : 0,
+                Pressed = descriptor.Pressed == true ? 1 : 0,
+                Checked = descriptor.Checked == true ? 1 : 0,
+                Selected = descriptor.Selected == true ? 1 : 0,
+            };
+            if (Native.gua_register_node_v2(_handle, in native) == 0)
+            {
+                throw new InvalidOperationException($"Failed to register Gua v2 node: {descriptor.Id}");
+            }
+        }
+        finally
+        {
+            foreach (var pointer in pointers.Where(pointer => pointer != nint.Zero))
+            {
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pointer);
+            }
+        }
+    }
+
     public string GetUiTreeJson()
     {
         ThrowIfDisposed();
@@ -94,6 +146,39 @@ public sealed class GuaContext : IGuaContext, IDisposable
             throw new InvalidOperationException($"Gua node not found: {id}");
         }
         return state;
+    }
+
+    public GuaNodeStateV2 GetNodeStateV2(string id)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            Native.GuaNativeNodeStateV2 state = default;
+            state.StructSize = (uint)sizeof(Native.GuaNativeNodeStateV2);
+            if (Native.gua_get_node_state_v2(_handle, id, &state) == 0)
+            {
+                throw new InvalidOperationException($"Gua node not found: {id}");
+            }
+
+            var known = (GuaNodeKnownState)state.KnownMask;
+            string? Read(byte* value, GuaNodeKnownState flag) => known.HasFlag(flag)
+                ? System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)value) ?? string.Empty
+                : null;
+            bool? ReadBool(int value, GuaNodeKnownState flag) => known.HasFlag(flag) ? value != 0 : null;
+
+            return new GuaNodeStateV2(
+                known,
+                state.Visible != 0,
+                state.Enabled != 0,
+                Read(state.ParentId, GuaNodeKnownState.ParentId),
+                Read(state.Text, GuaNodeKnownState.Text),
+                Read(state.Value, GuaNodeKnownState.Value),
+                ReadBool(state.Focused, GuaNodeKnownState.Focused),
+                ReadBool(state.Hovered, GuaNodeKnownState.Hovered),
+                ReadBool(state.Pressed, GuaNodeKnownState.Pressed),
+                ReadBool(state.Checked, GuaNodeKnownState.Checked),
+                ReadBool(state.Selected, GuaNodeKnownState.Selected));
+        }
     }
 
     public string FindNodeById(string id)
