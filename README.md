@@ -196,6 +196,9 @@ consumer changes:
 
 - Inspector changes build the Tauri Inspector on Windows and attach the bundle
   outputs to a GitHub Release tagged as `inspector-<short-sha>`.
+- Godot GDScript addon changes build `gua-godot` on Windows and attach a zipped
+  `addons/gua` plugin, including the built GDExtension DLLs, to a GitHub Release
+  tagged as `godot-plugin-<short-sha>`.
 - MCP changes build and publish `gui-mcp` to npm as
   `0.0.0-main.<run-number>.<short-sha>` with the `latest` dist-tag.
 
@@ -255,6 +258,26 @@ game process starts an Inspector bridge on `ws://127.0.0.1:8765`, which Gua
 Inspector can connect to while the game is open. The addon includes `plugin.cfg`
 only for standard Godot addon packaging; Gua's runtime API is provided by
 `gua.gdextension`, not by an editor MCP.
+
+For game scripts, instantiate the GDScript adapter through an explicit preload
+instead of relying on `class_name` registration order:
+
+```gdscript
+const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
+
+var ui := GuaAutoAdapterScript.new()
+```
+
+The adapter resolves the native `GuaContext` class through `ClassDB` on first
+use and verifies that required methods such as `consume_click_request` exist
+before dispatching Inspector click requests. If that check fails, rebuild
+`gua-godot`; the stale vendored DLL is the problem, not the game script.
+
+Run the GDScript smoke check with:
+
+```powershell
+C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+```
 
 ## Repository Layout
 

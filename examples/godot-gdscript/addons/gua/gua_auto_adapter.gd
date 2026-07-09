@@ -2,19 +2,40 @@ class_name GuaAutoAdapter
 extends RefCounted
 
 const META_ID := "gua_id"
+const CONTEXT_CLASS := "GuaContext"
+const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
+const REBUILD_COMMAND := "cmake --build --preset windows-msvc-debug --target gua-godot"
+const REQUIRED_CONTEXT_METHODS := [
+	"begin_frame",
+	"register_node",
+	"end_frame",
+	"get_ui_tree_json",
+	"enqueue_click",
+	"consume_click_request",
+	"emit_click",
+	"poll_event",
+	"start_inspector_bridge",
+	"inspector_bridge_url",
+]
 
-var context := GuaContext.new()
+var context: Object
 var root: Control
 var buttons_by_id: Dictionary = {}
 var connected_buttons: Dictionary = {}
 var suppressed_clicks: Dictionary = {}
+var gdextension_resource: Resource
+var unavailable := false
 
 
 func attach(root_control: Control) -> void:
 	root = root_control
+	_ensure_context()
 
 
 func update(screen: String) -> void:
+	if not _ensure_context():
+		return
+
 	if root == null:
 		push_error("GuaAutoAdapter.update called before attach.")
 		return
@@ -27,15 +48,93 @@ func update(screen: String) -> void:
 
 
 func start_inspector_bridge(port: int = 8765) -> bool:
+	if not _ensure_context():
+		return false
+
 	return context.start_inspector_bridge(port)
 
 
 func inspector_bridge_url() -> String:
+	if not _ensure_context():
+		return ""
+
 	return context.inspector_bridge_url()
 
 
 func get_ui_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+
 	return context.get_ui_tree_json()
+
+
+func enqueue_click(id: String) -> bool:
+	if not _ensure_context():
+		return false
+
+	return context.enqueue_click(id)
+
+
+func poll_event() -> Dictionary:
+	if not _ensure_context():
+		return {}
+
+	return context.poll_event()
+
+
+func _ensure_context() -> bool:
+	if context != null:
+		return not unavailable
+	if unavailable:
+		return false
+
+	if gdextension_resource == null:
+		gdextension_resource = load(GDEXTENSION_RESOURCE)
+		if gdextension_resource == null:
+			_mark_unavailable(
+				"Failed to load %s. Ensure the Gua addon files are installed and rebuild the Godot GDExtension DLL with: %s"
+				% [GDEXTENSION_RESOURCE, REBUILD_COMMAND]
+			)
+			return false
+
+	if not ClassDB.class_exists(CONTEXT_CLASS) or not ClassDB.can_instantiate(CONTEXT_CLASS):
+		_mark_unavailable(
+			"%s is not available. Ensure addons/gua/gua.gdextension is enabled and rebuild the Godot GDExtension DLL with: %s"
+			% [CONTEXT_CLASS, REBUILD_COMMAND]
+		)
+		return false
+
+	context = ClassDB.instantiate(CONTEXT_CLASS)
+	if context == null:
+		_mark_unavailable(
+			"Failed to instantiate %s. Ensure addons/gua/gua.gdextension loaded successfully and rebuild with: %s"
+			% [CONTEXT_CLASS, REBUILD_COMMAND]
+		)
+		return false
+
+	var missing_methods := _missing_context_methods(context)
+	if not missing_methods.is_empty():
+		_mark_unavailable(
+			"%s is missing required method '%s'. The vendored gua_godot Windows debug DLL is stale. Rebuild it with: %s"
+			% [CONTEXT_CLASS, missing_methods[0], REBUILD_COMMAND]
+		)
+		return false
+
+	return true
+
+
+func _missing_context_methods(candidate: Object) -> Array:
+	var missing_methods := []
+	for method in REQUIRED_CONTEXT_METHODS:
+		if not candidate.has_method(method):
+			missing_methods.append(method)
+	return missing_methods
+
+
+func _mark_unavailable(message: String) -> void:
+	unavailable = true
+	context = null
+	push_error(message)
 
 
 func _collect_control(control: Control) -> void:
