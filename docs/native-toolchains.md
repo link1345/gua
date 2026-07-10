@@ -10,7 +10,8 @@ The project should still keep the native core portable:
 - Windows: MSVC
 - macOS and iOS: Apple Clang
 - Android: Android NDK Clang
-- Linux: Clang or GCC can be supported later, but it is not the first target
+- Linux: portable native targets are built in CI with the default Ubuntu C++
+  toolchain; Windows-only examples remain excluded
 
 Do not put Windows API calls, MSVC-only extensions, or platform-specific behavior
 inside protocol-level code. If platform code becomes necessary, isolate it under
@@ -31,6 +32,18 @@ Release build:
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release
 ```
+
+## Linux CI
+
+Portable native targets are configured and built on `ubuntu-latest`:
+
+```sh
+cmake -S . -B build/cpp -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/cpp --parallel
+```
+
+This check protects the portable core. Windows remains the primary development
+and release target for native runtime artifacts and the Win32 examples.
 
 ## Apple And Android
 

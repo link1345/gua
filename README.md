@@ -1,18 +1,44 @@
 # Gua
 
+English | [日本語](README.ja.md)
+
+[![License](https://img.shields.io/github/license/link1345/gua)](https://github.com/link1345/gua/blob/main/LICENSE)
+[![Discord](https://img.shields.io/discord/1329272750099136552)](https://discord.gg/Zy65k8AxH2)
+
 **Gua** is a runtime UI automation protocol for games.
 
 It exposes a semantic UI tree from a running game, so test runners and AI agents
 can inspect, query, click, and verify in-game UI without relying on fragile image
 recognition or coordinate-based input.
 
+## NuGet Packages
+
+- **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
+  P/Invoke bindings for using the Gua C ABI runtime from .NET, including the
+  Windows x64 native runtime.
+- **Gua.Testing:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing)](https://www.nuget.org/packages/Gua.Testing) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing)<br>
+  Adds Gua locators, waits, assertions, and adapter test loops to regular .NET
+  tests.
+- **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
+  Starts a Godot process and provides helpers for controlling and verifying a
+  running scene through the Gua bridge.
+
+## MCP and Inspector
+
+- **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
+  A thin MCP server that exposes Gua runtime actions to AI agents through the
+  same WebSocket bridge used by the Inspector.
+- **Gua Inspector:** [![Inspector Release](https://img.shields.io/github/actions/workflow/status/link1345/gua/inspector-release.yml?branch=main&label=Inspector%20Release)](https://github.com/link1345/gua/actions/workflows/inspector-release.yml)<br>
+  A browser and Windows desktop UI for inspecting the semantic UI tree, node
+  state, screenshots, and logs, and for sending runtime commands.
+
 ```ts
 await game.getByRole("button", { name: "Start Game" }).click()
 await expect(game.getById("loading")).toBeVisible()
 ```
 
-Current v0.5 implementation exposes that shape for C++ and C# over the C ABI,
-adds Inspector and MCP consumers, and includes a Godot 4.7 C# runtime sample:
+The current implementation exposes that shape for C++ and C# over the C ABI,
+adds Inspector and MCP consumers, and includes Godot 4.7 adapters and samples:
 
 ```cpp
 gua::testing::get_by_role(ctx, "button", "Start Game").click();
@@ -141,9 +167,9 @@ while (ui.TryPollEvent(out var e))
 }
 ```
 
-Gua is not a game engine.
-Gua is not an editor MCP.
-Gua is not an image-recognition QA bot.
+* Gua is not a game engine.
+* Gua is not an editor MCP.
+* Gua is not an image-recognition QA bot.
 
 Gua is a small bridge between a game runtime and automation tools.
 
@@ -157,8 +183,8 @@ The first implementation focuses on a small, stable core:
 - ImGui adapter
 - C++ and C# testing helpers
 - .NET P/Invoke binding over the C ABI
-- Inspector prototype for tree, node detail, screenshot, and logs
-- MCP server prototype
+- Inspector for tree, node detail, screenshot, logs, and runtime commands
+- MCP server for AI-agent access to the runtime bridge
 - Godot 4.7 C# sample using the shared native runtime bridge
 - Godot 4.7 GDScript sample using the same runtime bridge through GDExtension
 
@@ -180,7 +206,7 @@ and Android should use Android NDK Clang when those targets are added.
 
 ## .NET Testing
 
-The .NET packages are prepared for local NuGet packing:
+The .NET packages are published on NuGet and can also be packed locally:
 
 ```powershell
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
@@ -266,13 +292,26 @@ The ImGui bridge pushes snapshot notifications while the UI is running, so the
 Inspector updates without polling. The `Poll` toggle in the Inspector remains as
 a fallback for bridges that only implement request/response.
 
-The bridge speaks the same JSON command shape expected from a future game-side
-adapter:
+The bridge speaks the same JSON command shape used by Gua runtime adapters:
 
 ```json
 { "id": 1, "type": "get_ui_tree" }
 { "id": 2, "type": "click_node", "nodeId": "start" }
 ```
+
+Build the static Inspector:
+
+```powershell
+bun run --filter @gua/inspector build
+```
+
+Run the Tauri desktop shell during development:
+
+```powershell
+bun run --filter @gua/inspector tauri:dev
+```
+
+Tauri requires a Rust toolchain in addition to the JavaScript dependencies.
 
 ## MCP
 
@@ -289,8 +328,7 @@ Then run the MCP server over stdio:
 bun run mcp
 ```
 
-The package is shaped for npm publishing as `gui-mcp`. After publishing, MCP
-clients can start it with:
+The MCP server is published to npm as `gui-mcp`. MCP clients can start it with:
 
 ```powershell
 bunx gui-mcp@latest mcp
@@ -304,7 +342,7 @@ $env:GUA_BRIDGE_URL = "ws://127.0.0.1:8765"
 bunx gui-mcp@latest mcp
 ```
 
-The v0.4 tool surface is:
+The MCP tool surface is:
 
 ```text
 get_ui_tree
@@ -315,20 +353,6 @@ get_screenshot
 get_logs
 run_test
 ```
-
-Build the static Inspector:
-
-```powershell
-bun run --filter @gua/inspector build
-```
-
-The package is also prepared for a Tauri desktop shell:
-
-```powershell
-bun run --filter @gua/inspector tauri:dev
-```
-
-Tauri requires a Rust toolchain in addition to the JavaScript dependencies.
 
 ## Release automation
 
@@ -361,10 +385,11 @@ Build it with:
 dotnet build examples/dotnet-godot/GuaGodotSample.csproj -v:minimal
 ```
 
-The sample uses `Gua.Godot.GuaGodotRuntime` from the addon, starts an Inspector
-bridge on `ws://127.0.0.1:8765`, registers a title-screen semantic tree, and
-consumes click events to transition to the loading screen. `examples/dotnet-monogame`
-is still present as a future placeholder, but Godot is the v0.5 C# engine sample.
+The sample uses `Gua.Godot.GuaGodotRuntime` from the addon, attaches it to the
+root Godot `Control`, and starts an Inspector bridge on `ws://127.0.0.1:8765`.
+The adapter collects standard controls into the semantic tree and dispatches
+external click requests through normal Godot button signals.
+`examples/dotnet-monogame` is still present as a future placeholder.
 
 ## Godot 4.7 GDScript Addon
 
@@ -432,20 +457,11 @@ native/gua-godot/     Godot GDExtension adapter for GDScript
 bindings/dotnet/      .NET P/Invoke binding and C# testing helpers
 bindings/dotnet/src/Gua.Testing.Godot/
                       Godot process test helpers over Gua.Testing
-packages/mcp/         MCP server prototype
-packages/inspector/   Inspector UI prototype
+packages/mcp/         Published MCP server package
+packages/inspector/   Browser and Tauri desktop Inspector UI
 examples/             Minimal demos and samples, including the Godot C# sample
-docs/                 Project planning and design notes
+docs/                 Native toolchain guidance
 ```
-
-## Planning
-
-The project plan is kept in two places:
-
-- `plan.md`: original working plan
-- `docs/planning/gua-project-plan.md`: repository planning copy
-
-Keep these aligned when the product direction changes.
 
 ## License
 
