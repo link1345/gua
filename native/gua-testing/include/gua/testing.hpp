@@ -4,6 +4,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -85,22 +87,93 @@ public:
         throw std::runtime_error("Timed out waiting for Gua action completion: " + id_);
     }
 
-    void wait_for(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) const
+    void wait_for(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
+        std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
     {
-        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+        const auto start = std::chrono::steady_clock::now();
+        const auto deadline = start + timeout;
         do {
             gua_node_state_t state {};
             if (gua_get_node_state(context_, id_.c_str(), &state) != 0) {
                 return;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        } while (std::chrono::steady_clock::now() < deadline);
+            if (std::chrono::steady_clock::now() >= deadline) break;
+            std::this_thread::sleep_for(poll_interval);
+        } while (true);
 
-        throw std::runtime_error("Timed out waiting for Gua node: " + id_);
+        throw_wait_timeout("exist", timeout, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start));
+    }
+
+    void wait_for_visible(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        wait_for_state([](const gua_node_state_v2_t& state, bool found) { return found && state.visible != 0; }, "be visible", timeout, poll_interval);
+    }
+
+    void wait_for_hidden(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        wait_for_state([](const gua_node_state_v2_t& state, bool found) { return !found || state.visible == 0; }, "be hidden or removed", timeout, poll_interval);
+    }
+
+    void wait_for_enabled(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        wait_for_state([](const gua_node_state_v2_t& state, bool found) { return found && state.enabled != 0; }, "be enabled", timeout, poll_interval);
+    }
+
+    void wait_for_disabled(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        wait_for_state([](const gua_node_state_v2_t& state, bool found) { return found && state.enabled == 0; }, "be disabled", timeout, poll_interval);
+    }
+
+    void wait_for_text(std::string_view expected, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        const std::string value(expected);
+        wait_for_state([&](const gua_node_state_v2_t& state, bool found) {
+            return found && (state.known_mask & GUA_NODE_KNOWN_TEXT) != 0U && value == state.text;
+        }, "have text '" + value + "'", timeout, poll_interval);
+    }
+
+    void wait_for_value(std::string_view expected, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10)) const
+    {
+        const std::string value(expected);
+        wait_for_state([&](const gua_node_state_v2_t& state, bool found) {
+            return found && (state.known_mask & GUA_NODE_KNOWN_VALUE) != 0U && value == state.value;
+        }, "have value '" + value + "'", timeout, poll_interval);
     }
 
 private:
+    template <typename Predicate>
+    void wait_for_state(Predicate&& predicate, const std::string& description, std::chrono::milliseconds timeout, std::chrono::milliseconds poll_interval) const
+    {
+        if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+        const auto start = std::chrono::steady_clock::now();
+        const auto deadline = start + timeout;
+        do {
+            gua_node_state_v2_t state { sizeof(gua_node_state_v2_t) };
+            const bool found = gua_get_node_state_v2(context_, id_.c_str(), &state) != 0;
+            if (std::invoke(predicate, state, found)) return;
+            if (std::chrono::steady_clock::now() >= deadline) break;
+            std::this_thread::sleep_for(poll_interval);
+        } while (true);
+        throw_wait_timeout(description, timeout, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start));
+    }
+
+    [[noreturn]] void throw_wait_timeout(const std::string& description, std::chrono::milliseconds timeout, std::chrono::milliseconds elapsed) const
+    {
+        gua_context_status_t status { sizeof(gua_context_status_t) };
+        (void)gua_get_context_status(context_, &status);
+        gua_node_state_v2_t state { sizeof(gua_node_state_v2_t) };
+        const bool found = gua_get_node_state_v2(context_, id_.c_str(), &state) != 0;
+        const std::string last_state = found
+            ? "visible=" + std::to_string(state.visible) + ", enabled=" + std::to_string(state.enabled) +
+                ", text='" + state.text + "', value='" + state.value + "'"
+            : "removed or not found";
+        throw std::runtime_error("Timed out after " + std::to_string(timeout.count()) + "ms (elapsed " + std::to_string(elapsed.count()) + "ms) waiting for Gua node id '" + id_ + "' to " + description +
+            ". Last state: " + last_state + "; frameSequence=" + std::to_string(status.frame_sequence) + ", revision=" + std::to_string(status.revision));
+    }
+
     [[nodiscard]] std::uint64_t enqueue(int action, std::string_view value = {}, bool bool_value = false, bool sensitive = false) const
     {
         std::string value_buffer(value);
@@ -236,43 +309,112 @@ inline Locator expect_node(gua_context_t* context, std::string id)
     return get_by_id(context, std::move(id));
 }
 
-inline void wait_for(const Locator& locator, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+inline void wait_for(const Locator& locator, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
 {
-    locator.wait_for(timeout);
+    locator.wait_for(timeout, poll_interval);
 }
 
-inline Locator wait_for_id(gua_context_t* context, std::string id, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+[[noreturn]] inline void throw_selector_wait_timeout(gua_context_t* context, const std::string& description,
+    std::chrono::milliseconds timeout, std::chrono::steady_clock::time_point start)
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    (void)gua_get_context_status(context, &status);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    throw std::runtime_error("Timed out after " + std::to_string(timeout.count()) + "ms (elapsed " + std::to_string(elapsed.count()) +
+        "ms) waiting for Gua node by " + description + "; last frameSequence=" + std::to_string(status.frame_sequence) +
+        ", revision=" + std::to_string(status.revision));
+}
+
+template <typename Predicate>
+inline void wait_until(Predicate&& condition, std::string_view description,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
+    std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
+{
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
+    do {
+        if (std::invoke(condition)) return;
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(poll_interval);
+    } while (true);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    throw std::runtime_error("Timed out after " + std::to_string(timeout.count()) + "ms (elapsed " + std::to_string(elapsed.count()) + "ms) waiting for " + std::string(description));
+}
+
+inline void wait_for_stable_snapshot(gua_context_t* context, std::size_t stable_frames = 3,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
+    std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
+{
+    if (context == nullptr) throw std::invalid_argument("Gua stable snapshot wait requires a context");
+    if (stable_frames == 0) throw std::invalid_argument("Gua stable snapshot wait requires at least one frame");
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
+    std::optional<std::uint64_t> session_epoch;
+    std::optional<std::uint64_t> last_frame;
+    std::optional<std::uint64_t> stable_revision;
+    std::size_t observed = 0;
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    do {
+        if (gua_get_context_status(context, &status) == 0) throw std::runtime_error("Failed to inspect Gua context while waiting for stable snapshot");
+        if (!last_frame.has_value() || status.frame_sequence != *last_frame) {
+            if (!session_epoch.has_value() || status.session_epoch != *session_epoch || !stable_revision.has_value() || status.revision != *stable_revision) {
+                session_epoch = status.session_epoch;
+                stable_revision = status.revision;
+                observed = 1;
+            } else {
+                ++observed;
+            }
+            last_frame = status.frame_sequence;
+            if (observed >= stable_frames) return;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(poll_interval);
+    } while (true);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    throw std::runtime_error("Timed out after " + std::to_string(timeout.count()) + "ms (elapsed " + std::to_string(elapsed.count()) + "ms) waiting for " + std::to_string(stable_frames) + " distinct stable semantic frames; observed " +
+        std::to_string(observed) + ", frameSequence=" + std::to_string(status.frame_sequence) + ", revision=" + std::to_string(status.revision));
+}
+
+inline Locator wait_for_id(gua_context_t* context, std::string id, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
+{
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
     do {
         auto matches = query(context).by_id(id).query_all();
         if (matches.size() == 1) return std::move(matches.front());
         if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by id: " + id);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(poll_interval);
     } while (std::chrono::steady_clock::now() < deadline);
 
-    throw std::runtime_error("Timed out waiting for Gua node by id: " + id);
+    throw_selector_wait_timeout(context, "id '" + id + "'", timeout, start);
 }
 
-inline Locator wait_for_role(gua_context_t* context, std::string_view role, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+inline Locator wait_for_role(gua_context_t* context, std::string_view role, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
     std::string role_buffer(role);
     do {
         auto matches = query(context).by_role(role_buffer).query_all();
         if (matches.size() == 1) return std::move(matches.front());
         if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by role: " + role_buffer);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(poll_interval);
     } while (std::chrono::steady_clock::now() < deadline);
 
-    throw std::runtime_error("Timed out waiting for Gua node by role: " + role_buffer);
+    throw_selector_wait_timeout(context, "role '" + role_buffer + "'", timeout, start);
 }
 
-inline Locator wait_for_role(gua_context_t* context, std::string_view role, std::string_view name, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+inline Locator wait_for_role(gua_context_t* context, std::string_view role, std::string_view name, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
     std::string role_buffer(role);
     std::string name_buffer(name);
     do {
@@ -280,25 +422,27 @@ inline Locator wait_for_role(gua_context_t* context, std::string_view role, std:
         if (matches.size() == 1) return std::move(matches.front());
         if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by role and name: " + role_buffer + ", " + name_buffer);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(poll_interval);
     } while (std::chrono::steady_clock::now() < deadline);
 
-    throw std::runtime_error("Timed out waiting for Gua node by role and name: " + role_buffer + ", " + name_buffer);
+    throw_selector_wait_timeout(context, "role '" + role_buffer + "' and name '" + name_buffer + "'", timeout, start);
 }
 
-inline Locator wait_for_text(gua_context_t* context, std::string_view text, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000))
+inline Locator wait_for_text(gua_context_t* context, std::string_view text, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000), std::chrono::milliseconds poll_interval = std::chrono::milliseconds(10))
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    if (timeout.count() < 0 || poll_interval.count() <= 0) throw std::invalid_argument("Gua wait timeout must be non-negative and poll interval must be positive");
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + timeout;
     std::string text_buffer(text);
     do {
         auto matches = query(context).by_text(text_buffer).query_all();
         if (matches.size() == 1) return std::move(matches.front());
         if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by text: " + text_buffer);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(poll_interval);
     } while (std::chrono::steady_clock::now() < deadline);
 
-    throw std::runtime_error("Timed out waiting for Gua node by text: " + text_buffer);
+    throw_selector_wait_timeout(context, "text '" + text_buffer + "'", timeout, start);
 }
 
 class TestSession {

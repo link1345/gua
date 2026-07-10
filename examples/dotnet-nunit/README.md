@@ -35,3 +35,7 @@ For a Godot process or native runtime shared across tests, create a
 use `Reset(new GuaResetOptions(Strict: true))` in teardown. Strict teardown
 reports leaked requests/events and leaves them intact for diagnosis. Logs and
 screenshots are preserved by default; select `GuaResetTargets.All` to clear them.
+
+The sample's async wait tests use semantic state and distinct frame/revision
+progress as synchronization points. They do not use fixed `Thread.Sleep` or
+`Task.Delay` calls to guess when UI work has completed.

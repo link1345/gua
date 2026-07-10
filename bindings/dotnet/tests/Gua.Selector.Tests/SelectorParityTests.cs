@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using Gua.Core;
+using Gua.Testing;
 using Gua.Testing.Godot;
 using NUnit.Framework;
 
@@ -32,6 +33,8 @@ public sealed class SelectorParityTests
 
             using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
             remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            GuaAssertions.WaitForVisible(remote, "save-a", pollInterval: TimeSpan.FromMilliseconds(5));
+            GuaAssertions.WaitForHidden(remote, "missing", pollInterval: TimeSpan.FromMilliseconds(5));
             var selector = new GuaSelector(Role: "button", Name: "^Save", NameMatch: GuaMatchMode.Regex);
             var remoteResult = remote.Query(selector);
             var localResult = local.Query(selector);

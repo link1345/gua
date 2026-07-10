@@ -4,7 +4,7 @@ using Gua.Core;
 
 namespace Gua.Testing;
 
-public static class GuaAssertions
+public static partial class GuaAssertions
 {
     private static readonly AsyncLocal<GuaAssertionOptions?> CurrentOptions = new();
 
@@ -53,20 +53,20 @@ public static class GuaAssertions
         expectation.WaitFor(timeout);
     }
 
-    public static GuaNodeExpectation WaitForId(IGuaContext context, string id, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForId(IGuaContext context, string id, TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitForQuery(() => GetById(context, id).RequireExistingSnapshot(), $"id '{id}'", timeout);
+        return WaitForQuery(context, () => GetById(context, id).RequireExistingSnapshot(), $"id '{id}'", timeout, pollInterval);
     }
 
-    public static GuaNodeExpectation WaitForRole(IGuaContext context, string role, string? name = null, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForRole(IGuaContext context, string role, string? name = null, TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
         var description = name is null ? $"role '{role}'" : $"role '{role}' and label '{name}'";
-        return WaitForQuery(() => GetByRole(context, role, name).RequireExistingSnapshot(), description, timeout);
+        return WaitForQuery(context, () => GetByRole(context, role, name).RequireExistingSnapshot(), description, timeout, pollInterval);
     }
 
-    public static GuaNodeExpectation WaitForText(IGuaContext context, string text, TimeSpan? timeout = null)
+    public static GuaNodeExpectation WaitForText(IGuaContext context, string text, TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitForQuery(() => GetByText(context, text).RequireExistingSnapshot(), $"text '{text}'", timeout);
+        return WaitForQuery(context, () => GetByText(context, text).RequireExistingSnapshot(), $"text '{text}'", timeout, pollInterval);
     }
 
     public static void WaitUntil(
@@ -75,23 +75,7 @@ public static class GuaAssertions
         TimeSpan? timeout = null,
         TimeSpan? pollInterval = null)
     {
-        ArgumentNullException.ThrowIfNull(condition);
-        ArgumentException.ThrowIfNullOrWhiteSpace(description);
-
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(1));
-        var interval = pollInterval ?? TimeSpan.FromMilliseconds(10);
-        do
-        {
-            if (condition())
-            {
-                return;
-            }
-
-            Thread.Sleep(interval);
-        }
-        while (DateTime.UtcNow < deadline);
-
-        Fail($"Timed out after {FormatTimeout(timeout)} waiting for {description}.");
+        WaitUntilAsync(condition, description, timeout, pollInterval).GetAwaiter().GetResult();
     }
 
     internal static void Fail(string message)
@@ -194,9 +178,13 @@ public static class GuaAssertions
         }
     }
 
-    private static GuaNodeExpectation WaitForQuery(Func<GuaNodeExpectation> query, string description, TimeSpan? timeout)
+    private static GuaNodeExpectation WaitForQuery(IGuaContext context, Func<GuaNodeExpectation> query, string description, TimeSpan? timeout, TimeSpan? pollInterval)
     {
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(1));
+        var stopwatch = Stopwatch.StartNew();
+        var limit = timeout ?? TimeSpan.FromSeconds(1);
+        var interval = pollInterval ?? TimeSpan.FromMilliseconds(10);
+        if (limit < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        if (interval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(pollInterval));
         Exception? lastException = null;
         do
         {
@@ -207,12 +195,13 @@ public static class GuaAssertions
             catch (Exception ex) when (ex is InvalidOperationException or GuaAssertionException)
             {
                 lastException = ex;
-                Thread.Sleep(10);
+                Thread.Sleep(interval);
             }
         }
-        while (DateTime.UtcNow < deadline);
+        while (stopwatch.Elapsed < limit);
 
-        Fail($"Timed out after {FormatTimeout(timeout)} waiting for Gua node by {description}. {lastException?.Message}");
+        var last = ReadWaitSnapshot(context);
+        Fail($"Timed out after {FormatTimeout(timeout)} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node by {description}. Last frameSequence={Format(last.FrameSequence)}, revision={Format(last.Revision)}. {lastException?.Message}");
         throw new UnreachableException();
     }
 
@@ -412,50 +401,50 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation WaitFor(TimeSpan? timeout = null)
     {
-        return WaitUntil(node => node is not null, "exist", timeout);
+        return GuaAssertions.WaitForId(_context, _id, timeout);
     }
 
-    public GuaNodeExpectation WaitUntilVisible(TimeSpan? timeout = null)
+    public GuaNodeExpectation WaitUntilVisible(TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitUntil(node => node is { Visible: true }, "be visible", timeout);
+        return GuaAssertions.WaitForVisible(_context, _id, timeout, pollInterval);
     }
 
-    public GuaNodeExpectation WaitUntilHidden(TimeSpan? timeout = null)
+    public GuaNodeExpectation WaitUntilHidden(TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitUntil(node => node is { Visible: false } || node is null, "be hidden or removed", timeout);
+        return GuaAssertions.WaitForHidden(_context, _id, timeout, pollInterval);
     }
 
-    public GuaNodeExpectation WaitUntilEnabled(TimeSpan? timeout = null)
+    public GuaNodeExpectation WaitUntilEnabled(TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitUntil(node => node is { Enabled: true }, "be enabled", timeout);
+        return GuaAssertions.WaitForEnabled(_context, _id, timeout, pollInterval);
     }
 
-    public GuaNodeExpectation WaitUntilDisabled(TimeSpan? timeout = null)
+    public GuaNodeExpectation WaitUntilDisabled(TimeSpan? timeout = null, TimeSpan? pollInterval = null)
     {
-        return WaitUntil(node => node is { Enabled: false }, "be disabled", timeout);
+        return GuaAssertions.WaitForDisabled(_context, _id, timeout, pollInterval);
     }
+
+    public Task<GuaNodeExpectation> WaitUntilVisibleAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForVisibleAsync(_context, _id, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitUntilHiddenAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForHiddenAsync(_context, _id, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitUntilEnabledAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForEnabledAsync(_context, _id, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitUntilDisabledAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForDisabledAsync(_context, _id, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitForTextAsync(string expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForTextAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitForValueAsync(string expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForValueAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
 
     internal GuaNodeExpectation RequireExistingSnapshot()
     {
         ToExist();
-        return this;
-    }
-
-    private GuaNodeExpectation WaitUntil(Func<GuaNodeSnapshot?, bool> condition, string description, TimeSpan? timeout)
-    {
-        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(1));
-        do
-        {
-            if (condition(GuaAssertions.TryGetSnapshot(_context, _id)))
-            {
-                return this;
-            }
-
-            Thread.Sleep(10);
-        }
-        while (DateTime.UtcNow < deadline);
-
-        GuaAssertions.Fail($"Timed out waiting for Gua node {_description} to {description}. {GuaAssertions.DescribeTree(_context)}");
         return this;
     }
 

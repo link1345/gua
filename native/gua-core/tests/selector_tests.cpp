@@ -29,6 +29,11 @@ int main()
     node(context, "left-save", "left-group", "button", "保存", "保存");
     node(context, "right-save", "right", "button", "保存", "保存");
     node(context, "hidden", "left", "button", "Hidden", "Hidden", false);
+    const gua_node_descriptor_v2_t status {
+        sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_TEXT | GUA_NODE_KNOWN_VALUE,
+        "status", nullptr, "status", "Status", "Ready", "2", { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0,
+    };
+    assert(gua_register_node_v2(context, &status) == 1);
     gua_end_frame(context);
 
     using namespace gua::testing;
@@ -51,5 +56,24 @@ int main()
     char legacy[128] {};
     assert(gua_find_node_by_text(context, "保存", legacy, sizeof(legacy)) == 1);
     assert(std::string(legacy) == "left-save");
+
+    Locator status_locator(context, "status");
+    status_locator.wait_for_visible(std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+    status_locator.wait_for_enabled(std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+    status_locator.wait_for_text("Ready", std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+    status_locator.wait_for_value("2", std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+    Locator(context, "missing").wait_for_hidden(std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+
+    bool stale_snapshot_rejected = false;
+    try { wait_for_stable_snapshot(context, 3, std::chrono::milliseconds(5), std::chrono::milliseconds(1)); }
+    catch (const std::runtime_error& error) {
+        const std::string message(error.what());
+        stale_snapshot_rejected = message.find("distinct stable semantic frames") != std::string::npos &&
+            message.find("frameSequence=1") != std::string::npos && message.find("revision=1") != std::string::npos;
+    }
+    assert(stale_snapshot_rejected);
+
+    int attempts = 0;
+    wait_until([&attempts] { return ++attempts == 3; }, "third predicate evaluation", std::chrono::milliseconds(20), std::chrono::milliseconds(1));
     gua_destroy_context(context);
 }
