@@ -1,11 +1,18 @@
 name: Inspector Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: New major version (major upgrades only; leave empty for an automatic minor release)
+        required: false
+        type: string
   push:
     branches:
       - main
     paths:
       - .github/workflows/inspector-release.yml
+      - .github/scripts/next-release-version.ps1
       - bun.lock
       - package.json
       - tsconfig.base.json
@@ -31,6 +38,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_MAJOR: ${{ inputs.major }}
+        run: .github/scripts/next-release-version.ps1 -TagPrefix inspector -RequestedMajor $env:REQUESTED_MAJOR
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -47,19 +63,11 @@ jobs:
       - name: Build Tauri inspector
         run: bun run --filter @gua/inspector tauri:build
 
-      - name: Collect release metadata
-        id: meta
-        shell: pwsh
-        run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 12)
-          "tag=inspector-$shortSha" >> $env:GITHUB_OUTPUT
-          "name=Gua Inspector $shortSha" >> $env:GITHUB_OUTPUT
-
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ steps.meta.outputs.name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Gua Inspector v${{ steps.version.outputs.version }}
           body: |
             Automated Gua Inspector build from `${{ github.sha }}`.
 

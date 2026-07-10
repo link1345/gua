@@ -1,11 +1,18 @@
 name: Godot Plugin Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: New major version (major upgrades only; leave empty for an automatic minor release)
+        required: false
+        type: string
   push:
     branches:
       - main
     paths:
       - .github/workflows/godot-plugin-release.yml
+      - .github/scripts/next-release-version.ps1
       - CMakeLists.txt
       - CMakePresets.json
       - examples/godot-gdscript/addons/gua/**
@@ -29,6 +36,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_MAJOR: ${{ inputs.major }}
+        run: .github/scripts/next-release-version.ps1 -TagPrefix godot-plugin -RequestedMajor $env:REQUESTED_MAJOR
 
       - name: Configure native build
         run: cmake --preset windows-msvc-debug
@@ -40,11 +56,10 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          $shortSha = "${env:GITHUB_SHA}".Substring(0, 12)
           $packageRoot = Join-Path $env:RUNNER_TEMP "gua-godot-plugin"
           $addonSource = "examples/godot-gdscript/addons/gua"
           $addonTarget = Join-Path $packageRoot "addons/gua"
-          $zipPath = Join-Path $env:RUNNER_TEMP "gua-godot-plugin-windows-debug-$shortSha.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP "gua-godot-plugin-windows-debug-v${{ steps.version.outputs.version }}.zip"
 
           Remove-Item -Recurse -Force $packageRoot, $zipPath -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force $addonTarget | Out-Null
@@ -61,8 +76,6 @@ jobs:
           Compress-Archive -Path (Join-Path $packageRoot "addons") -DestinationPath $zipPath -CompressionLevel Optimal
 
           "asset=$zipPath" >> $env:GITHUB_OUTPUT
-          "tag=godot-plugin-$shortSha" >> $env:GITHUB_OUTPUT
-          "name=Gua Godot Plugin $shortSha" >> $env:GITHUB_OUTPUT
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -74,8 +87,8 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.package.outputs.tag }}
-          name: ${{ steps.package.outputs.name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Gua Godot Plugin v${{ steps.version.outputs.version }}
           body: |
             Automated Gua Godot plugin build from `${{ github.sha }}`.
 
