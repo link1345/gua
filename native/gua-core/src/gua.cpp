@@ -755,6 +755,12 @@ extern "C" int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gu
         return 0;
     }
 
+    if (found->parent_id.size() >= sizeof(out_state->parent_id) ||
+        found->text.size() >= sizeof(out_state->text) ||
+        found->value.size() >= sizeof(out_state->value)) {
+        return 0;
+    }
+
     out_state->known_mask = found->known_mask;
     out_state->visible = found->visible ? 1 : 0;
     out_state->enabled = found->enabled ? 1 : 0;
@@ -815,7 +821,8 @@ extern "C" int gua_find_node_by_text(gua_context_t* ctx, const char* text, char*
 
     const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
-        return node.label == text;
+        return node.label == text ||
+            ((node.known_mask & GUA_NODE_KNOWN_TEXT) != 0U && node.text == text);
     });
     if (found == ctx->nodes.end()) {
         return 0;

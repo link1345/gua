@@ -26,6 +26,10 @@ export interface GuaNode {
 }
 
 export interface GuaUiTree {
+  schemaVersion: 2;
+  sessionEpoch?: number;
+  frameSequence: number;
+  revision: number;
   screen: string;
   nodes: GuaNode[];
 }
@@ -97,7 +101,14 @@ export const initialPanels: InspectorPanel[] = [
 ];
 
 export function createInspectorState(snapshot?: Partial<InspectorSnapshot>): InspectorState {
-  const uiTree = snapshot?.uiTree ?? { screen: "unknown", nodes: [] };
+  const uiTree = snapshot?.uiTree ?? {
+    schemaVersion: 2,
+    sessionEpoch: 1,
+    frameSequence: 0,
+    revision: 0,
+    screen: "unknown",
+    nodes: [],
+  };
   return {
     uiTree,
     logs: snapshot?.logs ?? [],
@@ -161,10 +172,16 @@ export class MockInspectorClient implements GuaInspectorClient {
   ];
 
   private screen: "title" | "loading" = "title";
+  private frameSequence = 1;
+  private revision = 1;
 
   async getUiTree(): Promise<GuaUiTree> {
     if (this.screen === "loading") {
       return {
+        schemaVersion: 2,
+        sessionEpoch: 1,
+        frameSequence: this.frameSequence,
+        revision: this.revision,
         screen: "loading",
         nodes: [
           {
@@ -190,6 +207,10 @@ export class MockInspectorClient implements GuaInspectorClient {
     }
 
     return {
+      schemaVersion: 2,
+      sessionEpoch: 1,
+      frameSequence: this.frameSequence,
+      revision: this.revision,
       screen: "title",
       nodes: [
         {
@@ -260,6 +281,8 @@ export class MockInspectorClient implements GuaInspectorClient {
 
     if (nodeId === "start") {
       this.screen = "loading";
+      this.frameSequence += 1;
+      this.revision += 1;
     }
   }
 

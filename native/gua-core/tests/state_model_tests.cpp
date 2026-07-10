@@ -56,6 +56,20 @@ int main()
     assert(state.checked == 0);
     assert(std::strcmp(state.parent_id, "form") == 0);
 
+    const std::string long_text(300, 'x');
+    const gua_node_descriptor_v2_t long_text_node {
+        sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_TEXT, "long-text", nullptr, "text", "Long text",
+        long_text.c_str(), nullptr, { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0,
+    };
+    gua_context_t* oversized_context = gua_create_context();
+    gua_begin_frame(oversized_context, "settings");
+    assert(gua_register_node_v2(oversized_context, &long_text_node) == 1);
+    gua_end_frame(oversized_context);
+    gua_node_state_v2_t oversized_state {};
+    oversized_state.struct_size = sizeof(oversized_state);
+    assert(gua_get_node_state_v2(oversized_context, "long-text", &oversized_state) == 0);
+    gua_destroy_context(oversized_context);
+
     gua_begin_frame(context, "settings");
     register_checkbox(context, false);
     gua_end_frame(context);

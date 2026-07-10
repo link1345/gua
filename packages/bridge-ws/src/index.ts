@@ -52,6 +52,8 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
 class DemoRuntime {
   private screen: "title" | "loading" = "title";
   private focusedNodeId = "start";
+  private frameSequence = 1;
+  private revision = 1;
   private logs: GuaLogEntry[] = [
     { sequence: 1, level: "info", message: "Demo runtime started." },
     { sequence: 2, level: "debug", message: "Serving Gua protocol snapshots over WebSocket." },
@@ -60,6 +62,10 @@ class DemoRuntime {
   getUiTree(): GuaUiTree {
     if (this.screen === "loading") {
       return {
+        schemaVersion: 2,
+        sessionEpoch: 1,
+        frameSequence: this.frameSequence,
+        revision: this.revision,
         screen: "loading",
         nodes: [
           node("root", "screen", "Loading Screen", { x: 0, y: 0, w: 1280, h: 720 }, false),
@@ -69,6 +75,10 @@ class DemoRuntime {
     }
 
     return {
+      schemaVersion: 2,
+      sessionEpoch: 1,
+      frameSequence: this.frameSequence,
+      revision: this.revision,
       screen: "title",
       nodes: [
         node("root", "screen", "Title Screen", { x: 0, y: 0, w: 1280, h: 720 }, false),
@@ -98,12 +108,18 @@ class DemoRuntime {
     if (nodeId === "start") {
       this.screen = "loading";
       this.focusedNodeId = "loading";
+      this.frameSequence += 1;
+      this.revision += 1;
       this.log("info", "Screen changed to loading.");
     }
   }
 
   focusNode(nodeId: string): void {
     this.assertNodeExists(nodeId);
+    if (this.focusedNodeId !== nodeId) {
+      this.frameSequence += 1;
+      this.revision += 1;
+    }
     this.focusedNodeId = nodeId;
     this.log("debug", `focus_node(${nodeId})`);
   }

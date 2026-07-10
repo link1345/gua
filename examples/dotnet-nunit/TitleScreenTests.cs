@@ -82,6 +82,17 @@ public sealed class TitleScreenTests
         });
     }
 
+    [TestCase("10", "10")]
+    [TestCase("true", "true")]
+    [TestCase("null", null)]
+    public void SnapshotScalarValueRemainsReadable(string jsonValue, string? expected)
+    {
+        using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);
+        var tree = $$$"""{"schemaVersion":2,"frameSequence":1,"revision":1,"screen":"test","nodes":[{"id":"status","role":"status","label":"Status","value":{{{jsonValue}}},"visible":true,"enabled":true,"bounds":{"x":0,"y":0,"w":1,"h":1},"actions":[]}]}""";
+        var snapshot = GuaAssertions.GetById(new SequenceContext(tree), "status").Snapshot;
+        Assert.That(snapshot.Value, Is.EqualTo(expected));
+    }
+
     [Test]
     public void StartClickShowsLoadingText()
     {
