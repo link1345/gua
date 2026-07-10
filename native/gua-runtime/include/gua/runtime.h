@@ -50,6 +50,8 @@ int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const
 int gua_runtime_emit_action_result(gua_runtime_t* runtime, const gua_action_result_t* result);
 int gua_runtime_poll_event_v2(gua_runtime_t* runtime, gua_event_v2_t* out_event);
 int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v2_t* out_event);
+int gua_runtime_get_context_status(gua_runtime_t* runtime, gua_context_status_t* out_status);
+int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset_options_t* options, gua_reset_report_t* out_report);
 
 int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port);
 void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime);

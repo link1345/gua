@@ -21,6 +21,8 @@ struct gua_runtime_t {
     std::string screenshot_json;
 };
 
+std::string escape_json(std::string_view value);
+
 namespace {
 
 bool valid_runtime(gua_runtime_t* runtime)
@@ -53,6 +55,50 @@ std::string copy_screenshot_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     return gua_get_screenshot_json(runtime->context);
+}
+
+std::string status_json(gua_runtime_t* runtime)
+{
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    const std::lock_guard lock(runtime->context_mutex);
+    if (gua_get_context_status(runtime->context, &status) == 0) return "null";
+    return "{\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+        ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
+        ",\"revision\":" + std::to_string(status.revision) +
+        ",\"nodeCount\":" + std::to_string(status.node_count) +
+        ",\"pendingRequestCount\":" + std::to_string(status.pending_request_count) +
+        ",\"inFlightRequestCount\":" + std::to_string(status.in_flight_request_count) +
+        ",\"unconsumedEventCount\":" + std::to_string(status.unconsumed_event_count) +
+        ",\"logCount\":" + std::to_string(status.log_count) +
+        ",\"hasScreenshot\":" + (status.has_screenshot != 0 ? "true" : "false") +
+        ",\"firstPendingAction\":" + std::to_string(status.first_pending_action) +
+        ",\"firstPendingNodeId\":\"" + escape_json(status.first_pending_node_id) + "\"" +
+        ",\"firstEventAction\":" + std::to_string(status.first_event_action) +
+        ",\"firstEventNodeId\":\"" + escape_json(status.first_event_node_id) + "\"}";
+}
+
+std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags, bool strict)
+{
+    gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch };
+    gua_reset_report_t report { sizeof(gua_reset_report_t) };
+    const std::lock_guard lock(runtime->context_mutex);
+    const int result = gua_reset_context(runtime->context, &options, &report);
+    return "{\"result\":" + std::to_string(result) +
+        ",\"previousSessionEpoch\":" + std::to_string(report.previous_session_epoch) +
+        ",\"sessionEpoch\":" + std::to_string(report.session_epoch) +
+        ",\"pendingRequestCount\":" + std::to_string(report.pending_request_count) +
+        ",\"inFlightRequestCount\":" + std::to_string(report.in_flight_request_count) +
+        ",\"unconsumedEventCount\":" + std::to_string(report.unconsumed_event_count) +
+        ",\"discardedNodeCount\":" + std::to_string(report.discarded_node_count) +
+        ",\"discardedPendingRequestCount\":" + std::to_string(report.discarded_pending_request_count) +
+        ",\"discardedInFlightRequestCount\":" + std::to_string(report.discarded_in_flight_request_count) +
+        ",\"discardedEventCount\":" + std::to_string(report.discarded_event_count) +
+        ",\"discardedLogCount\":" + std::to_string(report.discarded_log_count) +
+        ",\"discardedScreenshot\":" + (report.discarded_screenshot != 0 ? "true" : "false") +
+        ",\"firstPendingAction\":" + std::to_string(report.first_pending_action) +
+        ",\"firstPendingNodeId\":\"" + escape_json(report.first_pending_node_id) + "\"" +
+        ",\"firstEventAction\":" + std::to_string(report.first_event_action) +
+        ",\"firstEventNodeId\":\"" + escape_json(report.first_event_node_id) + "\"}";
 }
 
 } // namespace
@@ -318,8 +364,14 @@ std::string escape_json(std::string_view value)
 {
     std::string escaped;
     for (char ch : value) {
-        if (ch == '\\' || ch == '"') escaped.push_back('\\');
-        escaped.push_back(ch);
+        switch (ch) {
+        case '\\': escaped += "\\\\"; break;
+        case '"': escaped += "\\\""; break;
+        case '\n': escaped += "\\n"; break;
+        case '\r': escaped += "\\r"; break;
+        case '\t': escaped += "\\t"; break;
+        default: escaped.push_back(ch); break;
+        }
     }
     return escaped;
 }
@@ -359,6 +411,20 @@ extern "C" int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uin
     return gua_poll_event_v2_for_request(runtime->context, request_id, out_event);
 }
 
+extern "C" int gua_runtime_get_context_status(gua_runtime_t* runtime, gua_context_status_t* out_status)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_get_context_status(runtime->context, out_status);
+}
+
+extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset_options_t* options, gua_reset_report_t* out_report)
+{
+    if (!valid_runtime(runtime)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_reset_context(runtime->context, options, out_report);
+}
+
 extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port)
 {
     if (!valid_runtime(runtime) || port <= 0 || port > 65535) {
@@ -396,6 +462,10 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             gua_query_nodes_json(runtime->context, &native, json.data(), size);
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
+        },
+        .get_context_status_json = [runtime] { return status_json(runtime); },
+        .reset_context_json = [runtime](unsigned long long expected_epoch, unsigned int flags, bool strict) {
+            return reset_report_json(runtime, expected_epoch, flags, strict);
         },
         .click_node = [runtime](std::string_view node_id) {
             const std::string id(node_id);

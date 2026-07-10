@@ -19,5 +19,6 @@ public sealed record GuaNodeSnapshot(
     bool? Checked = null,
     bool? Selected = null,
     int? SchemaVersion = null,
+    ulong? SessionEpoch = null,
     ulong? FrameSequence = null,
     ulong? Revision = null);

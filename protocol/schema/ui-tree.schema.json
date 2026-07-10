@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": 2 },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
     "frameSequence": { "type": "integer", "minimum": 0 },
     "revision": { "type": "integer", "minimum": 0 },
     "screen": {

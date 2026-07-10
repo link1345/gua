@@ -37,3 +37,7 @@ rebuild this target and use the DLL emitted into `examples/godot-gdscript/addons
 
 The GDExtension is intentionally thin. It does not reimplement Gua runtime
 behavior and does not turn Gua into a Godot UI framework or editor MCP.
+
+`get_context_status` and `reset_context` expose the shared C ABI isolation
+contract. Use the higher-level auto adapter when control lookup and suppressed
+click caches must be cleared together with the runtime context.

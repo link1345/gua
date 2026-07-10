@@ -289,6 +289,57 @@ Dictionary GuaContext::poll_event_v2()
     return result;
 }
 
+Dictionary GuaContext::get_context_status() const
+{
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    if (gua_runtime_get_context_status(runtime_, &status) == 0) return Dictionary();
+    Dictionary result;
+    result["session_epoch"] = status.session_epoch;
+    result["frame_sequence"] = status.frame_sequence;
+    result["revision"] = status.revision;
+    result["node_count"] = status.node_count;
+    result["pending_request_count"] = status.pending_request_count;
+    result["in_flight_request_count"] = status.in_flight_request_count;
+    result["unconsumed_event_count"] = status.unconsumed_event_count;
+    result["log_count"] = status.log_count;
+    result["has_screenshot"] = status.has_screenshot != 0;
+    result["first_pending_action"] = action_name(status.first_pending_action);
+    result["first_pending_node_id"] = String::utf8(status.first_pending_node_id);
+    result["first_event_action"] = action_name(status.first_event_action);
+    result["first_event_node_id"] = String::utf8(status.first_event_node_id);
+    return result;
+}
+
+Dictionary GuaContext::reset_context(const Dictionary& source)
+{
+    const gua_reset_options_t options {
+        sizeof(gua_reset_options_t),
+        static_cast<uint32_t>(static_cast<int64_t>(source.get("flags", GUA_RESET_DEFAULT))),
+        source.get("strict", false) ? 1 : 0,
+        static_cast<uint64_t>(static_cast<int64_t>(source.get("expected_session_epoch", 0))),
+    };
+    gua_reset_report_t report { sizeof(gua_reset_report_t) };
+    const int code = gua_runtime_reset_context(runtime_, &options, &report);
+    Dictionary result;
+    result["result"] = code;
+    result["previous_session_epoch"] = report.previous_session_epoch;
+    result["session_epoch"] = report.session_epoch;
+    result["pending_request_count"] = report.pending_request_count;
+    result["in_flight_request_count"] = report.in_flight_request_count;
+    result["unconsumed_event_count"] = report.unconsumed_event_count;
+    result["discarded_node_count"] = report.discarded_node_count;
+    result["discarded_pending_request_count"] = report.discarded_pending_request_count;
+    result["discarded_in_flight_request_count"] = report.discarded_in_flight_request_count;
+    result["discarded_event_count"] = report.discarded_event_count;
+    result["discarded_log_count"] = report.discarded_log_count;
+    result["discarded_screenshot"] = report.discarded_screenshot != 0;
+    result["first_pending_action"] = action_name(report.first_pending_action);
+    result["first_pending_node_id"] = String::utf8(report.first_pending_node_id);
+    result["first_event_action"] = action_name(report.first_event_action);
+    result["first_event_node_id"] = String::utf8(report.first_event_node_id);
+    return result;
+}
+
 bool GuaContext::start_inspector_bridge(int port)
 {
     return gua_runtime_start_inspector_bridge(runtime_, port) != 0;
@@ -333,6 +384,8 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("consume_action_request", "action", "node_id"), &GuaContext::consume_action_request);
     ClassDB::bind_method(D_METHOD("emit_action_result", "result"), &GuaContext::emit_action_result);
     ClassDB::bind_method(D_METHOD("poll_event_v2"), &GuaContext::poll_event_v2);
+    ClassDB::bind_method(D_METHOD("get_context_status"), &GuaContext::get_context_status);
+    ClassDB::bind_method(D_METHOD("reset_context", "options"), &GuaContext::reset_context, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);
     ClassDB::bind_method(D_METHOD("inspector_bridge_running"), &GuaContext::inspector_bridge_running);

@@ -50,6 +50,12 @@ actions through the real controls. The v1 matrix covers focus, `LineEdit` /
 `TabContainer` selection, `ScrollContainer`, and key input. Every requested host
 operation emits an observed result carrying the same `requestId`.
 
+`GuaAutoAdapter.reset_context()` resets the shared runtime context and its
+temporary control/request-dispatch caches as one operation. Strict reset first
+checks pending/in-flight requests and unconsumed events and changes nothing when
+it reports a leak. The default preserves logs and screenshots; all clients of
+the same runtime observe the new `sessionEpoch`.
+
 For a headless smoke check of the load-order-safe path:
 
 ```powershell

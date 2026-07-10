@@ -39,6 +39,9 @@ struct Command {
     bool sensitive = false;
     int scroll_unit = 0;
     unsigned long long request_id = 0;
+    unsigned long long expected_session_epoch = 0;
+    unsigned int reset_flags = 15;
+    bool strict = false;
 };
 
 struct ClientConnection {
@@ -543,6 +546,9 @@ Command parse_command(std::string_view json)
     command.sensitive = json_bool_field(json, "sensitive");
     command.scroll_unit = json_int_field(json, "scrollUnit").value_or(0);
     command.request_id = json_uint64_field(json, "requestId").value_or(0);
+    command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(15));
+    command.strict = json_bool_field(json, "strict");
     return command;
 }
 
@@ -816,6 +822,17 @@ private:
                     return error_response(command.id, "query_nodes is not supported by this bridge");
                 }
                 return ok_response(command.id, handlers_.query_nodes_json(command.selector));
+            }
+            if (command.type == "get_context_status") {
+                return handlers_.get_context_status_json
+                    ? ok_response(command.id, handlers_.get_context_status_json())
+                    : error_response(command.id, "get_context_status is not supported by this bridge");
+            }
+            if (command.type == "reset_context") {
+                if (!handlers_.reset_context_json) return error_response(command.id, "reset_context is not supported by this bridge");
+                if (command.expected_session_epoch == 0) return error_response(command.id, "reset_context requires expectedSessionEpoch");
+                return ok_response(command.id, handlers_.reset_context_json(
+                    command.expected_session_epoch, command.reset_flags, command.strict));
             }
             if (command.type == "poll_events") {
                 return handlers_.poll_action_event_json

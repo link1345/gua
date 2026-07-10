@@ -164,6 +164,62 @@ public sealed class TitleScreenTests
         });
     }
 
+    [Test]
+    public void StrictSessionResetDetectsLeakWithoutDiscardingIt()
+    {
+        using var ui = new GuaContext();
+        var session = new GuaTestSession(ui);
+        ui.BeginFrame("form");
+        ui.RegisterNode(new GuaNodeDescriptor("password", "textbox", "Password", new GuaBounds(0, 0, 100, 20), Value: string.Empty));
+        ui.EndFrame();
+        Assert.That(GuaAssertions.GetById(ui, "password").SetValue("secret-marker", sensitive: true), Is.GreaterThan(0));
+
+        var error = Assert.Throws<GuaAssertionException>(() =>
+            session.Reset(new GuaResetOptions(Strict: true)));
+        Assert.That(error!.Message, Does.Contain("pending=1").And.Not.Contain("secret-marker"));
+        Assert.That(session.Inspect().PendingRequestCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void NonStrictResetStartsNewEpochAndPreservesOptionalStateByDefault()
+    {
+        using var ui = new GuaContext();
+        using var other = new GuaContext();
+        var session = new GuaTestSession(ui);
+        ui.BeginFrame("title");
+        ui.RegisterNode("start", "button", "Start", new GuaBounds(0, 0, 1, 1));
+        ui.EndFrame();
+        ui.AddLog(GuaLogLevel.Info, "keep");
+        ui.SetScreenshot("data:image/png;base64,AA==", 1, 1);
+        other.BeginFrame("other");
+        other.RegisterNode("other", "button", "Other", new GuaBounds(0, 0, 1, 1));
+        other.EndFrame();
+
+        var report = session.Reset();
+        var status = session.Inspect();
+        Assert.Multiple(() =>
+        {
+            Assert.That(report.Result, Is.EqualTo(GuaResetResult.Succeeded));
+            Assert.That(report.PreviousSessionEpoch, Is.EqualTo(1));
+            Assert.That(report.SessionEpoch, Is.EqualTo(2));
+            Assert.That(status.FrameSequence, Is.Zero);
+            Assert.That(status.Revision, Is.Zero);
+            Assert.That(status.NodeCount, Is.Zero);
+            Assert.That(status.LogCount, Is.EqualTo(1));
+            Assert.That(status.HasScreenshot, Is.True);
+            Assert.That(other.GetContextStatus().NodeCount, Is.EqualTo(1));
+        });
+
+        var cleared = session.Reset(new GuaResetOptions(GuaResetTargets.All));
+        Assert.Multiple(() =>
+        {
+            Assert.That(cleared.DiscardedLogCount, Is.EqualTo(1));
+            Assert.That(cleared.DiscardedScreenshot, Is.True);
+            Assert.That(session.Inspect().LogCount, Is.Zero);
+            Assert.That(session.Inspect().HasScreenshot, Is.False);
+        });
+    }
+
     private static void RenderTitle(GuaTestHost host, bool loading)
     {
         host.Frame(loading ? "loading" : "title", frame =>

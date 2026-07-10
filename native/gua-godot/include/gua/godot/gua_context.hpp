@@ -36,6 +36,8 @@ public:
     Dictionary consume_action_request(const String& action, const String& node_id);
     bool emit_action_result(const Dictionary& result);
     Dictionary poll_event_v2();
+    Dictionary get_context_status() const;
+    Dictionary reset_context(const Dictionary& options = Dictionary());
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

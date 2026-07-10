@@ -10,6 +10,7 @@
     { "$ref": "#/$defs/checkedAction" },
     { "$ref": "#/$defs/selectAction" },
     { "$ref": "#/$defs/scrollAction" },
+    { "$ref": "#/$defs/resetContext" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -95,6 +96,17 @@
         "requestId": { "type": "integer", "minimum": 1 }
       }
     },
+    "resetContext": {
+      "type": "object",
+      "required": ["type", "expectedSessionEpoch"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "reset_context" },
+        "expectedSessionEpoch": { "type": "integer", "minimum": 1 },
+        "flags": { "type": "integer", "minimum": 0, "maximum": 63, "default": 15 },
+        "strict": { "type": "boolean", "default": false }
+      }
+    },
     "textInput": {
       "type": "object",
       "required": ["type", "text"],
@@ -120,7 +132,7 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["get_screenshot", "get_logs", "poll_events"]
+          "enum": ["get_screenshot", "get_logs", "get_context_status", "poll_events"]
         }
       }
     }

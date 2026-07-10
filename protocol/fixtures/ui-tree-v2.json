@@ -1,5 +1,6 @@
 {
   "schemaVersion": 2,
+  "sessionEpoch": 1,
   "frameSequence": 12,
   "revision": 4,
   "screen": "settings",

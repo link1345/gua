@@ -301,4 +301,43 @@ inline Locator wait_for_text(gua_context_t* context, std::string_view text, std:
     throw std::runtime_error("Timed out waiting for Gua node by text: " + text_buffer);
 }
 
+class TestSession {
+public:
+    explicit TestSession(gua_context_t* context) : context_(context)
+    {
+        if (context_ == nullptr) throw std::invalid_argument("Gua TestSession requires a context");
+    }
+
+    [[nodiscard]] gua_context_status_t inspect() const
+    {
+        gua_context_status_t status { sizeof(gua_context_status_t) };
+        if (gua_get_context_status(context_, &status) == 0) throw std::runtime_error("Failed to inspect Gua context");
+        return status;
+    }
+
+    void assert_clean() const
+    {
+        const auto status = inspect();
+        if (status.pending_request_count == 0 && status.in_flight_request_count == 0 && status.unconsumed_event_count == 0) return;
+        throw std::runtime_error("Dirty Gua test session: pending=" + std::to_string(status.pending_request_count) +
+            ", in-flight=" + std::to_string(status.in_flight_request_count) + ", events=" +
+            std::to_string(status.unconsumed_event_count) + ", first request=" + status.first_pending_node_id +
+            ". Payload values are redacted.");
+    }
+
+    [[nodiscard]] gua_reset_report_t reset(bool strict = false, std::uint32_t flags = GUA_RESET_DEFAULT) const
+    {
+        const auto status = inspect();
+        const gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, status.session_epoch };
+        gua_reset_report_t report { sizeof(gua_reset_report_t) };
+        const int result = gua_reset_context(context_, &options, &report);
+        if (result == GUA_RESET_ERROR_DIRTY) throw std::runtime_error("Strict Gua reset rejected dirty state without discarding it");
+        if (result != GUA_RESET_SUCCEEDED) throw std::runtime_error("Gua reset failed: " + std::to_string(result));
+        return report;
+    }
+
+private:
+    gua_context_t* context_;
+};
+
 } // namespace gua::testing

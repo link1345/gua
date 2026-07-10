@@ -187,6 +187,27 @@ func _run() -> void:
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
 		return
 
+	var leaked := ui.enqueue_action({"action": "focus", "node_id": "start"})
+	if leaked.get("request_id", 0) == 0:
+		_fail("Gua smoke could not create a pending request for reset validation.")
+		return
+	var before_reset := ui.get_context_status()
+	var strict_report := ui.reset_context({"strict": true, "expected_session_epoch": before_reset.get("session_epoch", 0)})
+	if strict_report.get("result", 0) != -2 or ui.get_context_status().get("pending_request_count", 0) != 1:
+		_fail("Gua strict reset discarded or missed a pending request: %s" % strict_report)
+		return
+	var reset_report := ui.reset_context({"expected_session_epoch": before_reset.get("session_epoch", 0)})
+	var after_reset := ui.get_context_status()
+	if reset_report.get("result", 0) != 1 or after_reset.get("session_epoch", 0) != before_reset.get("session_epoch", 0) + 1:
+		_fail("Gua reset did not advance the session epoch: %s / %s" % [reset_report, after_reset])
+		return
+	if after_reset.get("frame_sequence", -1) != 0 or after_reset.get("revision", -1) != 0:
+		_fail("Gua reset did not initialize frame/revision metadata: %s" % after_reset)
+		return
+	if not ui.buttons_by_id.is_empty() or not ui.controls_by_id.is_empty() or not ui.suppressed_clicks.is_empty():
+		_fail("Gua adapter temporary caches survived a successful reset.")
+		return
+
 	print("Gua GDScript smoke passed.")
 	quit(0)
 

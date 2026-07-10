@@ -116,6 +116,54 @@ public sealed class GuaContext : IGuaContext, IDisposable
         return ReadCopiedJson(JsonSource.UiTree, _handle);
     }
 
+    public unsafe GuaContextStatus GetContextStatus()
+    {
+        ThrowIfDisposed();
+        Native.GuaNativeContextStatus status = default;
+        status.StructSize = (uint)sizeof(Native.GuaNativeContextStatus);
+        if (Native.gua_get_context_status(_handle, &status) == 0)
+        {
+            throw new InvalidOperationException("Failed to inspect the Gua context.");
+        }
+
+        return new GuaContextStatus(
+            status.SessionEpoch, status.FrameSequence, status.Revision, status.NodeCount,
+            status.PendingRequestCount, status.InFlightRequestCount, status.UnconsumedEventCount,
+            status.LogCount, status.HasScreenshot != 0, ActionOrNull(status.FirstPendingAction),
+            Marshal.PtrToStringUTF8((nint)status.FirstPendingNodeId) ?? string.Empty,
+            ActionOrNull(status.FirstEventAction),
+            Marshal.PtrToStringUTF8((nint)status.FirstEventNodeId) ?? string.Empty);
+    }
+
+    public unsafe GuaResetReport Reset(GuaResetOptions? options = null)
+    {
+        ThrowIfDisposed();
+        options ??= new GuaResetOptions();
+        var nativeOptions = new Native.GuaNativeResetOptions
+        {
+            StructSize = (uint)sizeof(Native.GuaNativeResetOptions),
+            Flags = (uint)options.Targets,
+            Strict = options.Strict ? 1 : 0,
+            ExpectedSessionEpoch = options.ExpectedSessionEpoch ?? 0,
+        };
+        Native.GuaNativeResetReport report = default;
+        report.StructSize = (uint)sizeof(Native.GuaNativeResetReport);
+        var result = Native.gua_reset_context(_handle, in nativeOptions, &report);
+        if (result == (int)GuaResetResult.InvalidArgument)
+        {
+            throw new ArgumentException("Invalid Gua reset options.", nameof(options));
+        }
+        return new GuaResetReport(
+            (GuaResetResult)result, report.PreviousSessionEpoch, report.SessionEpoch,
+            report.PendingRequestCount, report.InFlightRequestCount, report.UnconsumedEventCount,
+            report.DiscardedNodeCount, report.DiscardedPendingRequestCount, report.DiscardedInFlightRequestCount,
+            report.DiscardedEventCount, report.DiscardedLogCount, report.DiscardedScreenshot != 0,
+            ActionOrNull(report.FirstPendingAction), Marshal.PtrToStringUTF8((nint)report.FirstPendingNodeId) ?? string.Empty,
+            ActionOrNull(report.FirstEventAction), Marshal.PtrToStringUTF8((nint)report.FirstEventNodeId) ?? string.Empty);
+    }
+
+    private static GuaActionType? ActionOrNull(int action) => action == 0 ? null : (GuaActionType)action;
+
     public void AddLog(GuaLogLevel level, string message)
     {
         ThrowIfDisposed();
