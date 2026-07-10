@@ -1,9 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <PackageReference Include="Gua.Testing" Version="$(GuaPackageVersion)" />
+    <PackageReference Include="Gua.Testing" Version="$(GuaPackageVersion)" Condition="'$(UseProjectReferences)' != 'true'" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="NUnit" Version="4.3.2" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseProjectReferences)' == 'true'">
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Testing\Gua.Testing.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

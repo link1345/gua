@@ -239,6 +239,20 @@ public:
         return copy_json(gua_copy_screenshot_json);
     }
 
+    void configure_diagnostics(std::uint32_t history_limit, std::string_view environment_json = "{}")
+    {
+        environment_buffer_.assign(environment_json);
+        if (gua_set_diagnostics_history_limit(context_, history_limit) == 0 ||
+            gua_set_diagnostics_environment_json(context_, environment_buffer_.c_str()) == 0) {
+            throw std::invalid_argument("Invalid Gua diagnostics configuration");
+        }
+    }
+
+    [[nodiscard]] std::string diagnostics_json() const
+    {
+        return copy_json(gua_copy_diagnostics_json);
+    }
+
     [[nodiscard]] bool enqueue_click(std::string_view node_id)
     {
         id_buffer_.assign(node_id);
@@ -359,6 +373,7 @@ private:
     mutable std::string key_buffer_;
     mutable std::string message_buffer_;
     std::string screenshot_buffer_;
+    std::string environment_buffer_;
     std::string screen_buffer_;
 };
 

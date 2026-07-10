@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/diagnostics.schema.json",
+  "title": "Gua diagnostics snapshot",
+  "type": "object",
+  "required": ["schemaVersion", "sessionEpoch", "frameSequence", "revision", "historyLimit", "pendingRequestCount", "inFlightRequestCount", "unconsumedEventCount", "environment", "uiTree", "pendingRequests", "operations", "events", "logs", "screenshot"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
+    "frameSequence": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "historyLimit": { "type": "integer", "minimum": 0 },
+    "pendingRequestCount": { "type": "integer", "minimum": 0 },
+    "inFlightRequestCount": { "type": "integer", "minimum": 0 },
+    "unconsumedEventCount": { "type": "integer", "minimum": 0 },
+    "environment": { "type": "object" },
+    "uiTree": { "$ref": "ui-tree.schema.json" },
+    "pendingRequests": { "type": "array", "items": { "$ref": "#/$defs/request" } },
+    "operations": { "type": "array", "items": { "$ref": "#/$defs/history" } },
+    "events": { "type": "array", "items": { "$ref": "#/$defs/history" } },
+    "logs": { "$ref": "logs.schema.json" },
+    "screenshot": { "oneOf": [{ "type": "null" }, { "$ref": "screenshot.schema.json" }] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] },
+    "request": { "type": "object", "required": ["requestId", "action", "nodeId", "value", "sensitive"], "properties": { "requestId": { "type": "integer", "minimum": 1 }, "action": { "$ref": "#/$defs/action" }, "nodeId": { "type": "string" }, "value": { "type": "string" }, "sensitive": { "type": "boolean" } }, "additionalProperties": false },
+    "history": { "type": "object", "required": ["sequence", "phase", "requestId", "action", "nodeId", "status", "errorCode", "value", "sensitive"], "properties": { "sequence": { "type": "integer", "minimum": 1 }, "phase": { "enum": ["enqueued", "consumed", "observed"] }, "requestId": { "type": "integer", "minimum": 0 }, "action": { "$ref": "#/$defs/action" }, "nodeId": { "type": "string" }, "status": { "type": "integer" }, "errorCode": { "type": "integer" }, "value": { "type": "string" }, "sensitive": { "type": "boolean" } }, "additionalProperties": false }
+  }
+}

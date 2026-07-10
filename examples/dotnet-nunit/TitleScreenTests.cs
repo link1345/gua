@@ -221,6 +221,103 @@ public sealed class TitleScreenTests
     }
 
     [Test]
+    public void DiagnosticsWriterCreatesVersionedRedactedArtifacts()
+    {
+        using var ui = new GuaContext();
+        ui.ConfigureDiagnostics(2, "{\"bridge\":\"local\"}");
+        ui.BeginFrame("form");
+        ui.RegisterNode(new GuaNodeDescriptor("password", "textbox", "Password", new GuaBounds(0, 0, 100, 20), Value: string.Empty));
+        ui.EndFrame();
+        var before = ui.GetUiTreeJson();
+        var requestId = GuaAssertions.GetById(ui, "password").SetValue("secret-marker", sensitive: true);
+        Assert.That(ui.TryConsumeAction(GuaActionType.SetValue, "password", out var request), Is.True);
+        Assert.That(ui.EmitActionResult(new GuaActionEvent(requestId, GuaActionType.SetValue, true,
+            GuaActionError.None, "password", request.Value!, true)), Is.True);
+        Assert.That(ui.TryPollActionEvent(requestId, out _), Is.True);
+        ui.BeginFrame("form");
+        ui.RegisterNode(new GuaNodeDescriptor("password", "textbox", "Password changed", new GuaBounds(0, 0, 100, 20), Value: string.Empty));
+        ui.EndFrame();
+
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-diagnostics", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var capture = GuaDiagnosticWriter.Capture(ui, "intentional failure", new GuaDiagnosticOptions
+            {
+                TestName = "diagnostics/redaction",
+                OutputDirectory = output,
+                Environment = new Dictionary<string, string> { ["bridge"] = "in-process" },
+            }, before);
+            Assert.That(capture.Error, Is.Null);
+            Assert.That(capture.ArtifactPath, Is.Not.Null);
+            var path = capture.ArtifactPath!;
+            Assert.Multiple(() =>
+            {
+                Assert.That(File.Exists(Path.Combine(path, "failure-summary.txt")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "environment.json")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "ui-tree.json")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "ui-tree.diff.json")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "events.jsonl")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "operations.jsonl")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "pending-requests.json")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "logs.json")), Is.True);
+                Assert.That(File.Exists(Path.Combine(path, "screenshot.png")), Is.False);
+                Assert.That(string.Join("\n", Directory.EnumerateFiles(path).Select(File.ReadAllText)), Does.Not.Contain("secret-marker"));
+                Assert.That(File.ReadAllText(Path.Combine(path, "ui-tree.diff.json")), Does.Contain("password").And.Contain("changed"));
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
+    public void AssertionAndWaitFailuresCaptureArtifactsAndPreserveFailureOnWriterError()
+    {
+        using var ui = new GuaContext();
+        ui.BeginFrame("test");
+        ui.RegisterNode(new GuaNodeDescriptor("status", "status", "Status", new GuaBounds(0, 0, 1, 1), Visible: false));
+        ui.EndFrame();
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-diagnostics", Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (GuaAssertionScope.Use(new GuaAssertionOptions
+            {
+                Diagnostics = new GuaDiagnosticOptions { TestName = "assertion", OutputDirectory = output },
+            }))
+            {
+                var assertion = Assert.Throws<GuaAssertionException>(() => GuaAssertions.GetById(ui, "status").ToBeVisible());
+                Assert.That(assertion!.Message, Does.Contain("Gua diagnostics:"));
+            }
+            using (GuaAssertionScope.Use(new GuaAssertionOptions
+            {
+                Diagnostics = new GuaDiagnosticOptions { TestName = "wait", OutputDirectory = output },
+            }))
+            {
+                var timeout = Assert.ThrowsAsync<GuaAssertionException>(async () =>
+                    await GuaAssertions.WaitForVisibleAsync(ui, "status", TimeSpan.FromMilliseconds(5), TimeSpan.FromMilliseconds(1)));
+                Assert.That(timeout!.Message, Does.Contain("Gua diagnostics:"));
+            }
+
+            var blockingFile = Path.Combine(output, "not-a-directory");
+            Directory.CreateDirectory(output);
+            File.WriteAllText(blockingFile, "block");
+            using (GuaAssertionScope.Use(new GuaAssertionOptions
+            {
+                Diagnostics = new GuaDiagnosticOptions { TestName = "writer-failure", OutputDirectory = blockingFile },
+            }))
+            {
+                var original = Assert.Throws<GuaAssertionException>(() => GuaAssertions.GetById(ui, "status").ToBeVisible());
+                Assert.That(original!.Message, Does.StartWith("Expected Gua node").And.Contain("capture error"));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task AsyncWaitsObserveStateTextValueAndRemovalWithoutFixedSleeps()
     {
         using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);

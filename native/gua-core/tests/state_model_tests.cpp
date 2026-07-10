@@ -141,6 +141,16 @@ int main()
     assert(event.sensitive == 1);
     assert(std::strlen(event.value) == 0);
 
+    assert(gua_set_diagnostics_history_limit(context, 2) == 1);
+    assert(gua_set_diagnostics_environment_json(context, "{\"testName\":\"native-state\"}") == 1);
+    const std::string diagnostics = gua_get_diagnostics_json(context);
+    assert(diagnostics.find("\"schemaVersion\":1") != std::string::npos);
+    assert(diagnostics.find("\"historyLimit\":2") != std::string::npos);
+    assert(diagnostics.find("\"testName\":\"native-state\"") != std::string::npos);
+    assert(diagnostics.find("\"screenshot\":null") != std::string::npos);
+    assert(diagnostics.find("secret-marker") == std::string::npos);
+    assert(diagnostics.find("\"sensitive\":true") != std::string::npos);
+
     gua_action_request_t in_flight { sizeof(gua_action_request_t) };
     assert(gua_consume_action_request(context, GUA_ACTION_FOCUS, "name", &in_flight) == 1);
 
@@ -183,6 +193,9 @@ int main()
     assert(gua_get_context_status(context, &status) == 1);
     assert(status.session_epoch == 2 && status.frame_sequence == 0 && status.revision == 0);
     assert(status.node_count == 0 && status.pending_request_count == 0 && status.unconsumed_event_count == 0);
+    const std::string reset_diagnostics = gua_get_diagnostics_json(context);
+    assert(reset_diagnostics.find("\"operations\":[]") != std::string::npos);
+    assert(reset_diagnostics.find("\"events\":[]") != std::string::npos);
     assert(std::string(gua_get_ui_tree_json(context)).find("\"sessionEpoch\":2") != std::string::npos);
     char other_id[16] {};
     assert(gua_find_node_by_id(other, "other", other_id, sizeof(other_id)) == 1);

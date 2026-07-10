@@ -87,6 +87,7 @@ public static partial class GuaAssertions
         if (stableFrames <= 0) throw new ArgumentOutOfRangeException(nameof(stableFrames));
         var (limit, interval) = ValidateWait(timeout, pollInterval);
         var stopwatch = Stopwatch.StartNew();
+        var initialUiTreeJson = context.GetUiTreeJson();
         ulong? sessionEpoch = null;
         ulong? lastFrame = null;
         ulong? stableRevision = null;
@@ -118,7 +119,7 @@ public static partial class GuaAssertions
         }
         while (true);
 
-        Fail($"Timed out after {limit:g} (elapsed {stopwatch.Elapsed:g}) waiting for {stableFrames} distinct stable semantic frames; observed {observedStableFrames}. Last frameSequence={Format(last?.FrameSequence)}, revision={Format(last?.Revision)}, sessionEpoch={Format(last?.SessionEpoch)}.");
+        Fail(context, $"Timed out after {limit:g} (elapsed {stopwatch.Elapsed:g}) waiting for {stableFrames} distinct stable semantic frames; observed {observedStableFrames}. Last frameSequence={Format(last?.FrameSequence)}, revision={Format(last?.Revision)}, sessionEpoch={Format(last?.SessionEpoch)}.", initialUiTreeJson);
     }
 
     public static void WaitForStableSnapshot(IGuaContext context, int stableFrames = 3, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
@@ -132,6 +133,7 @@ public static partial class GuaAssertions
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         var (limit, interval) = ValidateWait(timeout, pollInterval);
         var stopwatch = Stopwatch.StartNew();
+        var initialUiTreeJson = context.GetUiTreeJson();
         WaitSnapshot? last = null;
         GuaNodeSnapshot? node = null;
         do
@@ -145,7 +147,7 @@ public static partial class GuaAssertions
         }
         while (true);
 
-        Fail($"Timed out after {limit:g} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node id '{id}' to {description}. Last state: {DescribeNode(node)}; frameSequence={Format(last?.FrameSequence)}, revision={Format(last?.Revision)}.");
+        Fail(context, $"Timed out after {limit:g} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node id '{id}' to {description}. Last state: {DescribeNode(node)}; frameSequence={Format(last?.FrameSequence)}, revision={Format(last?.Revision)}.", initialUiTreeJson);
         throw new UnreachableException();
     }
 

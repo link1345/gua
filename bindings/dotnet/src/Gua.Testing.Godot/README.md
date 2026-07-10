@@ -30,3 +30,7 @@ path such as `game/scenes/village_list.tscn`. Scene paths are matched against
 common logical screen names derived from the file name, and also accept a screen
 change from the previous value because Godot adapters often publish logical
 screen names instead of resource paths.
+
+For failure artifacts, `host.CreateDiagnosticOptions(testName)` includes the
+Godot process id, bridge URL, and project metadata. The remote context captures
+the same versioned diagnostics JSON as an in-process context.

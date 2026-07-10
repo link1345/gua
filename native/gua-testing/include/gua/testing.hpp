@@ -3,8 +3,12 @@
 #include "gua/gua.h"
 
 #include <chrono>
+#include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -14,6 +18,52 @@
 #include <vector>
 
 namespace gua::testing {
+
+struct DiagnosticOptions {
+    std::filesystem::path output_directory = std::filesystem::path("artifacts") / "gua";
+    std::string test_name = "native-test";
+};
+
+inline thread_local std::optional<DiagnosticOptions> current_diagnostics;
+
+class DiagnosticScope {
+public:
+    explicit DiagnosticScope(DiagnosticOptions options) : previous_(current_diagnostics)
+    {
+        current_diagnostics = std::move(options);
+    }
+    ~DiagnosticScope() { current_diagnostics = previous_; }
+private:
+    std::optional<DiagnosticOptions> previous_;
+};
+
+[[noreturn]] inline void fail(gua_context_t* context, std::string message)
+{
+    if (!current_diagnostics.has_value() || context == nullptr) throw std::runtime_error(message);
+    std::filesystem::path directory;
+    try {
+        std::string name = current_diagnostics->test_name;
+        for (char& ch : name) if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '-' && ch != '_') ch = '_';
+        static std::atomic<unsigned long long> failure_id { 1 };
+        directory = current_diagnostics->output_directory / name /
+            (std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count()) + "-" + std::to_string(failure_id++));
+        std::filesystem::create_directories(directory);
+        const int required = gua_copy_diagnostics_json(context, nullptr, 0);
+        std::string json(static_cast<std::size_t>(required), '\0');
+        gua_copy_diagnostics_json(context, json.data(), required);
+        json.resize(static_cast<std::size_t>(required - 1));
+        std::ofstream diagnostics_file(directory / "diagnostics.json", std::ios::binary);
+        diagnostics_file.exceptions(std::ios::badbit | std::ios::failbit);
+        diagnostics_file << json;
+        std::ofstream summary_file(directory / "failure-summary.txt", std::ios::binary);
+        summary_file.exceptions(std::ios::badbit | std::ios::failbit);
+        summary_file << message << '\n';
+    } catch (const std::exception& error) {
+        throw std::runtime_error(message + " Gua diagnostics capture error: " + error.what());
+    }
+    throw std::runtime_error(message + " Gua diagnostics: " + directory.string());
+}
 
 class Locator {
 public:
@@ -37,7 +87,7 @@ public:
     {
         const gua_node_state_t state = read_state();
         if (state.visible == 0) {
-            throw std::runtime_error("Expected Gua node to be visible: " + id_);
+            fail(context_, "Expected Gua node to be visible: " + id_);
         }
     }
 
@@ -45,14 +95,14 @@ public:
     {
         const gua_node_state_t state = read_state();
         if (state.enabled == 0) {
-            throw std::runtime_error("Expected Gua node to be enabled: " + id_);
+            fail(context_, "Expected Gua node to be enabled: " + id_);
         }
     }
 
     void click() const
     {
         if (gua_enqueue_click(context_, id_.c_str()) == 0) {
-            throw std::runtime_error("Failed to click Gua node: " + id_);
+            fail(context_, "Failed to click Gua node: " + id_);
         }
     }
 
@@ -84,7 +134,7 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         } while (std::chrono::steady_clock::now() < deadline);
-        throw std::runtime_error("Timed out waiting for Gua action completion: " + id_);
+        fail(context_, "Timed out waiting for Gua action completion: " + id_);
     }
 
     void wait_for(

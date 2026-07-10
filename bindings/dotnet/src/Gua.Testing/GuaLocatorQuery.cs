@@ -31,12 +31,12 @@ public sealed record GuaLocatorQuery
     {
         var result = Execute();
         if (result.Matches.Count == 0)
-            GuaAssertions.Fail($"Strict Gua selector matched no nodes: {Describe()}.");
+            GuaAssertions.Fail(_context, $"Strict Gua selector matched no nodes: {Describe()}.");
         if (result.Matches.Count > 1)
         {
             var candidates = string.Join("; ", result.Matches.Select(match =>
                 $"{match.Id} ({match.Role}, '{match.Label}', parentId='{match.ParentId ?? "<root>"}')"));
-            GuaAssertions.Fail($"Strict Gua selector matched {result.Matches.Count} nodes: {Describe()}. Candidates: {candidates}. Narrow the scope with Within(...) or add stable id/state filters.");
+            GuaAssertions.Fail(_context, $"Strict Gua selector matched {result.Matches.Count} nodes: {Describe()}. Candidates: {candidates}. Narrow the scope with Within(...) or add stable id/state filters.");
         }
         return new GuaNodeExpectation(_context, result.Matches[0].Id, Describe());
     }
@@ -45,7 +45,7 @@ public sealed record GuaLocatorQuery
     {
         var actual = Execute().Matches.Count;
         if (actual != expected)
-            GuaAssertions.Fail($"Expected selector {Describe()} to match {expected} nodes, but matched {actual}.");
+            GuaAssertions.Fail(_context, $"Expected selector {Describe()} to match {expected} nodes, but matched {actual}.");
         return this;
     }
 
@@ -66,7 +66,7 @@ public sealed record GuaLocatorQuery
             result = new GuaQueryResult(true, [new GuaNodeQueryMatch(id, "legacy", "legacy", null)]);
         }
         if (!result.Valid)
-            GuaAssertions.Fail($"Invalid Gua selector {Describe()}: {result.Error ?? "unknown syntax error"}");
+            GuaAssertions.Fail(_context, $"Invalid Gua selector {Describe()}: {result.Error ?? "unknown syntax error"}");
         return result;
     }
 

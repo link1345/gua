@@ -4,6 +4,8 @@ public interface IGuaContext
 {
     string GetUiTreeJson();
 
+    string GetDiagnosticsJson() => throw new NotSupportedException("This Gua context does not support diagnostics capture.");
+
     GuaContextStatus GetContextStatus() => throw new NotSupportedException("This Gua context does not support status inspection.");
 
     GuaResetReport Reset(GuaResetOptions? options = null) => throw new NotSupportedException("This Gua context does not support reset.");

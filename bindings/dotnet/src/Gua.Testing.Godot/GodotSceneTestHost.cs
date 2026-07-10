@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Gua.Core;
+using Gua.Testing;
 
 namespace Gua.Testing.Godot;
 
@@ -20,6 +21,23 @@ public sealed class GodotSceneTestHost : IDisposable
     public IGuaContext Context { get; }
 
     public int ProcessId => _process.Id;
+
+    public GuaDiagnosticOptions CreateDiagnosticOptions(string testName, string? outputDirectory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(testName);
+        return new GuaDiagnosticOptions
+        {
+            TestName = testName,
+            OutputDirectory = outputDirectory ?? Path.Combine("artifacts", "gua"),
+            Environment = new Dictionary<string, string>
+            {
+                ["host"] = "Godot",
+                ["processId"] = ProcessId.ToString(),
+                ["bridgeUrl"] = _options.BridgeUrl,
+                ["projectPath"] = _options.ProjectPath ?? string.Empty,
+            },
+        };
+    }
 
     public static GodotSceneTestHost Load(string scenePath, GodotSceneTestHostOptions? options = null)
     {

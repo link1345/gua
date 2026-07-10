@@ -32,3 +32,8 @@ cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target gua
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 ```
+
+`GuaContext.ConfigureDiagnostics` sets the bounded retained-history limit and
+environment JSON. `GetDiagnosticsJson` returns the versioned semantic failure
+snapshot without draining the event queue; sensitive action values are already
+redacted by the native core.

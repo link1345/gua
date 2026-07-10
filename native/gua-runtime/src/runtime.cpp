@@ -19,6 +19,7 @@ struct gua_runtime_t {
     std::string ui_tree_json;
     std::string logs_json;
     std::string screenshot_json;
+    std::string diagnostics_json;
 };
 
 std::string escape_json(std::string_view value);
@@ -55,6 +56,12 @@ std::string copy_screenshot_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     return gua_get_screenshot_json(runtime->context);
+}
+
+std::string copy_diagnostics_json(gua_runtime_t* runtime)
+{
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_get_diagnostics_json(runtime->context);
 }
 
 std::string status_json(gua_runtime_t* runtime)
@@ -258,6 +265,33 @@ extern "C" int gua_runtime_copy_screenshot_json(gua_runtime_t* runtime, char* ou
     return copy_json_string(copy_screenshot_json(runtime), out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_set_diagnostics_history_limit(gua_runtime_t* runtime, uint32_t history_limit)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_set_diagnostics_history_limit(runtime->context, history_limit);
+}
+
+extern "C" int gua_runtime_set_diagnostics_environment_json(gua_runtime_t* runtime, const char* environment_json)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_set_diagnostics_environment_json(runtime->context, environment_json);
+}
+
+extern "C" const char* gua_runtime_get_diagnostics_json(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return "{}";
+    runtime->diagnostics_json = copy_diagnostics_json(runtime);
+    return runtime->diagnostics_json.c_str();
+}
+
+extern "C" int gua_runtime_copy_diagnostics_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    return copy_json_string(copy_diagnostics_json(runtime), out_json, out_json_size);
+}
+
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)
 {
     if (!valid_runtime(runtime)) {
@@ -445,6 +479,9 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_screenshot_json = [runtime] {
             return copy_screenshot_json(runtime);
+        },
+        .get_diagnostics_json = [runtime] {
+            return copy_diagnostics_json(runtime);
         },
         .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {
             gua_selector_v1_t native {

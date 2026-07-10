@@ -132,7 +132,7 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["get_screenshot", "get_logs", "get_context_status", "poll_events"]
+          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_context_status", "poll_events"]
         }
       }
     }

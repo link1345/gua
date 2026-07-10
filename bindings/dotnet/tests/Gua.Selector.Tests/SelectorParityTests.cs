@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Gua.Core;
 using Gua.Testing;
 using Gua.Testing.Godot;
@@ -46,6 +47,13 @@ public sealed class SelectorParityTests
             {
                 Assert.That(local.Query(invalid).Valid, Is.False);
                 Assert.That(remote.Query(invalid).Valid, Is.False);
+            });
+            using var diagnostics = JsonDocument.Parse(remote.GetDiagnosticsJson());
+            Assert.Multiple(() =>
+            {
+                Assert.That(diagnostics.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(1));
+                Assert.That(diagnostics.RootElement.GetProperty("uiTree").GetProperty("screen").GetString(), Is.EqualTo("fixture"));
+                Assert.That(diagnostics.RootElement.GetProperty("screenshot").ValueKind, Is.EqualTo(JsonValueKind.Null));
             });
         }
         finally

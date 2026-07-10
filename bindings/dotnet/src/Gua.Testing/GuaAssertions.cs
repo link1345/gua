@@ -84,6 +84,16 @@ public static partial class GuaAssertions
         throw new GuaAssertionException(message);
     }
 
+    internal static void Fail(IGuaContext context, string message, string? initialUiTreeJson = null)
+    {
+        var diagnostics = Options.Diagnostics;
+        var suffix = diagnostics is null
+            ? string.Empty
+            : GuaDiagnosticWriter.Capture(context, message, diagnostics, initialUiTreeJson).MessageSuffix;
+        Options.Fail(message + suffix);
+        throw new GuaAssertionException(message + suffix);
+    }
+
     internal static GuaNodeSnapshot? TryGetSnapshot(IGuaContext context, string id)
     {
         using var document = JsonDocument.Parse(context.GetUiTreeJson());
@@ -180,6 +190,7 @@ public static partial class GuaAssertions
 
     private static GuaNodeExpectation WaitForQuery(IGuaContext context, Func<GuaNodeExpectation> query, string description, TimeSpan? timeout, TimeSpan? pollInterval)
     {
+        var initialUiTreeJson = context.GetUiTreeJson();
         var stopwatch = Stopwatch.StartNew();
         var limit = timeout ?? TimeSpan.FromSeconds(1);
         var interval = pollInterval ?? TimeSpan.FromMilliseconds(10);
@@ -201,7 +212,7 @@ public static partial class GuaAssertions
         while (stopwatch.Elapsed < limit);
 
         var last = ReadWaitSnapshot(context);
-        Fail($"Timed out after {FormatTimeout(timeout)} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node by {description}. Last frameSequence={Format(last.FrameSequence)}, revision={Format(last.Revision)}. {lastException?.Message}");
+        Fail(context, $"Timed out after {FormatTimeout(timeout)} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node by {description}. Last frameSequence={Format(last.FrameSequence)}, revision={Format(last.Revision)}. {lastException?.Message}", initialUiTreeJson);
         throw new UnreachableException();
     }
 
@@ -232,7 +243,7 @@ public sealed class GuaNodeExpectation
     {
         if (GuaAssertions.TryGetSnapshot(_context, _id) is null)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -242,7 +253,7 @@ public sealed class GuaNodeExpectation
     {
         if (GuaAssertions.TryGetSnapshot(_context, _id) is not null)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} not to exist. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} not to exist. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -253,7 +264,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (!snapshot.Visible)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to be visible, but it was hidden. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to be visible, but it was hidden. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -264,7 +275,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (snapshot.Visible)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to be hidden, but it was visible. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to be hidden, but it was visible. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -275,7 +286,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (!snapshot.Enabled)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to be enabled, but it was disabled. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to be enabled, but it was disabled. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -286,7 +297,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (snapshot.Enabled)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to be disabled, but it was enabled. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to be disabled, but it was enabled. {GuaAssertions.DescribeTree(_context)}");
         }
 
         return this;
@@ -298,7 +309,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (!string.Equals(snapshot.Role, role, StringComparison.Ordinal))
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to have role '{role}', but it had role '{snapshot.Role}'.");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have role '{role}', but it had role '{snapshot.Role}'.");
         }
 
         return this;
@@ -310,7 +321,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (!string.Equals(snapshot.Label, label, StringComparison.Ordinal))
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to have label '{label}', but it had label '{snapshot.Label}'.");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have label '{label}', but it had label '{snapshot.Label}'.");
         }
 
         return this;
@@ -322,7 +333,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GetSnapshotOrFail();
         if (!snapshot.Actions.Contains(action, StringComparer.Ordinal))
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to expose action '{action}', but actions were [{string.Join(", ", snapshot.Actions)}].");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to expose action '{action}', but actions were [{string.Join(", ", snapshot.Actions)}].");
         }
 
         return this;
@@ -336,7 +347,7 @@ public sealed class GuaNodeExpectation
 
         if (!_context.EnqueueClick(_id))
         {
-            GuaAssertions.Fail(
+            GuaAssertions.Fail(_context,
                 $"Failed to enqueue click for Gua node {_description}. Click() records a request; the game adapter or GuaTestHost must consume it and emit a click event.");
         }
 
@@ -361,7 +372,7 @@ public sealed class GuaNodeExpectation
         }
         while (DateTime.UtcNow < deadline);
 
-        GuaAssertions.Fail($"Timed out waiting for click event from Gua node {_description}. The adapter consumed no click request for '{_id}'.");
+        GuaAssertions.Fail(_context, $"Timed out waiting for click event from Gua node {_description}. The adapter consumed no click request for '{_id}'.");
         return this;
     }
 
@@ -389,13 +400,13 @@ public sealed class GuaNodeExpectation
         {
             if (_context.TryPollActionEvent(requestId, out var e))
             {
-                if (!e.Succeeded) GuaAssertions.Fail($"Gua action {e.Action} failed for {_description}: {e.Error}.");
+                if (!e.Succeeded) GuaAssertions.Fail(_context, $"Gua action {e.Action} failed for {_description}: {e.Error}.");
                 return this;
             }
             Thread.Sleep(10);
         }
         while (Stopwatch.GetTimestamp() < deadline);
-        GuaAssertions.Fail($"Timed out waiting for action request {requestId} on Gua node {_description}.");
+        GuaAssertions.Fail(_context, $"Timed out waiting for action request {requestId} on Gua node {_description}.");
         return this;
     }
 
@@ -453,7 +464,7 @@ public sealed class GuaNodeExpectation
         var snapshot = GuaAssertions.TryGetSnapshot(_context, _id);
         if (snapshot is null)
         {
-            GuaAssertions.Fail($"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
             throw new UnreachableException();
         }
 
@@ -466,7 +477,7 @@ public sealed class GuaNodeExpectation
         ToBeEnabled();
         ToHaveAction(action);
         var error = _context.EnqueueAction(request, out var requestId);
-        if (error != GuaActionError.None) GuaAssertions.Fail($"Failed to enqueue {action} for Gua node {_description}: {error}.");
+        if (error != GuaActionError.None) GuaAssertions.Fail(_context, $"Failed to enqueue {action} for Gua node {_description}: {error}.");
         return requestId;
     }
 }

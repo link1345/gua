@@ -68,6 +68,18 @@ struct Screenshot {
     int height = 0;
 };
 
+struct HistoryEntry {
+    unsigned long long sequence;
+    std::string phase;
+    unsigned long long request_id;
+    int action;
+    std::string node_id;
+    int status;
+    int error_code;
+    std::string value;
+    bool sensitive;
+};
+
 const char* log_level_name(int level)
 {
     switch (level) {
@@ -267,11 +279,17 @@ struct gua_context_t {
     std::string json_cache;
     std::string logs_json_cache;
     std::string screenshot_json_cache;
+    std::string diagnostics_json_cache;
     unsigned long long frame_sequence = 0;
     unsigned long long revision = 0;
     unsigned long long next_request_id = 1;
     unsigned long long session_epoch = 1;
     std::string previous_semantic_snapshot;
+    std::deque<HistoryEntry> operation_history;
+    std::deque<HistoryEntry> event_history;
+    std::size_t diagnostics_history_limit = 100;
+    unsigned long long next_history_sequence = 1;
+    std::string diagnostics_environment_json = "{}";
 };
 
 namespace {
@@ -415,6 +433,74 @@ std::string build_screenshot_json(const gua_context_t& ctx)
     json += std::to_string(ctx.screenshot.height);
     json += "}";
     return json;
+}
+
+void trim_history(std::deque<HistoryEntry>& history, std::size_t limit)
+{
+    while (history.size() > limit) history.pop_front();
+}
+
+void append_history(gua_context_t& ctx, std::deque<HistoryEntry>& history, std::string phase,
+    unsigned long long request_id, int action, const std::string& node_id, int status,
+    int error_code, const std::string& value, bool sensitive)
+{
+    if (ctx.diagnostics_history_limit == 0) return;
+    history.push_back(HistoryEntry { ctx.next_history_sequence++, std::move(phase), request_id, action,
+        node_id, status, error_code, sensitive ? "" : value, sensitive });
+    trim_history(history, ctx.diagnostics_history_limit);
+    ctx.diagnostics_json_cache.clear();
+}
+
+std::string build_request_json(const ActionRequest& request)
+{
+    return "{\"requestId\":" + std::to_string(request.request_id) +
+        ",\"action\":\"" + action_name(request.action) + "\",\"nodeId\":\"" + escape_json(request.node_id) +
+        "\",\"value\":\"" + escape_json(request.sensitive ? "" : request.value) +
+        "\",\"sensitive\":" + (request.sensitive ? "true" : "false") + "}";
+}
+
+std::string build_history_json(const std::deque<HistoryEntry>& history)
+{
+    std::string json = "[";
+    for (std::size_t i = 0; i < history.size(); ++i) {
+        if (i > 0) json += ",";
+        const auto& entry = history[i];
+        json += "{\"sequence\":" + std::to_string(entry.sequence) + ",\"phase\":\"" + escape_json(entry.phase) +
+            "\",\"requestId\":" + std::to_string(entry.request_id) + ",\"action\":\"" + action_name(entry.action) +
+            "\",\"nodeId\":\"" + escape_json(entry.node_id) + "\",\"status\":" + std::to_string(entry.status) +
+            ",\"errorCode\":" + std::to_string(entry.error_code) + ",\"value\":\"" + escape_json(entry.value) +
+            "\",\"sensitive\":" + (entry.sensitive ? "true" : "false") + "}";
+    }
+    return json + "]";
+}
+
+std::string build_diagnostics_json(const gua_context_t& ctx)
+{
+    std::string pending = "[";
+    bool comma = false;
+    for (const auto& request : ctx.action_requests) {
+        if (comma) pending += ",";
+        pending += build_request_json(request);
+        comma = true;
+    }
+    for (const auto& request : ctx.consumed_requests) {
+        if (comma) pending += ",";
+        pending += build_request_json(request);
+        comma = true;
+    }
+    pending += "]";
+    return "{\"schemaVersion\":1,\"sessionEpoch\":" + std::to_string(ctx.session_epoch) +
+        ",\"frameSequence\":" + std::to_string(ctx.frame_sequence) + ",\"revision\":" + std::to_string(ctx.revision) +
+        ",\"historyLimit\":" + std::to_string(ctx.diagnostics_history_limit) +
+        ",\"pendingRequestCount\":" + std::to_string(ctx.action_requests.size()) +
+        ",\"inFlightRequestCount\":" + std::to_string(ctx.consumed_requests.size()) +
+        ",\"unconsumedEventCount\":" + std::to_string(ctx.events.size()) +
+        ",\"environment\":" + ctx.diagnostics_environment_json +
+        ",\"uiTree\":" + build_ui_tree_json(ctx) + ",\"pendingRequests\":" + pending +
+        ",\"operations\":" + build_history_json(ctx.operation_history) +
+        ",\"events\":" + build_history_json(ctx.event_history) +
+        ",\"logs\":" + build_logs_json(ctx) + ",\"screenshot\":" +
+        (ctx.screenshot.data_uri.empty() ? "null" : build_screenshot_json(ctx)) + "}";
 }
 
 } // namespace
@@ -597,6 +683,45 @@ extern "C" int gua_copy_screenshot_json(gua_context_t* ctx, char* out_json, int 
 
     const std::lock_guard lock(ctx->mutex);
     return copy_json_string(build_screenshot_json(*ctx), out_json, out_json_size);
+}
+
+extern "C" int gua_set_diagnostics_history_limit(gua_context_t* ctx, uint32_t history_limit)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    ctx->diagnostics_history_limit = history_limit;
+    trim_history(ctx->operation_history, history_limit);
+    trim_history(ctx->event_history, history_limit);
+    ctx->diagnostics_json_cache.clear();
+    return 1;
+}
+
+extern "C" int gua_set_diagnostics_environment_json(gua_context_t* ctx, const char* environment_json)
+{
+    if (ctx == nullptr || environment_json == nullptr) return 0;
+    const std::string value(environment_json);
+    const auto first = value.find_first_not_of(" \t\r\n");
+    const auto last = value.find_last_not_of(" \t\r\n");
+    if (first == std::string::npos || value[first] != '{' || value[last] != '}') return 0;
+    const std::lock_guard lock(ctx->mutex);
+    ctx->diagnostics_environment_json = value;
+    ctx->diagnostics_json_cache.clear();
+    return 1;
+}
+
+extern "C" const char* gua_get_diagnostics_json(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return "{}";
+    const std::lock_guard lock(ctx->mutex);
+    ctx->diagnostics_json_cache = build_diagnostics_json(*ctx);
+    return ctx->diagnostics_json_cache.c_str();
+}
+
+extern "C" int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_diagnostics_json(*ctx), out_json, out_json_size);
 }
 
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)
@@ -801,6 +926,8 @@ extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_d
         request_id, descriptor->action, node_id, value, descriptor->delta_x, descriptor->delta_y,
         descriptor->bool_value, key, descriptor->modifiers, descriptor->sensitive != 0, descriptor->scroll_unit
     });
+    append_history(*ctx, ctx->operation_history, "enqueued", request_id, descriptor->action, node_id,
+        GUA_ACTION_ACCEPTED, 0, value, descriptor->sensitive != 0);
     if (out_request_id != nullptr) *out_request_id = request_id;
     return GUA_ACTION_ACCEPTED;
 }
@@ -817,6 +944,8 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
     const ActionRequest value = *request;
     ctx->action_requests.erase(request);
     ctx->consumed_requests.push_back(value);
+    append_history(*ctx, ctx->operation_history, "consumed", value.request_id, value.action, value.node_id,
+        GUA_ACTION_ACCEPTED, 0, value.value, value.sensitive);
     out_request->request_id = value.request_id;
     out_request->action = value.action;
     std::snprintf(out_request->node_id, sizeof(out_request->node_id), "%s", value.node_id.c_str());
@@ -853,6 +982,9 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
         result->sensitive != 0 ? "" : (result->value != nullptr ? result->value : ""),
         result->sensitive != 0,
     });
+    append_history(*ctx, ctx->event_history, "observed", result->request_id, result->action,
+        result->node_id != nullptr ? result->node_id : "", result->status, result->error_code,
+        result->value != nullptr ? result->value : "", result->sensitive != 0);
     if (consumed != ctx->consumed_requests.end()) ctx->consumed_requests.erase(consumed);
     return 1;
 }
@@ -962,6 +1094,12 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         ctx->consumed_requests.clear();
     }
     if ((options->flags & GUA_RESET_EVENTS) != 0U) ctx->events.clear();
+    if ((options->flags & GUA_RESET_HISTORY) != 0U) {
+        ctx->operation_history.clear();
+        ctx->event_history.clear();
+        ctx->next_history_sequence = 1;
+        ctx->diagnostics_json_cache.clear();
+    }
     if ((options->flags & GUA_RESET_LOGS) != 0U) {
         ctx->logs.clear();
         ctx->next_log_sequence = 1;
