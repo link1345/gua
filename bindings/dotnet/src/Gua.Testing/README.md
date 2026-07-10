@@ -50,6 +50,24 @@ GuaAssertions.GetById(ui, "start").ToBeVisible();
 ```
 
 See `examples/dotnet-nunit` for a complete NUnit project with multiple `[Test]`
+methods in one file.
+
+Async condition waits are the primary synchronization API. They use a monotonic
+timeout, honor cancellation, and work with both local `GuaContext` and remote
+`GuaRemoteContext` snapshot polling:
+
+```csharp
+await GuaAssertions.WaitForVisibleAsync(ui, "status", cancellationToken: token);
+await GuaAssertions.WaitForTextAsync(ui, "status", "Ready", pollInterval: TimeSpan.FromMilliseconds(20));
+await GuaAssertions.WaitForValueAsync(ui, "progress", "100");
+await GuaAssertions.WaitForStableSnapshotAsync(ui, stableFrames: 3);
+```
+
+Stable snapshot waiting counts only distinct `frameSequence` values whose
+`revision` remains unchanged; repeatedly polling one stopped frame never
+satisfies the wait. Hidden waiting succeeds for either `visible=false` or a
+removed node. Timeout messages include the condition, last node state, frame,
+and revision. Sync wrappers remain available for compatibility.
 
 Use `GuaTestSession` as the explicit process-reuse boundary. The default reset
 clears semantic nodes, requests, events, and retained history while preserving
@@ -66,7 +84,6 @@ session.Reset(new GuaResetOptions(Strict: true)); // teardown; throws if dirty
 `ResetAsync` provides the same contract for remote contexts and honors
 `CancellationToken`. Remote reset always includes the inspected session epoch,
 so a stale client cannot reset a newer shared runtime session.
-methods in one file.
 Semantic locators are strict: `GetBy*` fails when zero or multiple nodes match,
 while `QueryAll()` is the explicit multi-result API. String matching is exact by
 default and can opt into ordinal contains or ECMAScript regex matching:

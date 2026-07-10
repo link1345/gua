@@ -220,6 +220,56 @@ public sealed class TitleScreenTests
         });
     }
 
+    [Test]
+    public async Task AsyncWaitsObserveStateTextValueAndRemovalWithoutFixedSleeps()
+    {
+        using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);
+        var changing = new SequenceContext(
+            Tree(1, 1, Node(visible: false, enabled: false, text: "Old", value: "1")),
+            Tree(2, 2, Node(visible: true, enabled: true, text: "Ready", value: "2")));
+
+        await GuaAssertions.WaitForVisibleAsync(changing, "status", pollInterval: TimeSpan.FromMilliseconds(1));
+        await GuaAssertions.WaitForEnabledAsync(changing, "status", pollInterval: TimeSpan.FromMilliseconds(1));
+        await GuaAssertions.WaitForTextAsync(changing, "status", "Ready", pollInterval: TimeSpan.FromMilliseconds(1));
+        await GuaAssertions.WaitForValueAsync(changing, "status", "2", pollInterval: TimeSpan.FromMilliseconds(1));
+
+        var removed = new SequenceContext(Tree(1, 1, Node()), Tree(2, 2));
+        await GuaAssertions.WaitForHiddenAsync(removed, "status", pollInterval: TimeSpan.FromMilliseconds(1));
+    }
+
+    [Test]
+    public async Task StableSnapshotCountsDistinctFramesOnly()
+    {
+        var advancing = new SequenceContext(Tree(1, 7, Node()), Tree(1, 7, Node()), Tree(2, 7, Node()), Tree(3, 7, Node()));
+        await GuaAssertions.WaitForStableSnapshotAsync(advancing, 3, pollInterval: TimeSpan.FromMilliseconds(1));
+
+        var stopped = new SequenceContext(Tree(9, 7, Node()));
+        var error = Assert.ThrowsAsync<GuaAssertionException>(async () =>
+            await GuaAssertions.WaitForStableSnapshotAsync(stopped, 3, TimeSpan.FromMilliseconds(15), TimeSpan.FromMilliseconds(1)));
+        Assert.That(error!.Message, Does.Contain("observed 1").And.Contain("frameSequence=9").And.Contain("revision=7"));
+    }
+
+    [Test]
+    public void AsyncWaitHonorsCancellationAndReportsLastSemanticState()
+    {
+        var stopped = new SequenceContext(Tree(4, 8, Node(visible: false, enabled: false, text: "Old", value: "1")));
+        var timeout = Assert.ThrowsAsync<GuaAssertionException>(async () =>
+            await GuaAssertions.WaitForVisibleAsync(stopped, "status", TimeSpan.FromMilliseconds(15), TimeSpan.FromMilliseconds(1)));
+        Assert.That(timeout!.Message, Does.Contain("id 'status'").And.Contain("be visible").And.Contain("visible=False")
+            .And.Contain("frameSequence=4").And.Contain("revision=8"));
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await GuaAssertions.WaitForEnabledAsync(stopped, "status", cancellationToken: cancellation.Token));
+    }
+
+    private static string Tree(ulong frame, ulong revision, string? node = null) =>
+        $$$"""{"schemaVersion":2,"sessionEpoch":1,"frameSequence":{{{frame}}},"revision":{{{revision}}},"screen":"test","nodes":[{{{node}}}]}""";
+
+    private static string Node(bool visible = true, bool enabled = true, string text = "Ready", string value = "2") =>
+        $$$"""{"id":"status","role":"status","label":"Status","text":"{{{text}}}","value":"{{{value}}}","visible":{{{visible.ToString().ToLowerInvariant()}}},"enabled":{{{enabled.ToString().ToLowerInvariant()}}},"bounds":{"x":0,"y":0,"w":1,"h":1},"actions":[],"state":{}}""";
+
     private static void RenderTitle(GuaTestHost host, bool loading)
     {
         host.Frame(loading ? "loading" : "title", frame =>
@@ -247,6 +297,25 @@ public sealed class TitleScreenTests
         public string FindNodeById(string id) => id == "legacy" ? id : throw new InvalidOperationException();
         public string FindNodeByRole(string role, string? name = null) => "legacy";
         public string FindNodeByText(string text) => "legacy";
+        public bool EnqueueClick(string id) => true;
+        public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) { requestId = 1; return GuaActionError.None; }
+        public bool TryPollActionEvent(out GuaActionEvent e) { e = default; return false; }
+        public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) { e = default; return false; }
+        public bool TryPollEvent(out GuaEvent e) { e = default; return false; }
+    }
+
+    private sealed class SequenceContext(params string[] snapshots) : IGuaContext
+    {
+        private int _index;
+        public string GetUiTreeJson()
+        {
+            var index = Math.Min(Interlocked.Increment(ref _index) - 1, snapshots.Length - 1);
+            return snapshots[index];
+        }
+        public GuaNodeState GetNodeState(string id) => new(true, true);
+        public string FindNodeById(string id) => id;
+        public string FindNodeByRole(string role, string? name = null) => "status";
+        public string FindNodeByText(string text) => "status";
         public bool EnqueueClick(string id) => true;
         public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) { requestId = 1; return GuaActionError.None; }
         public bool TryPollActionEvent(out GuaActionEvent e) { e = default; return false; }
