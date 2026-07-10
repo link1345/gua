@@ -147,6 +147,34 @@ typedef struct gua_node_state_v2_t {
 } gua_node_state_v2_t;
 
 enum {
+    GUA_MATCH_EXACT = 0,
+    GUA_MATCH_CONTAINS = 1,
+    GUA_MATCH_REGEX = 2
+};
+
+enum {
+    GUA_FILTER_ANY = 0,
+    GUA_FILTER_FALSE = 1,
+    GUA_FILTER_TRUE = 2
+};
+
+typedef struct gua_selector_v1_t {
+    uint32_t struct_size;
+    const char* id;
+    int id_match;
+    const char* role;
+    int role_match;
+    const char* name;
+    int name_match;
+    const char* text;
+    int text_match;
+    const char* parent_id;
+    int direct_child;
+    int visible;
+    int enabled;
+} gua_selector_v1_t;
+
+enum {
     GUA_LOG_TRACE = 0,
     GUA_LOG_DEBUG = 1,
     GUA_LOG_INFO = 2,
@@ -193,6 +221,8 @@ int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_stat
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);
+/* Returns the required JSON byte size including the trailing NUL. The result contains valid, matches, and optional error fields. */
+int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t* selector, char* out_json, int out_json_size);
 int gua_enqueue_click(gua_context_t* ctx, const char* node_id);
 int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
 int gua_emit_click(gua_context_t* ctx, const char* node_id);

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -124,6 +125,54 @@ int write_node_id(const std::string& node_id, char* out_node_id, int out_node_id
     return 1;
 }
 
+bool matches_text(const std::string& actual, const char* expected, int mode, std::string& error)
+{
+    if (expected == nullptr || expected[0] == '\0') {
+        return true;
+    }
+    switch (mode) {
+    case GUA_MATCH_EXACT:
+        return actual == expected;
+    case GUA_MATCH_CONTAINS:
+        return actual.find(expected) != std::string::npos;
+    case GUA_MATCH_REGEX:
+        try {
+            return std::regex_search(actual, std::regex(expected, std::regex::ECMAScript));
+        } catch (const std::regex_error& exception) {
+            error = exception.what();
+            return false;
+        }
+    default:
+        error = "unknown match mode";
+        return false;
+    }
+}
+
+bool matches_filter(bool actual, int filter, std::string& error)
+{
+    if (filter == GUA_FILTER_ANY) return true;
+    if (filter == GUA_FILTER_FALSE) return !actual;
+    if (filter == GUA_FILTER_TRUE) return actual;
+    error = "unknown state filter";
+    return false;
+}
+
+bool is_in_scope(const std::vector<Node>& nodes, const Node& node, const char* parent_id, bool direct_child)
+{
+    if (parent_id == nullptr || parent_id[0] == '\0') return true;
+    if (node.id == parent_id) return false;
+    if (direct_child) return node.parent_id == parent_id;
+
+    std::string current = node.parent_id;
+    for (std::size_t depth = 0; !current.empty() && depth <= nodes.size(); ++depth) {
+        if (current == parent_id) return true;
+        const auto parent = std::find_if(nodes.begin(), nodes.end(), [&](const Node& candidate) { return candidate.id == current; });
+        if (parent == nodes.end() || parent->parent_id == current) return false;
+        current = parent->parent_id;
+    }
+    return false;
+}
+
 bool supports_action(const Node& node, int action)
 {
     if (action == GUA_ACTION_PRESS_KEY) {
@@ -149,6 +198,44 @@ bool supports_action(const Node& node, int action)
         return node.role == "list" || node.role == "scrollarea";
     }
     return false;
+}
+
+std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_v1_t& selector)
+{
+    std::string error;
+    std::vector<const Node*> matches;
+    for (const Node& node : nodes) {
+        if (!is_in_scope(nodes, node, selector.parent_id, selector.direct_child != 0)) continue;
+        const std::string& text = (node.known_mask & GUA_NODE_KNOWN_TEXT) != 0U ? node.text : node.label;
+        if (!matches_text(node.id, selector.id, selector.id_match, error) || !error.empty() ||
+            !matches_text(node.role, selector.role, selector.role_match, error) || !error.empty() ||
+            !matches_text(node.label, selector.name, selector.name_match, error) || !error.empty() ||
+            !matches_text(text, selector.text, selector.text_match, error) || !error.empty() ||
+            !matches_filter(node.visible, selector.visible, error) || !error.empty() ||
+            !matches_filter(node.enabled, selector.enabled, error) || !error.empty()) {
+            if (!error.empty()) break;
+            continue;
+        }
+        matches.push_back(&node);
+    }
+
+    if (!error.empty()) {
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+    }
+
+    std::string json = "{\"valid\":true,\"matches\":[";
+    for (std::size_t i = 0; i < matches.size(); ++i) {
+        if (i > 0) json += ",";
+        const Node& node = *matches[i];
+        json += "{\"id\":\"" + escape_json(node.id) + "\",\"role\":\"" + escape_json(node.role) +
+            "\",\"label\":\"" + escape_json(node.label) + "\",\"parentId\":";
+        json += (node.known_mask & GUA_NODE_KNOWN_PARENT_ID) != 0U
+            ? "\"" + escape_json(node.parent_id) + "\""
+            : "null";
+        json += "}";
+    }
+    json += "]}";
+    return json;
 }
 
 const char* action_name(int action)
@@ -594,6 +681,15 @@ extern "C" int gua_find_node_by_text(gua_context_t* ctx, const char* text, char*
     }
 
     return write_node_id(found->id, out_node_id, out_node_id_size);
+}
+
+extern "C" int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t* selector, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_selector_v1_t)) {
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid selector struct\",\"matches\":[]}", out_json, out_json_size);
+    }
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_query_json(ctx->nodes, *selector), out_json, out_json_size);
 }
 
 extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)

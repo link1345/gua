@@ -60,6 +60,30 @@ and later engine adapters own the engine-specific reflection details.
 | Godot `TabContainer` | `tablist` + `tab` children | stable derived child id, parentId, text, selected |
 | Godot `ScrollContainer` | `scrollarea` | bounds, visible, enabled, scroll action |
 
+## Semantic selectors
+
+`selector.schema.json` is the source of truth for semantic queries. String
+criteria are ordinal and case-sensitive. Their default match mode is `exact`;
+callers may explicitly select `contains` or ECMAScript `regex`. An invalid regex
+is a selector syntax error, never a zero-match result.
+
+Criteria combine with logical AND. `name` means the node's accessible `label`.
+`text` uses the v2 `text` field when known and falls back to `label` for legacy
+nodes. `visible` and `enabled` are tri-state at ABI level (`any`, `false`,
+`true`) so omitting a filter differs from requiring `false`.
+
+A scope parent is excluded from its own results. The default scope searches all
+descendants by following `parentId`; `directChild: true` limits it to immediate
+children. A strict single query fails for both zero and multiple matches.
+`QueryAll` is the only query form that accepts multiple results. Ambiguity
+diagnostics include candidate `id`, `role`, `label`, and `parentId` and suggest
+adding a stable id, state filter, or narrower scope.
+
+The C ABI evaluates selectors through versioned `gua_selector_v1_t` and
+`gua_query_nodes_json`. C++, .NET local contexts, and the remote `query_nodes`
+command all use that evaluator. The legacy `gua_find_node_by_*` exports remain
+available for ABI compatibility but retain first-match behavior.
+
 The legacy `gua_register_node` and `gua_get_node_state` C exports remain valid.
 New integrations use `gua_node_descriptor_v2_t` / `gua_node_state_v2_t`, whose
 `struct_size` protects ABI versioning and whose `known_mask` distinguishes

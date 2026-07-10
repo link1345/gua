@@ -9,6 +9,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace gua::testing {
 
@@ -137,32 +138,97 @@ inline std::string read_node_id(char const* description, int found, const char* 
     return buffer;
 }
 
+enum class match_mode { exact = GUA_MATCH_EXACT, contains = GUA_MATCH_CONTAINS, regex = GUA_MATCH_REGEX };
+
+class Query {
+public:
+    explicit Query(gua_context_t* context) : context_(context) {}
+
+    Query by_id(std::string value, match_mode mode = match_mode::exact) const { Query copy(*this); copy.id_ = std::move(value); copy.id_match_ = mode; return copy; }
+    Query by_role(std::string value, match_mode mode = match_mode::exact) const { Query copy(*this); copy.role_ = std::move(value); copy.role_match_ = mode; return copy; }
+    Query by_name(std::string value, match_mode mode = match_mode::exact) const { Query copy(*this); copy.name_ = std::move(value); copy.name_match_ = mode; return copy; }
+    Query by_text(std::string value, match_mode mode = match_mode::exact) const { Query copy(*this); copy.text_ = std::move(value); copy.text_match_ = mode; return copy; }
+    Query within(std::string parent_id, bool direct_child = false) const { Query copy(*this); copy.parent_id_ = std::move(parent_id); copy.direct_child_ = direct_child; return copy; }
+    Query where_visible(bool value = true) const { Query copy(*this); copy.visible_ = value ? GUA_FILTER_TRUE : GUA_FILTER_FALSE; return copy; }
+    Query where_enabled(bool value = true) const { Query copy(*this); copy.enabled_ = value ? GUA_FILTER_TRUE : GUA_FILTER_FALSE; return copy; }
+
+    [[nodiscard]] std::vector<Locator> query_all() const
+    {
+        const std::string json = execute();
+        std::vector<Locator> matches;
+        std::size_t cursor = 0;
+        while ((cursor = json.find("\"id\":\"", cursor)) != std::string::npos) {
+            cursor += 6;
+            const std::size_t end = json.find('"', cursor);
+            if (end == std::string::npos) break;
+            matches.emplace_back(context_, json.substr(cursor, end - cursor));
+            cursor = end + 1;
+        }
+        return matches;
+    }
+
+    [[nodiscard]] Locator get() const
+    {
+        auto matches = query_all();
+        if (matches.empty()) throw std::runtime_error("Strict Gua selector matched no nodes: " + describe());
+        if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes: " + describe() + ". Narrow the scope with within() or add a stable id/state filter. " + execute());
+        return std::move(matches.front());
+    }
+
+    const Query& assert_count(std::size_t expected) const
+    {
+        const std::size_t actual = query_all().size();
+        if (actual != expected) throw std::runtime_error("Expected selector " + describe() + " to match " + std::to_string(expected) + " nodes, but matched " + std::to_string(actual));
+        return *this;
+    }
+
+private:
+    [[nodiscard]] std::string execute() const
+    {
+        gua_selector_v1_t selector {
+            sizeof(gua_selector_v1_t),
+            pointer(id_), static_cast<int>(id_match_), pointer(role_), static_cast<int>(role_match_),
+            pointer(name_), static_cast<int>(name_match_), pointer(text_), static_cast<int>(text_match_),
+            pointer(parent_id_), direct_child_ ? 1 : 0, visible_, enabled_,
+        };
+        const int required = gua_query_nodes_json(context_, &selector, nullptr, 0);
+        std::string json(static_cast<std::size_t>(required), '\0');
+        gua_query_nodes_json(context_, &selector, json.data(), required);
+        json.resize(static_cast<std::size_t>(required - 1));
+        if (json.find("\"valid\":false") != std::string::npos) throw std::runtime_error("Invalid Gua selector " + describe() + ": " + json);
+        return json;
+    }
+
+    static const char* pointer(const std::string& value) { return value.empty() ? nullptr : value.c_str(); }
+    [[nodiscard]] std::string describe() const { return "{id='" + id_ + "', role='" + role_ + "', name='" + name_ + "', text='" + text_ + "', scope='" + parent_id_ + "'}"; }
+
+    gua_context_t* context_;
+    std::string id_, role_, name_, text_, parent_id_;
+    match_mode id_match_ = match_mode::exact, role_match_ = match_mode::exact, name_match_ = match_mode::exact, text_match_ = match_mode::exact;
+    bool direct_child_ = false;
+    int visible_ = GUA_FILTER_ANY, enabled_ = GUA_FILTER_ANY;
+};
+
+inline Query query(gua_context_t* context) { return Query(context); }
+
 inline Locator get_by_id(gua_context_t* context, std::string id)
 {
-    char node_id[128] {};
-    return Locator(context, read_node_id("id", gua_find_node_by_id(context, id.c_str(), node_id, static_cast<int>(sizeof(node_id))), node_id));
+    return query(context).by_id(std::move(id)).get();
 }
 
 inline Locator get_by_role(gua_context_t* context, std::string_view role)
 {
-    char node_id[128] {};
-    std::string role_buffer(role);
-    return Locator(context, read_node_id("role", gua_find_node_by_role(context, role_buffer.c_str(), nullptr, node_id, static_cast<int>(sizeof(node_id))), node_id));
+    return query(context).by_role(std::string(role)).get();
 }
 
 inline Locator get_by_role(gua_context_t* context, std::string_view role, std::string_view name)
 {
-    char node_id[128] {};
-    std::string role_buffer(role);
-    std::string name_buffer(name);
-    return Locator(context, read_node_id("role and name", gua_find_node_by_role(context, role_buffer.c_str(), name_buffer.c_str(), node_id, static_cast<int>(sizeof(node_id))), node_id));
+    return query(context).by_role(std::string(role)).by_name(std::string(name)).get();
 }
 
 inline Locator get_by_text(gua_context_t* context, std::string_view text)
 {
-    char node_id[128] {};
-    std::string text_buffer(text);
-    return Locator(context, read_node_id("text", gua_find_node_by_text(context, text_buffer.c_str(), node_id, static_cast<int>(sizeof(node_id))), node_id));
+    return query(context).by_text(std::string(text)).get();
 }
 
 inline Locator expect_node(gua_context_t* context, std::string id)
@@ -179,10 +245,9 @@ inline Locator wait_for_id(gua_context_t* context, std::string id, std::chrono::
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     do {
-        char node_id[128] {};
-        if (gua_find_node_by_id(context, id.c_str(), node_id, static_cast<int>(sizeof(node_id))) != 0) {
-            return Locator(context, node_id);
-        }
+        auto matches = query(context).by_id(id).query_all();
+        if (matches.size() == 1) return std::move(matches.front());
+        if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by id: " + id);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     } while (std::chrono::steady_clock::now() < deadline);
@@ -195,10 +260,9 @@ inline Locator wait_for_role(gua_context_t* context, std::string_view role, std:
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     std::string role_buffer(role);
     do {
-        char node_id[128] {};
-        if (gua_find_node_by_role(context, role_buffer.c_str(), nullptr, node_id, static_cast<int>(sizeof(node_id))) != 0) {
-            return Locator(context, node_id);
-        }
+        auto matches = query(context).by_role(role_buffer).query_all();
+        if (matches.size() == 1) return std::move(matches.front());
+        if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by role: " + role_buffer);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     } while (std::chrono::steady_clock::now() < deadline);
@@ -212,10 +276,9 @@ inline Locator wait_for_role(gua_context_t* context, std::string_view role, std:
     std::string role_buffer(role);
     std::string name_buffer(name);
     do {
-        char node_id[128] {};
-        if (gua_find_node_by_role(context, role_buffer.c_str(), name_buffer.c_str(), node_id, static_cast<int>(sizeof(node_id))) != 0) {
-            return Locator(context, node_id);
-        }
+        auto matches = query(context).by_role(role_buffer).by_name(name_buffer).query_all();
+        if (matches.size() == 1) return std::move(matches.front());
+        if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by role and name: " + role_buffer + ", " + name_buffer);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     } while (std::chrono::steady_clock::now() < deadline);
@@ -228,10 +291,9 @@ inline Locator wait_for_text(gua_context_t* context, std::string_view text, std:
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     std::string text_buffer(text);
     do {
-        char node_id[128] {};
-        if (gua_find_node_by_text(context, text_buffer.c_str(), node_id, static_cast<int>(sizeof(node_id))) != 0) {
-            return Locator(context, node_id);
-        }
+        auto matches = query(context).by_text(text_buffer).query_all();
+        if (matches.size() == 1) return std::move(matches.front());
+        if (matches.size() > 1) throw std::runtime_error("Strict Gua selector matched multiple nodes by text: " + text_buffer);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     } while (std::chrono::steady_clock::now() < deadline);

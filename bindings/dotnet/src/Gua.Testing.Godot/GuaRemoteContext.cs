@@ -63,6 +63,27 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return node.Id;
     }
 
+    public GuaQueryResult Query(GuaSelector selector)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        return Request<GuaQueryResult>(new
+        {
+            type = "query_nodes",
+            selectorId = selector.Id,
+            idMatch = (int)selector.IdMatch,
+            role = selector.Role,
+            roleMatch = (int)selector.RoleMatch,
+            name = selector.Name,
+            nameMatch = (int)selector.NameMatch,
+            text = selector.Text,
+            textMatch = (int)selector.TextMatch,
+            parentId = selector.ParentId,
+            directChild = selector.DirectChild ? 1 : 0,
+            visible = (int)selector.Visible,
+            enabled = (int)selector.Enabled,
+        });
+    }
+
     public bool EnqueueClick(string id)
     {
         Request<object?>(new { type = "click_node", nodeId = id }, allowNullResult: true);

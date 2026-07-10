@@ -40,6 +40,7 @@ int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, g
 int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_runtime_find_node_by_role(gua_runtime_t* runtime, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_runtime_find_node_by_text(gua_runtime_t* runtime, const char* text, char* out_node_id, int out_node_id_size);
+int gua_runtime_query_nodes_json(gua_runtime_t* runtime, const gua_selector_v1_t* selector, char* out_json, int out_json_size);
 int gua_runtime_enqueue_click(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_consume_click_request(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_emit_click(gua_runtime_t* runtime, const char* node_id);

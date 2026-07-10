@@ -7,6 +7,21 @@
 
 namespace gua::ws {
 
+struct QuerySelector {
+    std::string id;
+    int id_match = 0;
+    std::string role;
+    int role_match = 0;
+    std::string name;
+    int name_match = 0;
+    std::string text;
+    int text_match = 0;
+    std::string parent_id;
+    bool direct_child = false;
+    int visible = 0;
+    int enabled = 0;
+};
+
 struct ActionCommand {
     std::string type;
     std::string node_id;
@@ -24,6 +39,7 @@ struct BridgeHandlers {
     std::function<std::string()> get_ui_tree_json;
     std::function<std::string()> get_logs_json;
     std::function<std::string()> get_screenshot_json;
+    std::function<std::string(const QuerySelector& selector)> query_nodes_json;
     std::function<bool(std::string_view node_id)> click_node;
     std::function<bool(std::string_view node_id)> focus_node;
     std::function<bool(std::string_view key)> press_key;

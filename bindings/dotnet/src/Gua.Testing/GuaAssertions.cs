@@ -18,7 +18,7 @@ public static class GuaAssertions
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        return new GuaNodeExpectation(context, id, $"id '{id}'");
+        return Query(context).ById(id).Get();
     }
 
     public static GuaNodeExpectation GetByRole(IGuaContext context, string role, string? name = null)
@@ -26,16 +26,20 @@ public static class GuaAssertions
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(role);
 
-        var id = context.FindNodeByRole(role, name);
-        var description = name is null ? $"role '{role}'" : $"role '{role}' and label '{name}'";
-        return new GuaNodeExpectation(context, id, description);
+        return Query(context).ByRole(role, name).Get();
     }
 
     public static GuaNodeExpectation GetByText(IGuaContext context, string text)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        return new GuaNodeExpectation(context, context.FindNodeByText(text), $"text '{text}'");
+        return Query(context).ByText(text).Get();
+    }
+
+    public static GuaLocatorQuery Query(IGuaContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return new GuaLocatorQuery(context);
     }
 
     public static GuaNodeExpectation ExpectNode(IGuaContext context, string id)

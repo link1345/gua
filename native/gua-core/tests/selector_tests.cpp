@@ -1,0 +1,55 @@
+#include "gua/gua.h"
+#include "gua/testing.hpp"
+
+#include <cassert>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+void node(gua_context_t* context, const char* id, const char* parent, const char* role, const char* label, const char* text, bool visible = true)
+{
+    const gua_node_descriptor_v2_t descriptor {
+        sizeof(gua_node_descriptor_v2_t),
+        static_cast<uint64_t>((parent ? GUA_NODE_KNOWN_PARENT_ID : 0) | (text ? GUA_NODE_KNOWN_TEXT : 0)),
+        id, parent, role, label, text, nullptr, { 0, 0, 1, 1 }, visible ? 1 : 0, 1, 0, 0, 0, 0, 0,
+    };
+    assert(gua_register_node_v2(context, &descriptor) == 1);
+}
+
+}
+
+int main()
+{
+    gua_context_t* context = gua_create_context();
+    gua_begin_frame(context, "selectors");
+    node(context, "left", nullptr, "panel", "Left", nullptr);
+    node(context, "right", nullptr, "panel", "Right", nullptr);
+    node(context, "left-group", "left", "panel", "Group", nullptr);
+    node(context, "left-save", "left-group", "button", "保存", "保存");
+    node(context, "right-save", "right", "button", "保存", "保存");
+    node(context, "hidden", "left", "button", "Hidden", "Hidden", false);
+    gua_end_frame(context);
+
+    using namespace gua::testing;
+    assert(query(context).by_role("button").query_all().size() == 3);
+    assert(query(context).by_text("保存").within("left").get().id() == "left-save");
+    assert(query(context).by_text("存", match_mode::contains).within("right", true).get().id() == "right-save");
+    assert(query(context).by_name("^保.*$", match_mode::regex).within("left").where_visible().get().id() == "left-save");
+    query(context).by_role("button").within("left", true).assert_count(1);
+
+    bool ambiguous = false;
+    try { (void)get_by_text(context, "保存"); }
+    catch (const std::runtime_error& error) { ambiguous = std::string(error.what()).find("multiple") != std::string::npos; }
+    assert(ambiguous);
+
+    bool invalid_regex = false;
+    try { (void)query(context).by_text("[", match_mode::regex).query_all(); }
+    catch (const std::runtime_error& error) { invalid_regex = std::string(error.what()).find("Invalid Gua selector") != std::string::npos; }
+    assert(invalid_regex);
+
+    char legacy[128] {};
+    assert(gua_find_node_by_text(context, "保存", legacy, sizeof(legacy)) == 1);
+    assert(std::string(legacy) == "left-save");
+    gua_destroy_context(context);
+}

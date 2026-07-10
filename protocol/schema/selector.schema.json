@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/selector.schema.json",
+  "title": "Gua Semantic Selector",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "$ref": "#/$defs/stringCriterion" },
+    "role": { "$ref": "#/$defs/stringCriterion" },
+    "name": { "$ref": "#/$defs/stringCriterion" },
+    "text": { "$ref": "#/$defs/stringCriterion" },
+    "scope": {
+      "type": "object",
+      "required": ["parentId"],
+      "additionalProperties": false,
+      "properties": {
+        "parentId": { "type": "string", "minLength": 1 },
+        "directChild": { "type": "boolean", "default": false }
+      }
+    },
+    "visible": { "type": "boolean" },
+    "enabled": { "type": "boolean" }
+  },
+  "$defs": {
+    "stringCriterion": {
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "match": { "enum": ["exact", "contains", "regex"], "default": "exact" }
+      }
+    }
+  }
+}
