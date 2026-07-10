@@ -97,6 +97,17 @@ void GuaContext::end_frame()
     gua_runtime_end_frame(runtime_);
 }
 
+void GuaContext::set_screenshot(const String& data_uri, int width, int height)
+{
+    const CharString data_uri_utf8 = data_uri.utf8();
+    gua_runtime_set_screenshot(runtime_, data_uri_utf8.get_data(), width, height);
+}
+
+String GuaContext::get_screenshot_json() const
+{
+    return copy_runtime_json(runtime_, gua_runtime_copy_screenshot_json);
+}
+
 void GuaContext::register_node(
     const String& id,
     const String& role,
@@ -376,6 +387,8 @@ void GuaContext::_bind_methods()
         DEFVAL(true));
     ClassDB::bind_method(D_METHOD("register_node_v2", "descriptor"), &GuaContext::register_node_v2);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
+    ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
+    ClassDB::bind_method(D_METHOD("get_screenshot_json"), &GuaContext::get_screenshot_json);
     ClassDB::bind_method(D_METHOD("enqueue_click", "node_id"), &GuaContext::enqueue_click);
     ClassDB::bind_method(D_METHOD("consume_click_request", "node_id"), &GuaContext::consume_click_request);
     ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);

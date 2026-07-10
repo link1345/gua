@@ -12,6 +12,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"register_node_v2",
 	"end_frame",
 	"get_ui_tree_json",
+	"set_screenshot",
+	"get_screenshot_json",
 	"enqueue_click",
 	"consume_click_request",
 	"emit_click",
@@ -56,6 +58,19 @@ func update(screen: String) -> void:
 	context.end_frame()
 	_dispatch_click_requests()
 	_dispatch_action_requests()
+
+
+func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
+	if not _ensure_context() or root == null:
+		return {"ok": false, "error": "Gua adapter is not attached."}
+	var image := image_override
+	if image == null:
+		image = root.get_viewport().get_texture().get_image()
+	if image == null or image.is_empty():
+		return {"ok": false, "error": "Godot viewport capture returned an empty image."}
+	var png := image.save_png_to_buffer()
+	context.set_screenshot("data:image/png;base64," + Marshalls.raw_to_base64(png), image.get_width(), image.get_height())
+	return {"ok": true, "width": image.get_width(), "height": image.get_height()}
 
 
 func start_inspector_bridge(port: int = 8765) -> bool:

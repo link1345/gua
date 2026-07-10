@@ -158,6 +158,21 @@ The screenshot payload stores an already encoded `dataUri` plus `width` and
 `height`. This keeps the C ABI small and avoids forcing the core protocol to own
 PNG encoding, GPU readback, or platform-specific capture code.
 
+## Visual comparison and operation recording v1
+
+Visual comparison is an opt-in consumer of the existing PNG screenshot payload;
+semantic assertions remain the primary test path. Baselines use an explicit test
+name and variant, are updated only by an API option or `GUA_UPDATE_BASELINES=1`,
+and are never inferred from OS/GPU state. Masks are removed from both diff output
+and the ratio denominator. Dimension mismatch never performs an implicit resize.
+
+`recording.schema.json` is the source of truth for recording version 1. Targets
+prefer stable `id`, then strict role/name/scope selection, with coordinate fallback
+only when explicitly recorded and permitted. Request IDs deduplicate retained
+operation/event history. Replay preserves delays or prefers recorded semantic wait
+conditions. Sensitive steps contain a `secretKey`, never plaintext, and require a
+caller resolver.
+
 ## Commands
 
 Commands are external automation requests.

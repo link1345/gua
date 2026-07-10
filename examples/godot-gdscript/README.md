@@ -2,6 +2,21 @@
 
 This sample uses the Gua Godot GDExtension from GDScript.
 
+## Opt-in visual capture
+
+`GuaAutoAdapter.capture_viewport_screenshot()` reads the current viewport after a
+rendered frame, encodes it as PNG, and publishes it through the existing Gua
+screenshot payload. It is never called automatically. The headless smoke covers
+button, text input, checkbox, and select semantics plus PNG capture; managed
+`Gua.Testing.Visual` tests own baseline compare and recording/replay policy.
+Because Godot's dummy headless renderer has no viewport texture, the smoke injects
+a deterministic `Image`; normal runtime calls omit that test-only argument and
+capture `Viewport.get_texture().get_image()`.
+
+Use a normal run to compare without baseline mutation. Set
+`GUA_UPDATE_BASELINES=1` only for an intentional update, and change a rendered
+control to exercise the diff-failure artifact path.
+
 Build the native extension first:
 
 ```powershell

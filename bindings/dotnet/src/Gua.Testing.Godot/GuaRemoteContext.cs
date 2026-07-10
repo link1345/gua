@@ -36,6 +36,11 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return RequestRawResult(new { type = "get_diagnostics" });
     }
 
+    public string GetScreenshotJson()
+    {
+        return RequestRawResult(new { type = "get_screenshot" });
+    }
+
     public GuaContextStatus GetContextStatus()
     {
         var status = Request<ContextStatusResult>(new { type = "get_context_status" });

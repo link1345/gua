@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>Gua.Testing.Visual</PackageId>
+    <Description>Opt-in screenshot comparison and UI recording/replay for Gua.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Gua.Testing\Gua.Testing.csproj" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
+  </ItemGroup>
+</Project>

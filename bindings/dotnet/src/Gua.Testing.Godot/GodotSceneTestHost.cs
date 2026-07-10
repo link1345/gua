@@ -86,6 +86,21 @@ public sealed class GodotSceneTestHost : IDisposable
         }
     }
 
+    public async Task<string> WaitForScreenshotAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var limit = timeout ?? _options.SceneTimeout;
+        var deadline = DateTimeOffset.UtcNow + limit;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var screenshot = ((GuaRemoteContext)Context).GetScreenshotJson();
+            if (screenshot.Contains("data:image/png;base64,", StringComparison.OrdinalIgnoreCase)) return screenshot;
+            await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+        } while (DateTimeOffset.UtcNow < deadline);
+        throw new TimeoutException($"Godot did not publish an opt-in viewport screenshot within {limit:g}.");
+    }
+
     public void Dispose()
     {
         if (_disposed)

@@ -4,6 +4,11 @@
 `Gua.Testing`. It starts a Godot project, connects to the Gua WebSocket bridge,
 and lets tests assert against the live semantic UI tree.
 
+Godot visual capture is opt-in. After the adapter publishes a viewport PNG,
+`GodotSceneTestHost.WaitForScreenshotAsync` waits for that existing protocol
+payload. Add `Gua.Testing.Visual` only in visual test projects; the base Godot
+testing package deliberately has no PNG codec dependency.
+
 ```csharp
 using Gua.Testing;
 using Gua.Testing.Godot;
