@@ -53,6 +53,24 @@ internal static partial class Native
         public fixed byte Value[256];
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeSelectorV1
+    {
+        public uint StructSize;
+        public nint Id;
+        public int IdMatch;
+        public nint Role;
+        public int RoleMatch;
+        public nint Name;
+        public int NameMatch;
+        public nint Text;
+        public int TextMatch;
+        public nint ParentId;
+        public int DirectChild;
+        public int Visible;
+        public int Enabled;
+    }
+
     static Native()
     {
         NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, ResolveGuaLibrary);
@@ -202,6 +220,9 @@ internal static partial class Native
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static unsafe partial int gua_find_node_by_text(nint context, string text, byte* outNodeId, int outNodeIdSize);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_query_nodes_json(nint context, in GuaNativeSelectorV1 selector, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_enqueue_click(nint context, string nodeId);

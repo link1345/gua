@@ -1,0 +1,7 @@
+{
+  "role": { "value": "button", "match": "exact" },
+  "name": { "value": "^保存", "match": "regex" },
+  "scope": { "parentId": "settings-panel", "directChild": false },
+  "visible": true,
+  "enabled": true
+}

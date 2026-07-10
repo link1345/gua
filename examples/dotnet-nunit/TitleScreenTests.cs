@@ -8,6 +8,30 @@ namespace Gua.DotNetNUnitSample;
 public sealed class TitleScreenTests
 {
     [Test]
+    public void StrictSelectorsShareNativeMatchingAndScopeRules()
+    {
+        using var ui = new GuaContext();
+        ui.BeginFrame("selectors");
+        ui.RegisterNode(new GuaNodeDescriptor("left", "panel", "Left", new GuaBounds(0, 0, 10, 10)));
+        ui.RegisterNode(new GuaNodeDescriptor("right", "panel", "Right", new GuaBounds(0, 0, 10, 10)));
+        ui.RegisterNode(new GuaNodeDescriptor("group", "panel", "Group", new GuaBounds(0, 0, 10, 10), ParentId: "left"));
+        ui.RegisterNode(new GuaNodeDescriptor("left-save", "button", "保存", new GuaBounds(0, 0, 1, 1), ParentId: "group", Text: "保存"));
+        ui.RegisterNode(new GuaNodeDescriptor("right-save", "button", "保存", new GuaBounds(0, 0, 1, 1), ParentId: "right", Text: "保存"));
+        ui.RegisterNode(new GuaNodeDescriptor("hidden", "button", "Hidden", new GuaBounds(0, 0, 1, 1), ParentId: "left", Text: "Hidden", Visible: false));
+        ui.EndFrame();
+
+        var left = GuaAssertions.Query(ui).ByText("保", GuaMatchMode.Contains).Within("left").WhereVisible().Get();
+        Assert.That(left.Snapshot.Id, Is.EqualTo("left-save"));
+        GuaAssertions.Query(ui).ByRole("button").Within("left", directChild: true).AssertCount(1);
+
+        var ambiguous = Assert.Throws<GuaAssertionException>(() => GuaAssertions.GetByText(ui, "保存"));
+        Assert.That(ambiguous!.Message, Does.Contain("left-save").And.Contain("right-save").And.Contain("Within"));
+
+        var invalid = Assert.Throws<GuaAssertionException>(() => GuaAssertions.Query(ui).ByText("[", GuaMatchMode.Regex).QueryAll());
+        Assert.That(invalid!.Message, Does.Contain("Invalid Gua selector"));
+    }
+
+    [Test]
     public void V2NodeStatePreservesUnknownAndStableRevision()
     {
         using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);

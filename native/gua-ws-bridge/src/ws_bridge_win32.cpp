@@ -29,6 +29,7 @@ struct Command {
     std::string type;
     std::string node_id;
     std::string key;
+    gua::ws::QuerySelector selector;
 };
 
 struct ClientConnection {
@@ -416,8 +417,11 @@ std::optional<std::string> json_string_field(std::string_view json, std::string_
     if (colon == std::string_view::npos) {
         return std::nullopt;
     }
-    const std::size_t quote = json.find('"', colon + 1U);
-    if (quote == std::string_view::npos) {
+    std::size_t quote = colon + 1U;
+    while (quote < json.size() && json[quote] == ' ') {
+        ++quote;
+    }
+    if (quote >= json.size() || json[quote] != '"') {
         return std::nullopt;
     }
 
@@ -469,6 +473,18 @@ Command parse_command(std::string_view json)
     command.type = json_string_field(json, "type").value_or("");
     command.node_id = json_string_field(json, "nodeId").value_or("");
     command.key = json_string_field(json, "key").value_or("");
+    command.selector.id = json_string_field(json, "selectorId").value_or("");
+    command.selector.id_match = json_int_field(json, "idMatch").value_or(0);
+    command.selector.role = json_string_field(json, "role").value_or("");
+    command.selector.role_match = json_int_field(json, "roleMatch").value_or(0);
+    command.selector.name = json_string_field(json, "name").value_or("");
+    command.selector.name_match = json_int_field(json, "nameMatch").value_or(0);
+    command.selector.text = json_string_field(json, "text").value_or("");
+    command.selector.text_match = json_int_field(json, "textMatch").value_or(0);
+    command.selector.parent_id = json_string_field(json, "parentId").value_or("");
+    command.selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
+    command.selector.visible = json_int_field(json, "visible").value_or(0);
+    command.selector.enabled = json_int_field(json, "enabled").value_or(0);
     return command;
 }
 
@@ -723,6 +739,12 @@ private:
             }
             if (command.type == "get_screenshot") {
                 return ok_response(command.id, handlers_.get_screenshot_json());
+            }
+            if (command.type == "query_nodes") {
+                if (!handlers_.query_nodes_json) {
+                    return error_response(command.id, "query_nodes is not supported by this bridge");
+                }
+                return ok_response(command.id, handlers_.query_nodes_json(command.selector));
             }
             if (command.type == "click_node") {
                 return handlers_.click_node(command.node_id)

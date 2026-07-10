@@ -267,6 +267,13 @@ extern "C" int gua_runtime_find_node_by_text(gua_runtime_t* runtime, const char*
     return gua_find_node_by_text(runtime->context, text, out_node_id, out_node_id_size);
 }
 
+extern "C" int gua_runtime_query_nodes_json(gua_runtime_t* runtime, const gua_selector_v1_t* selector, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_query_nodes_json(runtime->context, selector, out_json, out_json_size);
+}
+
 extern "C" int gua_runtime_enqueue_click(gua_runtime_t* runtime, const char* node_id)
 {
     if (!valid_runtime(runtime)) {
@@ -327,6 +334,23 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_screenshot_json = [runtime] {
             return copy_screenshot_json(runtime);
+        },
+        .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {
+            gua_selector_v1_t native {
+                sizeof(gua_selector_v1_t),
+                selector.id.empty() ? nullptr : selector.id.c_str(), selector.id_match,
+                selector.role.empty() ? nullptr : selector.role.c_str(), selector.role_match,
+                selector.name.empty() ? nullptr : selector.name.c_str(), selector.name_match,
+                selector.text.empty() ? nullptr : selector.text.c_str(), selector.text_match,
+                selector.parent_id.empty() ? nullptr : selector.parent_id.c_str(),
+                selector.direct_child ? 1 : 0, selector.visible, selector.enabled,
+            };
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_query_nodes_json(runtime->context, &native, nullptr, 0);
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_query_nodes_json(runtime->context, &native, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
         },
         .click_node = [runtime](std::string_view node_id) {
             const std::string id(node_id);

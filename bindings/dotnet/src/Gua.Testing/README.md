@@ -51,3 +51,23 @@ GuaAssertions.GetById(ui, "start").ToBeVisible();
 
 See `examples/dotnet-nunit` for a complete NUnit project with multiple `[Test]`
 methods in one file.
+
+Semantic locators are strict: `GetBy*` fails when zero or multiple nodes match,
+while `QueryAll()` is the explicit multi-result API. String matching is exact by
+default and can opt into ordinal contains or ECMAScript regex matching:
+
+```csharp
+var save = GuaAssertions.Query(ui)
+    .ByRole("button")
+    .ByText("^保存", GuaMatchMode.Regex)
+    .Within("settings-panel")
+    .WhereVisible()
+    .WhereEnabled()
+    .Get();
+
+GuaAssertions.Query(ui).ByRole("listitem").Within("servers").AssertCount(3);
+```
+
+`Within(parentId)` searches descendants and excludes the parent itself. Pass
+`directChild: true` to limit the query to immediate children. Local and Godot
+remote contexts send the same selector to the native evaluator.

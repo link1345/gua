@@ -12,6 +12,8 @@ public interface IGuaContext
 
     string FindNodeByText(string text);
 
+    GuaQueryResult Query(GuaSelector selector) => throw new NotSupportedException("This Gua context does not support semantic selector queries.");
+
     bool EnqueueClick(string id);
 
     bool TryPollEvent(out GuaEvent e);

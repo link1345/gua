@@ -228,6 +228,45 @@ public sealed class GuaContext : IGuaContext, IDisposable
         }
     }
 
+    public GuaQueryResult Query(GuaSelector selector)
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+        ThrowIfDisposed();
+        var values = new[] { selector.Id, selector.Role, selector.Name, selector.Text, selector.ParentId };
+        var pointers = values.Select(value => value is null ? nint.Zero : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+        try
+        {
+            var native = new Native.GuaNativeSelectorV1
+            {
+                StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.GuaNativeSelectorV1>(),
+                Id = pointers[0], IdMatch = (int)selector.IdMatch,
+                Role = pointers[1], RoleMatch = (int)selector.RoleMatch,
+                Name = pointers[2], NameMatch = (int)selector.NameMatch,
+                Text = pointers[3], TextMatch = (int)selector.TextMatch,
+                ParentId = pointers[4], DirectChild = selector.DirectChild ? 1 : 0,
+                Visible = (int)selector.Visible, Enabled = (int)selector.Enabled,
+            };
+            unsafe
+            {
+                var required = Native.gua_query_nodes_json(_handle, in native, null, 0);
+                var buffer = new byte[required];
+                fixed (byte* pointer = buffer)
+                {
+                    Native.gua_query_nodes_json(_handle, in native, pointer, buffer.Length);
+                    var json = System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)pointer)
+                        ?? throw new InvalidOperationException("Native Gua returned invalid selector JSON.");
+                    return System.Text.Json.JsonSerializer.Deserialize<GuaQueryResult>(json, QueryJsonOptions)
+                        ?? throw new InvalidOperationException("Native Gua returned an empty selector result.");
+                }
+            }
+        }
+        finally
+        {
+            foreach (var pointer in pointers.Where(pointer => pointer != nint.Zero))
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pointer);
+        }
+    }
+
     public bool EnqueueClick(string id)
     {
         ThrowIfDisposed();
@@ -344,4 +383,9 @@ public sealed class GuaContext : IGuaContext, IDisposable
         Logs,
         Screenshot,
     }
+
+    private static readonly System.Text.Json.JsonSerializerOptions QueryJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 }
