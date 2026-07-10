@@ -307,6 +307,51 @@ extern "C" int gua_runtime_poll_event(gua_runtime_t* runtime, gua_event_t* out_e
     return gua_poll_event(runtime->context, out_event);
 }
 
+std::string escape_json(std::string_view value)
+{
+    std::string escaped;
+    for (char ch : value) {
+        if (ch == '\\' || ch == '"') escaped.push_back('\\');
+        escaped.push_back(ch);
+    }
+    return escaped;
+}
+
+extern "C" int gua_runtime_enqueue_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id)
+{
+    if (!valid_runtime(runtime)) return GUA_ACTION_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_enqueue_action(runtime->context, descriptor, out_request_id);
+}
+
+extern "C" int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const char* node_id, gua_action_request_t* out_request)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_consume_action_request(runtime->context, action, node_id, out_request);
+}
+
+extern "C" int gua_runtime_emit_action_result(gua_runtime_t* runtime, const gua_action_result_t* result)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_emit_action_result(runtime->context, result);
+}
+
+extern "C" int gua_runtime_poll_event_v2(gua_runtime_t* runtime, gua_event_v2_t* out_event)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v2(runtime->context, out_event);
+}
+
+extern "C" int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v2_t* out_event)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v2_for_request(runtime->context, request_id, out_event);
+}
+
 extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port)
 {
     if (!valid_runtime(runtime) || port <= 0 || port > 65535) {
@@ -350,6 +395,43 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             const std::string message = "press_key(" + key_string + ")";
             gua_add_log(runtime->context, GUA_LOG_INFO, message.c_str());
             return !key.empty();
+        },
+        .enqueue_action = [runtime](const gua::ws::ActionCommand& command) -> long long {
+            int action = 0;
+            if (command.type == "click_node") action = GUA_ACTION_CLICK;
+            else if (command.type == "focus_node") action = GUA_ACTION_FOCUS;
+            else if (command.type == "set_value") action = GUA_ACTION_SET_VALUE;
+            else if (command.type == "set_checked") action = GUA_ACTION_SET_CHECKED;
+            else if (command.type == "select") action = GUA_ACTION_SELECT;
+            else if (command.type == "scroll") action = GUA_ACTION_SCROLL;
+            else if (command.type == "press_key") action = GUA_ACTION_PRESS_KEY;
+            const gua_action_request_descriptor_t descriptor {
+                sizeof(gua_action_request_descriptor_t), action,
+                command.node_id.empty() ? nullptr : command.node_id.c_str(),
+                command.value.empty() ? nullptr : command.value.c_str(),
+                command.delta_x, command.delta_y, command.bool_value ? 1 : 0,
+                command.key.empty() ? nullptr : command.key.c_str(), command.modifiers,
+                command.sensitive ? 1 : 0, command.scroll_unit
+            };
+            std::uint64_t request_id = 0;
+            const std::lock_guard lock(runtime->context_mutex);
+            const int result = gua_enqueue_action(runtime->context, &descriptor, &request_id);
+            return result == GUA_ACTION_ACCEPTED ? static_cast<long long>(request_id) : static_cast<long long>(result);
+        },
+        .poll_action_event_json = [runtime](unsigned long long request_id) {
+            gua_event_v2_t event { sizeof(gua_event_v2_t) };
+            const std::lock_guard lock(runtime->context_mutex);
+            const int found = request_id == 0
+                ? gua_poll_event_v2(runtime->context, &event)
+                : gua_poll_event_v2_for_request(runtime->context, request_id, &event);
+            if (found == 0) return std::string("null");
+            return std::string("{\"requestId\":") + std::to_string(event.request_id) +
+                ",\"action\":" + std::to_string(event.action) +
+                ",\"succeeded\":" + (event.status == GUA_ACTION_STATUS_SUCCEEDED ? "true" : "false") +
+                ",\"error\":" + std::to_string(event.error_code) +
+                ",\"nodeId\":\"" + escape_json(event.node_id) + "\"" +
+                ",\"value\":\"" + escape_json(event.value) + "\"" +
+                ",\"sensitive\":" + (event.sensitive != 0 ? "true" : "false") + "}";
         },
     };
 

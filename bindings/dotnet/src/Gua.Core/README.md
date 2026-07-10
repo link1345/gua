@@ -12,6 +12,12 @@ runtimes/win-x64/native/gua.dll
 normal package restore/build. `GUA_NATIVE_DIR` remains available when you want to
 override the packaged runtime with a locally built one.
 
+Semantic operations use `EnqueueAction` and return a `requestId`. The host adapter
+consumes the request, performs the real UI operation, then calls
+`EmitActionResult`; tests observe completion with `TryPollActionEvent`. Supported
+v1 actions are focus, set value, set checked, select, scroll, and key press.
+Click remains available through the original API and shares the same queue.
+
 At runtime the resolver checks:
 
 1. `GUA_NATIVE_DIR`

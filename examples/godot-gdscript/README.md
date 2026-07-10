@@ -44,9 +44,11 @@ because another process already owns the port or the native extension was not
 rebuilt.
 
 The sample attaches `GuaAutoAdapter` to the root Godot `Control`; the adapter
-collects standard labels and buttons into the semantic UI tree, publishes
-snapshots, observes button clicks, and dispatches Inspector `click_node` requests
-through the normal Godot button signal.
+collects standard controls into the semantic UI tree and dispatches semantic
+actions through the real controls. The v1 matrix covers focus, `LineEdit` /
+`TextEdit` / slider values, checkbox state, `OptionButton` / `ItemList` /
+`TabContainer` selection, `ScrollContainer`, and key input. Every requested host
+operation emits an observed result carrying the same `requestId`.
 
 For a headless smoke check of the load-order-safe path:
 

@@ -44,6 +44,11 @@ int gua_runtime_enqueue_click(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_consume_click_request(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_emit_click(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_poll_event(gua_runtime_t* runtime, gua_event_t* out_event);
+int gua_runtime_enqueue_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const char* node_id, gua_action_request_t* out_request);
+int gua_runtime_emit_action_result(gua_runtime_t* runtime, const gua_action_result_t* result);
+int gua_runtime_poll_event_v2(gua_runtime_t* runtime, gua_event_v2_t* out_event);
+int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v2_t* out_event);
 
 int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port);
 void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime);

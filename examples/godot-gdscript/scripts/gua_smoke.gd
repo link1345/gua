@@ -33,6 +33,14 @@ func _run() -> void:
 	line_edit.name = "name"
 	line_edit.text = "Gua"
 	screen.add_child(line_edit)
+	var text_edit := TextEdit.new()
+	text_edit.name = "notes"
+	text_edit.text = "Old"
+	screen.add_child(text_edit)
+	var slider := HSlider.new()
+	slider.name = "volume"
+	slider.value = 10
+	screen.add_child(slider)
 
 	var option := OptionButton.new()
 	option.name = "difficulty"
@@ -58,6 +66,12 @@ func _run() -> void:
 	tabs.add_child(audio_tab)
 	tabs.current_tab = 1
 	screen.add_child(tabs)
+	var scroll := ScrollContainer.new()
+	scroll.name = "scroll"
+	var scroll_content := Control.new()
+	scroll_content.custom_minimum_size = Vector2(1000, 1000)
+	scroll.add_child(scroll_content)
+	screen.add_child(scroll)
 
 	await process_frame
 
@@ -131,6 +145,46 @@ func _run() -> void:
 
 	if pressed_count != 1:
 		_fail("Gua smoke expected one Button.pressed signal, got %d." % pressed_count)
+		return
+	var action_checkbox := CheckBox.new()
+	action_checkbox.name = "action_check"
+	screen.add_child(action_checkbox)
+	ui.update("title")
+
+	var action_cases := [
+		[{"action": "focus", "node_id": "start"}, func(): return button.has_focus()],
+		[{"action": "set_value", "node_id": "name", "value": "Codex"}, func(): return line_edit.text == "Codex"],
+		[{"action": "set_value", "node_id": "notes", "value": "New"}, func(): return text_edit.text == "New"],
+		[{"action": "set_value", "node_id": "volume", "value": "42"}, func(): return slider.value == 42],
+		[{"action": "set_checked", "node_id": "action_check", "bool_value": true}, func(): return action_checkbox.button_pressed],
+		[{"action": "select", "node_id": "difficulty", "value": "Easy"}, func(): return option.selected == 0],
+		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
+		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
+		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
+		[{"action": "press_key", "node_id": "name", "key": "A"}, func(): return true],
+	]
+	for action_case in action_cases:
+		var accepted: Dictionary = ui.enqueue_action(action_case[0])
+		if accepted.get("error_code", -1) != 0 or accepted.get("request_id", 0) == 0:
+			_fail("Gua smoke rejected action %s: %s" % [action_case[0], accepted])
+			return
+		ui.update("title")
+		if not action_case[1].call():
+			_fail("Gua smoke did not apply host action: %s" % action_case[0])
+			return
+		var observed := ui.poll_event_v2()
+		if observed.get("request_id", 0) != accepted.get("request_id", 0) or not observed.get("succeeded", false):
+			_fail("Gua smoke did not correlate observed action event: %s / %s" % [accepted, observed])
+			return
+	var sensitive := ui.enqueue_action({"action": "set_value", "node_id": "name", "value": "secret-marker", "sensitive": true})
+	ui.update("title")
+	var sensitive_event := ui.poll_event_v2()
+	ui.update("title")
+	if sensitive_event.get("request_id", 0) != sensitive.get("request_id", 0) or not sensitive_event.get("value", "").is_empty():
+		_fail("Gua smoke leaked a sensitive value in its observed event: %s" % sensitive_event)
+		return
+	if ui.get_ui_tree_json().contains("secret-marker"):
+		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
 		return
 
 	print("Gua GDScript smoke passed.")

@@ -371,6 +371,40 @@ public sealed class GuaNodeExpectation
         return this;
     }
 
+    public ulong Focus() => Enqueue(new GuaActionRequest(GuaActionType.Focus, _id), "focus");
+
+    public ulong SetValue(string value, bool sensitive = false) =>
+        Enqueue(new GuaActionRequest(GuaActionType.SetValue, _id, Value: value, Sensitive: sensitive), "set_value");
+
+    public ulong SetChecked(bool value) =>
+        Enqueue(new GuaActionRequest(GuaActionType.SetChecked, _id, BoolValue: value), "set_checked");
+
+    public ulong Select(string value) =>
+        Enqueue(new GuaActionRequest(GuaActionType.Select, _id, Value: value), "select");
+
+    public ulong Scroll(float deltaX, float deltaY, int unit = 0) =>
+        Enqueue(new GuaActionRequest(GuaActionType.Scroll, _id, DeltaX: deltaX, DeltaY: deltaY, ScrollUnit: unit), "scroll");
+
+    public ulong PressKey(string key, uint modifiers = 0) =>
+        Enqueue(new GuaActionRequest(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), "press_key");
+
+    public GuaNodeExpectation WaitForAction(ulong requestId, TimeSpan? timeout = null)
+    {
+        var deadline = Stopwatch.GetTimestamp() + (long)((timeout ?? TimeSpan.FromSeconds(1)).TotalSeconds * Stopwatch.Frequency);
+        do
+        {
+            if (_context.TryPollActionEvent(requestId, out var e))
+            {
+                if (!e.Succeeded) GuaAssertions.Fail($"Gua action {e.Action} failed for {_description}: {e.Error}.");
+                return this;
+            }
+            Thread.Sleep(10);
+        }
+        while (Stopwatch.GetTimestamp() < deadline);
+        GuaAssertions.Fail($"Timed out waiting for action request {requestId} on Gua node {_description}.");
+        return this;
+    }
+
     public GuaNodeExpectation WaitFor(TimeSpan? timeout = null)
     {
         return WaitUntil(node => node is not null, "exist", timeout);
@@ -430,5 +464,15 @@ public sealed class GuaNodeExpectation
         }
 
         return snapshot;
+    }
+
+    private ulong Enqueue(GuaActionRequest request, string action)
+    {
+        ToBeVisible();
+        ToBeEnabled();
+        ToHaveAction(action);
+        var error = _context.EnqueueAction(request, out var requestId);
+        if (error != GuaActionError.None) GuaAssertions.Fail($"Failed to enqueue {action} for Gua node {_description}: {error}.");
+        return requestId;
     }
 }

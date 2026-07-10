@@ -1,0 +1,9 @@
+{
+  "type": "set_value",
+  "timestampMs": 1234,
+  "requestId": 42,
+  "status": "succeeded",
+  "nodeId": "player-name",
+  "value": "Ada",
+  "sensitive": false
+}

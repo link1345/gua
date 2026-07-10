@@ -58,7 +58,8 @@
             "menuitem",
             "combobox",
             "tablist",
-            "tab"
+            "tab",
+            "scrollarea"
           ]
         },
         "label": { "type": "string" },
@@ -85,7 +86,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["click", "focus", "press", "text_input", "set_value"]
+            "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"]
           },
           "uniqueItems": true
         }

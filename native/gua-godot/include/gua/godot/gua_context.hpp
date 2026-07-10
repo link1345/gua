@@ -32,6 +32,10 @@ public:
     bool consume_click_request(const String& node_id);
     bool emit_click(const String& node_id);
     Dictionary poll_event();
+    Dictionary enqueue_action(const Dictionary& request);
+    Dictionary consume_action_request(const String& action, const String& node_id);
+    bool emit_action_result(const Dictionary& result);
+    Dictionary poll_event_v2();
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

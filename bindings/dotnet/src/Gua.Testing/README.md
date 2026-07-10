@@ -51,3 +51,7 @@ GuaAssertions.GetById(ui, "start").ToBeVisible();
 
 See `examples/dotnet-nunit` for a complete NUnit project with multiple `[Test]`
 methods in one file.
+Node expectations expose `Focus`, `SetValue`, `SetChecked`, `Select`, `Scroll`,
+and `PressKey`. These methods enqueue requests and return a request ID;
+`WaitForAction` waits for the adapter's correlated observed result rather than
+treating enqueue acceptance as completion.

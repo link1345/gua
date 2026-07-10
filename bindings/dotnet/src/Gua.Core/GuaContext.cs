@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Gua.Core;
 
 public sealed class GuaContext : IGuaContext, IDisposable
@@ -232,6 +234,133 @@ public sealed class GuaContext : IGuaContext, IDisposable
     {
         ThrowIfDisposed();
         return Native.gua_enqueue_click(_handle, id) != 0;
+    }
+
+    public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId)
+    {
+        ThrowIfDisposed();
+        var nodeId = Marshal.StringToCoTaskMemUTF8(request.NodeId);
+        var value = Marshal.StringToCoTaskMemUTF8(request.Value);
+        var key = Marshal.StringToCoTaskMemUTF8(request.Key);
+        try
+        {
+            var descriptor = new Native.GuaNativeActionRequestDescriptor
+            {
+                StructSize = (uint)Marshal.SizeOf<Native.GuaNativeActionRequestDescriptor>(),
+                Action = (int)request.Action,
+                NodeId = nodeId,
+                Value = value,
+                DeltaX = request.DeltaX,
+                DeltaY = request.DeltaY,
+                BoolValue = request.BoolValue ? 1 : 0,
+                Key = key,
+                Modifiers = request.Modifiers,
+                Sensitive = request.Sensitive ? 1 : 0,
+                ScrollUnit = request.ScrollUnit,
+            };
+            var result = Native.gua_enqueue_action(_handle, in descriptor, out requestId);
+            return result == 1 ? GuaActionError.None : (GuaActionError)result;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(nodeId);
+            Marshal.FreeCoTaskMem(value);
+            Marshal.FreeCoTaskMem(key);
+        }
+    }
+
+    public bool TryPollActionEvent(out GuaActionEvent e)
+    {
+        return TryPollActionEventCore(null, out e);
+    }
+
+    public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(requestId);
+        return TryPollActionEventCore(requestId, out e);
+    }
+
+    private bool TryPollActionEventCore(ulong? requestId, out GuaActionEvent e)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            Native.GuaNativeEventV2 nativeEvent = new()
+            {
+                StructSize = (uint)sizeof(Native.GuaNativeEventV2),
+            };
+            var found = requestId.HasValue
+                ? Native.gua_poll_event_v2_for_request(_handle, requestId.Value, &nativeEvent)
+                : Native.gua_poll_event_v2(_handle, &nativeEvent);
+            if (found == 0)
+            {
+                e = default;
+                return false;
+            }
+            e = new GuaActionEvent(
+                nativeEvent.RequestId,
+                (GuaActionType)nativeEvent.Action,
+                nativeEvent.Status == 1,
+                (GuaActionError)nativeEvent.ErrorCode,
+                Marshal.PtrToStringUTF8((nint)nativeEvent.NodeId) ?? string.Empty,
+                Marshal.PtrToStringUTF8((nint)nativeEvent.Value) ?? string.Empty,
+                nativeEvent.Sensitive != 0);
+            return true;
+        }
+    }
+
+    public bool TryConsumeAction(GuaActionType action, string? nodeId, out GuaActionRequest request)
+    {
+        ThrowIfDisposed();
+        unsafe
+        {
+            Native.GuaNativeActionRequest nativeRequest = new() { StructSize = (uint)sizeof(Native.GuaNativeActionRequest) };
+            if (Native.gua_consume_action_request(_handle, (int)action, nodeId, &nativeRequest) == 0)
+            {
+                request = default;
+                return false;
+            }
+            request = new GuaActionRequest(
+                (GuaActionType)nativeRequest.Action,
+                Marshal.PtrToStringUTF8((nint)nativeRequest.NodeId),
+                Marshal.PtrToStringUTF8((nint)nativeRequest.Value),
+                nativeRequest.DeltaX,
+                nativeRequest.DeltaY,
+                nativeRequest.BoolValue != 0,
+                Marshal.PtrToStringUTF8((nint)nativeRequest.Key),
+                nativeRequest.Modifiers,
+                nativeRequest.Sensitive != 0,
+                nativeRequest.ScrollUnit,
+                nativeRequest.RequestId);
+            return true;
+        }
+    }
+
+    public bool EmitActionResult(GuaActionEvent e)
+    {
+        ThrowIfDisposed();
+        var nodeId = Marshal.StringToCoTaskMemUTF8(e.NodeId);
+        var value = Marshal.StringToCoTaskMemUTF8(e.Value);
+        try
+        {
+            var result = new Native.GuaNativeActionResult
+            {
+                StructSize = (uint)Marshal.SizeOf<Native.GuaNativeActionResult>(),
+                RequestId = e.RequestId,
+                Action = (int)e.Action,
+                Status = e.Succeeded ? 1 : 2,
+                ErrorCode = (int)e.Error,
+                NodeId = nodeId,
+                Value = value,
+                Sensitive = e.Sensitive ? 1 : 0,
+            };
+            return Native.gua_emit_action_result(_handle, in result) != 0;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(nodeId);
+            Marshal.FreeCoTaskMem(value);
+        }
     }
 
     public bool ConsumeClickRequest(string id)
