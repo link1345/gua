@@ -4,6 +4,8 @@ public sealed class GuaRemoteUiTree
 {
     public int? SchemaVersion { get; set; }
 
+    public ulong? SessionEpoch { get; set; }
+
     public ulong? FrameSequence { get; set; }
 
     public ulong? Revision { get; set; }

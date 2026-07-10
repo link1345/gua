@@ -156,6 +156,7 @@ public static class GuaAssertions
                 Checked: OptionalBoolean("checked"),
                 Selected: OptionalBoolean("selected"),
                 SchemaVersion: document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ? schemaVersion.GetInt32() : null,
+                SessionEpoch: OptionalRootUInt64("sessionEpoch"),
                 FrameSequence: OptionalRootUInt64("frameSequence"),
                 Revision: OptionalRootUInt64("revision"));
         }

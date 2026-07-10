@@ -31,6 +31,38 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return RequestRawResult(new { type = "get_ui_tree" });
     }
 
+    public GuaContextStatus GetContextStatus()
+    {
+        var status = Request<ContextStatusResult>(new { type = "get_context_status" });
+        return new GuaContextStatus(
+            status.SessionEpoch, status.FrameSequence, status.Revision, status.NodeCount,
+            status.PendingRequestCount, status.InFlightRequestCount, status.UnconsumedEventCount,
+            status.LogCount, status.HasScreenshot, ActionOrNull(status.FirstPendingAction),
+            status.FirstPendingNodeId, ActionOrNull(status.FirstEventAction), status.FirstEventNodeId);
+    }
+
+    public GuaResetReport Reset(GuaResetOptions? options = null)
+    {
+        options ??= new GuaResetOptions();
+        var expectedEpoch = options.ExpectedSessionEpoch ?? GetContextStatus().SessionEpoch;
+        var report = Request<ResetReportResult>(new
+        {
+            type = "reset_context",
+            expectedSessionEpoch = expectedEpoch,
+            flags = (uint)options.Targets,
+            strict = options.Strict,
+        });
+        return new GuaResetReport(
+            (GuaResetResult)report.Result, report.PreviousSessionEpoch, report.SessionEpoch,
+            report.PendingRequestCount, report.InFlightRequestCount, report.UnconsumedEventCount,
+            report.DiscardedNodeCount, report.DiscardedPendingRequestCount, report.DiscardedInFlightRequestCount,
+            report.DiscardedEventCount, report.DiscardedLogCount, report.DiscardedScreenshot,
+            ActionOrNull(report.FirstPendingAction), report.FirstPendingNodeId,
+            ActionOrNull(report.FirstEventAction), report.FirstEventNodeId);
+    }
+
+    private static GuaActionType? ActionOrNull(int action) => action == 0 ? null : (GuaActionType)action;
+
     public string FindNodeById(string id)
     {
         return GetUiTree().FindNodeById(id)?.Id
@@ -375,4 +407,15 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     private sealed record ActionRequestResult(ulong RequestId);
     private sealed record ActionEventResult(
         ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive);
+    private sealed record ContextStatusResult(
+        ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount,
+        uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount,
+        uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId,
+        int FirstEventAction, string FirstEventNodeId);
+    private sealed record ResetReportResult(
+        int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount,
+        uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount,
+        uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount,
+        uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId,
+        int FirstEventAction, string FirstEventNodeId);
 }

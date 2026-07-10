@@ -20,6 +20,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_action_request",
 	"emit_action_result",
 	"poll_event_v2",
+	"get_context_status",
+	"reset_context",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -101,6 +103,26 @@ func poll_event_v2() -> Dictionary:
 	if not _ensure_context():
 		return {}
 	return context.poll_event_v2()
+
+
+func get_context_status() -> Dictionary:
+	if not _ensure_context():
+		return {}
+	return context.get_context_status()
+
+
+func reset_context(options: Dictionary = {}) -> Dictionary:
+	if not _ensure_context():
+		return {"result": -1}
+	var resolved := options.duplicate()
+	if not resolved.has("expected_session_epoch"):
+		resolved["expected_session_epoch"] = context.get_context_status().get("session_epoch", 0)
+	var report: Dictionary = context.reset_context(resolved)
+	if report.get("result", -1) == 1:
+		buttons_by_id.clear()
+		controls_by_id.clear()
+		suppressed_clicks.clear()
+	return report
 
 
 func _ensure_context() -> bool:

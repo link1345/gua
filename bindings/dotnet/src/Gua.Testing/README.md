@@ -50,6 +50,22 @@ GuaAssertions.GetById(ui, "start").ToBeVisible();
 ```
 
 See `examples/dotnet-nunit` for a complete NUnit project with multiple `[Test]`
+
+Use `GuaTestSession` as the explicit process-reuse boundary. The default reset
+clears semantic nodes, requests, events, and retained history while preserving
+logs and screenshots. Strict teardown detects leaked requests/events without
+discarding them:
+
+```csharp
+var session = new GuaTestSession(context);
+session.Reset(); // setup; starts a new session epoch
+// ...test...
+session.Reset(new GuaResetOptions(Strict: true)); // teardown; throws if dirty
+```
+
+`ResetAsync` provides the same contract for remote contexts and honors
+`CancellationToken`. Remote reset always includes the inspected session epoch,
+so a stale client cannot reset a newer shared runtime session.
 methods in one file.
 Semantic locators are strict: `GetBy*` fails when zero or multiple nodes match,
 while `QueryAll()` is the explicit multi-result API. String matching is exact by

@@ -29,3 +29,9 @@ dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
+
+For a Godot process or native runtime shared across tests, create a
+`GuaTestSession` in setup, call non-strict `Reset()` to start a new epoch, and
+use `Reset(new GuaResetOptions(Strict: true))` in teardown. Strict teardown
+reports leaked requests/events and leaves them intact for diagnosis. Logs and
+screenshots are preserved by default; select `GuaResetTargets.All` to clear them.

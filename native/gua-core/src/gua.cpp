@@ -270,6 +270,7 @@ struct gua_context_t {
     unsigned long long frame_sequence = 0;
     unsigned long long revision = 0;
     unsigned long long next_request_id = 1;
+    unsigned long long session_epoch = 1;
     std::string previous_semantic_snapshot;
 };
 
@@ -364,8 +365,23 @@ std::string build_ui_tree_json(const gua_context_t& ctx)
 {
     std::string semantic = build_semantic_snapshot_json(ctx);
     semantic.erase(semantic.begin());
-    return "{\"schemaVersion\":2,\"frameSequence\":" + std::to_string(ctx.frame_sequence) +
+    return "{\"schemaVersion\":2,\"sessionEpoch\":" + std::to_string(ctx.session_epoch) +
+        ",\"frameSequence\":" + std::to_string(ctx.frame_sequence) +
         ",\"revision\":" + std::to_string(ctx.revision) + "," + semantic;
+}
+
+void fill_reset_summary(const gua_context_t& ctx, gua_reset_report_t& report)
+{
+    const ActionRequest* request = !ctx.action_requests.empty() ? &ctx.action_requests.front()
+        : (!ctx.consumed_requests.empty() ? &ctx.consumed_requests.front() : nullptr);
+    if (request != nullptr) {
+        report.first_pending_action = request->action;
+        std::snprintf(report.first_pending_node_id, sizeof(report.first_pending_node_id), "%s", request->node_id.c_str());
+    }
+    if (!ctx.events.empty()) {
+        report.first_event_action = ctx.events.front().action;
+        std::snprintf(report.first_event_node_id, sizeof(report.first_event_node_id), "%s", ctx.events.front().node_id.c_str());
+    }
 }
 
 std::string build_logs_json(const gua_context_t& ctx)
@@ -874,4 +890,94 @@ extern "C" int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t reques
     std::snprintf(out_event->value, sizeof(out_event->value), "%s", event.value.c_str());
     out_event->sensitive = event.sensitive ? 1 : 0;
     return 1;
+}
+
+extern "C" int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status)
+{
+    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < sizeof(gua_context_status_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    out_status->session_epoch = ctx->session_epoch;
+    out_status->frame_sequence = ctx->frame_sequence;
+    out_status->revision = ctx->revision;
+    out_status->node_count = static_cast<uint32_t>(ctx->nodes.size());
+    out_status->pending_request_count = static_cast<uint32_t>(ctx->action_requests.size());
+    out_status->in_flight_request_count = static_cast<uint32_t>(ctx->consumed_requests.size());
+    out_status->unconsumed_event_count = static_cast<uint32_t>(ctx->events.size());
+    out_status->log_count = static_cast<uint32_t>(ctx->logs.size());
+    out_status->has_screenshot = ctx->screenshot.data_uri.empty() ? 0 : 1;
+    out_status->first_pending_action = 0;
+    out_status->first_pending_node_id[0] = '\0';
+    out_status->first_event_action = 0;
+    out_status->first_event_node_id[0] = '\0';
+    gua_reset_report_t summary { sizeof(gua_reset_report_t) };
+    fill_reset_summary(*ctx, summary);
+    out_status->first_pending_action = summary.first_pending_action;
+    std::snprintf(out_status->first_pending_node_id, sizeof(out_status->first_pending_node_id), "%s", summary.first_pending_node_id);
+    out_status->first_event_action = summary.first_event_action;
+    std::snprintf(out_status->first_event_node_id, sizeof(out_status->first_event_node_id), "%s", summary.first_event_node_id);
+    return 1;
+}
+
+extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report)
+{
+    if (ctx == nullptr || options == nullptr || options->struct_size < sizeof(gua_reset_options_t) ||
+        out_report == nullptr || out_report->struct_size < sizeof(gua_reset_report_t)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    if ((options->flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+
+    const std::lock_guard lock(ctx->mutex);
+    *out_report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    out_report->previous_session_epoch = ctx->session_epoch;
+    out_report->session_epoch = ctx->session_epoch;
+    out_report->pending_request_count = static_cast<uint32_t>(ctx->action_requests.size());
+    out_report->in_flight_request_count = static_cast<uint32_t>(ctx->consumed_requests.size());
+    out_report->unconsumed_event_count = static_cast<uint32_t>(ctx->events.size());
+    fill_reset_summary(*ctx, *out_report);
+
+    if (options->expected_session_epoch != 0 && options->expected_session_epoch != ctx->session_epoch) {
+        out_report->result = GUA_RESET_ERROR_STALE_EPOCH;
+        return out_report->result;
+    }
+    const bool dirty_requests = (options->flags & GUA_RESET_REQUESTS) != 0U &&
+        (!ctx->action_requests.empty() || !ctx->consumed_requests.empty());
+    const bool dirty_events = (options->flags & GUA_RESET_EVENTS) != 0U && !ctx->events.empty();
+    if (options->strict != 0 && (dirty_requests || dirty_events)) {
+        out_report->result = GUA_RESET_ERROR_DIRTY;
+        return out_report->result;
+    }
+
+    out_report->discarded_node_count = (options->flags & GUA_RESET_NODES) != 0U ? static_cast<uint32_t>(ctx->nodes.size()) : 0;
+    out_report->discarded_pending_request_count = (options->flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->action_requests.size()) : 0;
+    out_report->discarded_in_flight_request_count = (options->flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->consumed_requests.size()) : 0;
+    out_report->discarded_event_count = (options->flags & GUA_RESET_EVENTS) != 0U ? static_cast<uint32_t>(ctx->events.size()) : 0;
+    out_report->discarded_log_count = (options->flags & GUA_RESET_LOGS) != 0U ? static_cast<uint32_t>(ctx->logs.size()) : 0;
+    out_report->discarded_screenshot = (options->flags & GUA_RESET_SCREENSHOT) != 0U && !ctx->screenshot.data_uri.empty() ? 1 : 0;
+
+    if ((options->flags & GUA_RESET_NODES) != 0U) {
+        ctx->screen = "unknown";
+        ctx->nodes.clear();
+    }
+    if ((options->flags & GUA_RESET_REQUESTS) != 0U) {
+        ctx->action_requests.clear();
+        ctx->consumed_requests.clear();
+    }
+    if ((options->flags & GUA_RESET_EVENTS) != 0U) ctx->events.clear();
+    if ((options->flags & GUA_RESET_LOGS) != 0U) {
+        ctx->logs.clear();
+        ctx->next_log_sequence = 1;
+        ctx->logs_json_cache.clear();
+    }
+    if ((options->flags & GUA_RESET_SCREENSHOT) != 0U) {
+        ctx->screenshot = Screenshot {};
+        ctx->screenshot_json_cache.clear();
+    }
+    ctx->frame_sequence = 0;
+    ctx->revision = 0;
+    ctx->previous_semantic_snapshot.clear();
+    ctx->json_cache.clear();
+    ++ctx->session_epoch;
+    ctx->next_request_id = 1;
+    out_report->session_epoch = ctx->session_epoch;
+    out_report->result = GUA_RESET_SUCCEEDED;
+    return out_report->result;
 }

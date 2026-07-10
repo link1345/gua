@@ -42,6 +42,7 @@ int main()
     gua_end_frame(context);
     const std::string first = gua_get_ui_tree_json(context);
     assert(first.find("\"schemaVersion\":2") != std::string::npos);
+    assert(first.find("\"sessionEpoch\":1") != std::string::npos);
     assert(first.find("\"frameSequence\":1") != std::string::npos);
     assert(first.find("\"revision\":1") != std::string::npos);
     assert(first.find("\"parentId\":\"form\"") != std::string::npos);
@@ -139,6 +140,68 @@ int main()
     assert(event.status == GUA_ACTION_STATUS_SUCCEEDED);
     assert(event.sensitive == 1);
     assert(std::strlen(event.value) == 0);
+
+    gua_action_request_t in_flight { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(context, GUA_ACTION_FOCUS, "name", &in_flight) == 1);
+
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(context, &status) == 1);
+    assert(status.session_epoch == 1);
+    assert(status.pending_request_count == 4);
+    assert(status.in_flight_request_count == 1);
+    assert(status.unconsumed_event_count == 0);
+    assert(status.first_pending_action == GUA_ACTION_SET_CHECKED);
+    assert(std::strcmp(status.first_pending_node_id, "remember") == 0);
+
+    gua_reset_report_t report { sizeof(gua_reset_report_t) };
+    const gua_reset_options_t strict_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 1, 1 };
+    assert(gua_reset_context(context, &strict_reset, &report) == GUA_RESET_ERROR_DIRTY);
+    assert(report.session_epoch == 1);
+    assert(report.pending_request_count == 4);
+    assert(report.in_flight_request_count == 1);
+    assert(report.discarded_pending_request_count == 0);
+    assert(gua_get_context_status(context, &status) == 1);
+    assert(status.pending_request_count == 4);
+    assert(status.in_flight_request_count == 1);
+
+    gua_context_t* other = gua_create_context();
+    gua_begin_frame(other, "other");
+    gua_register_node(other, "other", "button", "Other", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(other);
+
+    report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    const gua_reset_options_t stale_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 2 };
+    assert(gua_reset_context(context, &stale_reset, &report) == GUA_RESET_ERROR_STALE_EPOCH);
+    assert(report.session_epoch == 1);
+
+    report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    const gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 1 };
+    assert(gua_reset_context(context, &reset, &report) == GUA_RESET_SUCCEEDED);
+    assert(report.previous_session_epoch == 1 && report.session_epoch == 2);
+    assert(report.discarded_pending_request_count == 4);
+    assert(report.discarded_in_flight_request_count == 1);
+    assert(gua_get_context_status(context, &status) == 1);
+    assert(status.session_epoch == 2 && status.frame_sequence == 0 && status.revision == 0);
+    assert(status.node_count == 0 && status.pending_request_count == 0 && status.unconsumed_event_count == 0);
+    assert(std::string(gua_get_ui_tree_json(context)).find("\"sessionEpoch\":2") != std::string::npos);
+    char other_id[16] {};
+    assert(gua_find_node_by_id(other, "other", other_id, sizeof(other_id)) == 1);
+
+    const gua_action_result_t unsolicited { sizeof(gua_action_result_t), 0, GUA_ACTION_FOCUS,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, "focus-target", nullptr, 0 };
+    assert(gua_emit_action_result(context, &unsolicited) == 1);
+    report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    const gua_reset_options_t strict_events { sizeof(gua_reset_options_t), GUA_RESET_EVENTS, 1, 2 };
+    assert(gua_reset_context(context, &strict_events, &report) == GUA_RESET_ERROR_DIRTY);
+    assert(report.unconsumed_event_count == 1);
+    assert(report.discarded_event_count == 0);
+    assert(report.first_event_action == GUA_ACTION_FOCUS);
+    assert(std::strcmp(report.first_event_node_id, "focus-target") == 0);
+    gua_event_v2_t preserved_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2(context, &preserved_event) == 1);
+    assert(preserved_event.action == GUA_ACTION_FOCUS);
+
+    gua_destroy_context(other);
 
     gua_destroy_context(context);
     return 0;

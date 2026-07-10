@@ -52,6 +52,38 @@ public sealed class SelectorParityTests
         }
     }
 
+    [Test]
+    public void RemoteResetRejectsStaleEpochAndKeepsTheConnection()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Native.gua_runtime_begin_frame(runtime, "fixture");
+            Native.gua_runtime_register_node(runtime, "save", "button", "Save", new GuaBounds(0, 0, 1, 1), 1, 1);
+            Native.gua_runtime_end_frame(runtime);
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+
+            var first = remote.Reset(new GuaResetOptions(ExpectedSessionEpoch: 1));
+            var stale = remote.Reset(new GuaResetOptions(ExpectedSessionEpoch: 1));
+            Assert.Multiple(() =>
+            {
+                Assert.That(first.Result, Is.EqualTo(GuaResetResult.Succeeded));
+                Assert.That(first.SessionEpoch, Is.EqualTo(2));
+                Assert.That(stale.Result, Is.EqualTo(GuaResetResult.StaleEpoch));
+                Assert.That(remote.GetContextStatus().SessionEpoch, Is.EqualTo(2));
+            });
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
+        }
+    }
+
     private static int ReservePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

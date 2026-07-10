@@ -45,6 +45,56 @@ internal static partial class Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeContextStatus
+    {
+        public uint StructSize;
+        public ulong SessionEpoch;
+        public ulong FrameSequence;
+        public ulong Revision;
+        public uint NodeCount;
+        public uint PendingRequestCount;
+        public uint InFlightRequestCount;
+        public uint UnconsumedEventCount;
+        public uint LogCount;
+        public int HasScreenshot;
+        public int FirstPendingAction;
+        public fixed byte FirstPendingNodeId[128];
+        public int FirstEventAction;
+        public fixed byte FirstEventNodeId[128];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeResetOptions
+    {
+        public uint StructSize;
+        public uint Flags;
+        public int Strict;
+        public ulong ExpectedSessionEpoch;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeResetReport
+    {
+        public uint StructSize;
+        public int Result;
+        public ulong PreviousSessionEpoch;
+        public ulong SessionEpoch;
+        public uint PendingRequestCount;
+        public uint InFlightRequestCount;
+        public uint UnconsumedEventCount;
+        public uint DiscardedNodeCount;
+        public uint DiscardedPendingRequestCount;
+        public uint DiscardedInFlightRequestCount;
+        public uint DiscardedEventCount;
+        public uint DiscardedLogCount;
+        public int DiscardedScreenshot;
+        public int FirstPendingAction;
+        public fixed byte FirstPendingNodeId[128];
+        public int FirstEventAction;
+        public fixed byte FirstEventNodeId[128];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct GuaNativeActionRequest
     {
         public uint StructSize;
@@ -309,4 +359,10 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static partial int gua_emit_action_result(nint context, in GuaNativeActionResult result);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_get_context_status(nint context, GuaNativeContextStatus* status);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_reset_context(nint context, in GuaNativeResetOptions options, GuaNativeResetReport* report);
 }

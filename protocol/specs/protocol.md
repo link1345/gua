@@ -12,6 +12,7 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 - `schemaVersion`: currently `2`
 - `frameSequence`: increments once for every completed host frame
 - `revision`: increments only when the semantic screen or node content changes
+- `sessionEpoch`: identifies the current test-isolation session and increments after every successful context reset
 
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
@@ -27,6 +28,35 @@ allows native JSON scalar values for future transports.
 semantic tree in consecutive frames increments `frameSequence` but leaves
 `revision` unchanged. Changing the screen, node membership, hierarchy, bounds,
 text, value, state, or actions increments `revision` at `end_frame`.
+
+`sessionEpoch` starts at 1. A successful reset starts a new epoch and resets
+`frameSequence` and `revision` to zero. Consumers must use the epoch together
+with frame/revision metadata; values from an older epoch are stale.
+
+## Test session inspection and reset
+
+Context inspection reports semantic node count, pending and in-flight action
+request counts, unconsumed event count, log count, screenshot presence, and the
+first request/event action plus node id. It never includes action payload values,
+so sensitive values cannot leak through teardown diagnostics.
+
+Reset is scoped to one `gua_context_t` / `gua_runtime_t`; it does not use global
+state and cannot affect another context. The selectable flags are nodes (1),
+requests (2), events (4), retained diagnostic history (8), logs (16), and
+screenshot (32). The default is 15: nodes, requests, events, and history are
+cleared, while logs and screenshot are preserved unless explicitly selected.
+Bridge server, port, active WebSocket connections, and context configuration are
+never reset.
+
+Strict reset checks selected request/event queues before mutation. If pending,
+in-flight, or unconsumed state exists, it returns `dirty` with counts and a
+redacted first-item summary and changes nothing. Non-strict reset reports how
+many selected items it discarded. Every successful reset increments
+`sessionEpoch`; local callers may pass zero to use the current epoch, but remote
+`reset_context` commands must provide `expectedSessionEpoch`. A stale remote
+epoch is rejected without mutation. Multiple clients of one runtime observe the
+same reset because the isolation boundary is the shared runtime context, not a
+WebSocket connection.
 
 ## Adapter-Owned Reflection
 
@@ -132,6 +162,8 @@ The v1 action names map directly to the additive C ABI action enum: `click`, `fo
 - `get_screenshot`
 - `get_logs`
 - `poll_events`
+- `get_context_status`
+- `reset_context` with `expectedSessionEpoch`, optional reset `flags`, and optional `strict`
 
 For the Inspector WebSocket bridge, commands are sent as JSON text messages with
 a numeric `id`. Responses echo the same `id` and either include `result` or

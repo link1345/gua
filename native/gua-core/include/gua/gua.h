@@ -96,6 +96,67 @@ typedef struct gua_event_v2_t {
     int sensitive;
 } gua_event_v2_t;
 
+enum {
+    GUA_RESET_NODES = 1U << 0,
+    GUA_RESET_REQUESTS = 1U << 1,
+    GUA_RESET_EVENTS = 1U << 2,
+    GUA_RESET_HISTORY = 1U << 3,
+    GUA_RESET_LOGS = 1U << 4,
+    GUA_RESET_SCREENSHOT = 1U << 5,
+    GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY
+};
+
+enum {
+    GUA_RESET_SUCCEEDED = 1,
+    GUA_RESET_ERROR_INVALID_ARGUMENT = -1,
+    GUA_RESET_ERROR_DIRTY = -2,
+    GUA_RESET_ERROR_STALE_EPOCH = -3
+};
+
+typedef struct gua_context_status_t {
+    uint32_t struct_size;
+    uint64_t session_epoch;
+    uint64_t frame_sequence;
+    uint64_t revision;
+    uint32_t node_count;
+    uint32_t pending_request_count;
+    uint32_t in_flight_request_count;
+    uint32_t unconsumed_event_count;
+    uint32_t log_count;
+    int has_screenshot;
+    int first_pending_action;
+    char first_pending_node_id[128];
+    int first_event_action;
+    char first_event_node_id[128];
+} gua_context_status_t;
+
+typedef struct gua_reset_options_t {
+    uint32_t struct_size;
+    uint32_t flags;
+    int strict;
+    uint64_t expected_session_epoch;
+} gua_reset_options_t;
+
+typedef struct gua_reset_report_t {
+    uint32_t struct_size;
+    int result;
+    uint64_t previous_session_epoch;
+    uint64_t session_epoch;
+    uint32_t pending_request_count;
+    uint32_t in_flight_request_count;
+    uint32_t unconsumed_event_count;
+    uint32_t discarded_node_count;
+    uint32_t discarded_pending_request_count;
+    uint32_t discarded_in_flight_request_count;
+    uint32_t discarded_event_count;
+    uint32_t discarded_log_count;
+    int discarded_screenshot;
+    int first_pending_action;
+    char first_pending_node_id[128];
+    int first_event_action;
+    char first_event_node_id[128];
+} gua_reset_report_t;
+
 typedef struct gua_node_state_t {
     int visible;
     int enabled;
@@ -232,6 +293,8 @@ int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_
 int gua_emit_action_result(gua_context_t* ctx, const gua_action_result_t* result);
 int gua_poll_event_v2(gua_context_t* ctx, gua_event_v2_t* out_event);
 int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v2_t* out_event);
+int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status);
+int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report);
 
 #ifdef __cplusplus
 }
