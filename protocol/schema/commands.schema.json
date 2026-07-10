@@ -6,6 +6,10 @@
     { "$ref": "#/$defs/getUiTree" },
     { "$ref": "#/$defs/nodeCommand" },
     { "$ref": "#/$defs/pressKey" },
+    { "$ref": "#/$defs/valueAction" },
+    { "$ref": "#/$defs/checkedAction" },
+    { "$ref": "#/$defs/selectAction" },
+    { "$ref": "#/$defs/scrollAction" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -28,7 +32,8 @@
           "enum": ["get_node", "click_node", "focus_node", "wait_for_node"]
         },
         "nodeId": { "type": "string", "minLength": 1 },
-        "timeoutMs": { "type": "integer", "minimum": 0 }
+        "timeoutMs": { "type": "integer", "minimum": 0 },
+        "requestId": { "type": "integer", "minimum": 1 }
       }
     },
     "pressKey": {
@@ -37,7 +42,57 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "press_key" },
-        "key": { "type": "string", "minLength": 1 }
+        "key": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "modifiers": { "type": "integer", "minimum": 0 },
+        "requestId": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "valueAction": {
+      "type": "object",
+      "required": ["type", "nodeId", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "set_value" },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "value": { "type": "string" },
+        "sensitive": { "type": "boolean", "default": false },
+        "requestId": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "checkedAction": {
+      "type": "object",
+      "required": ["type", "nodeId", "checked"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "set_checked" },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "checked": { "type": "boolean" },
+        "requestId": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "selectAction": {
+      "type": "object",
+      "required": ["type", "nodeId", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "select" },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 },
+        "requestId": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "scrollAction": {
+      "type": "object",
+      "required": ["type", "nodeId", "deltaX", "deltaY"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "scroll" },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "deltaX": { "type": "number" },
+        "deltaY": { "type": "number" },
+        "scrollUnit": { "type": "integer", "enum": [0, 1] },
+        "requestId": { "type": "integer", "minimum": 1 }
       }
     },
     "textInput": {

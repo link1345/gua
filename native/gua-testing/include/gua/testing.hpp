@@ -3,6 +3,7 @@
 #include "gua/gua.h"
 
 #include <chrono>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -52,6 +53,37 @@ public:
         }
     }
 
+    [[nodiscard]] std::uint64_t focus() const { return enqueue(GUA_ACTION_FOCUS); }
+    [[nodiscard]] std::uint64_t set_value(std::string_view value, bool sensitive = false) const { return enqueue(GUA_ACTION_SET_VALUE, value, false, sensitive); }
+    [[nodiscard]] std::uint64_t set_checked(bool value) const { return enqueue(GUA_ACTION_SET_CHECKED, {}, value); }
+    [[nodiscard]] std::uint64_t select(std::string_view value) const { return enqueue(GUA_ACTION_SELECT, value); }
+    [[nodiscard]] std::uint64_t scroll(float dx, float dy, int unit = 0) const
+    {
+        gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SCROLL, id_.c_str(), nullptr, dx, dy, 0, nullptr, 0, 0, unit };
+        return enqueue_descriptor(descriptor);
+    }
+
+    [[nodiscard]] std::uint64_t press_key(std::string_view key, std::uint32_t modifiers = 0) const
+    {
+        std::string key_buffer(key);
+        gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t), GUA_ACTION_PRESS_KEY, id_.c_str(), nullptr, 0, 0, 0, key_buffer.c_str(), modifiers, 0, 0 };
+        return enqueue_descriptor(descriptor);
+    }
+
+    void wait_for_completion(std::uint64_t request_id, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) const
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        do {
+            gua_event_v2_t event { sizeof(gua_event_v2_t) };
+            if (gua_poll_event_v2_for_request(context_, request_id, &event) != 0) {
+                if (event.status == GUA_ACTION_STATUS_FAILED) throw std::runtime_error("Gua action failed for node: " + id_);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        throw std::runtime_error("Timed out waiting for Gua action completion: " + id_);
+    }
+
     void wait_for(std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) const
     {
         const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -68,6 +100,22 @@ public:
     }
 
 private:
+    [[nodiscard]] std::uint64_t enqueue(int action, std::string_view value = {}, bool bool_value = false, bool sensitive = false) const
+    {
+        std::string value_buffer(value);
+        gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t), action, id_.c_str(),
+            value_buffer.empty() ? nullptr : value_buffer.c_str(), 0, 0, bool_value ? 1 : 0, nullptr, 0, sensitive ? 1 : 0, 0 };
+        return enqueue_descriptor(descriptor);
+    }
+
+    [[nodiscard]] std::uint64_t enqueue_descriptor(const gua_action_request_descriptor_t& descriptor) const
+    {
+        std::uint64_t request_id = 0;
+        const int result = gua_enqueue_action(context_, &descriptor, &request_id);
+        if (result != GUA_ACTION_ACCEPTED) throw std::runtime_error("Failed to enqueue Gua action (" + std::to_string(result) + ") for node: " + id_);
+        return request_id;
+    }
+
     gua_node_state_t read_state() const
     {
         gua_node_state_t state {};
