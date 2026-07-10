@@ -34,7 +34,7 @@ bot, or full UI framework.
 
 ## AI Working Notes
 
-- Read `plan.md` and `docs/planning/gua-project-plan.md` before broad design work.
+- Read `README.md` and `protocol/specs/protocol.md` before broad design work.
 - Keep generated output, dependency folders, and local build artifacts out of git.
 - When changing schema behavior, update protocol docs and affected clients together.
 - Preserve the monorepo shape unless the user explicitly asks to split packages.
