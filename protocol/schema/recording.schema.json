@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/recording.schema.json",
+  "title": "Gua UI operation recording v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "steps"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "scope": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [{ "required": ["id"] }, { "required": ["role"] }]
+    },
+    "coordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "relativeMilliseconds", "preRevision", "postRevision", "sensitive"],
+      "properties": {
+        "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] },
+        "requestId": { "type": "integer", "minimum": 0 },
+        "eventId": { "type": "integer", "minimum": 0 },
+        "target": { "$ref": "#/$defs/target" },
+        "coordinateFallback": { "$ref": "#/$defs/coordinate" },
+        "relativeMilliseconds": { "type": "integer", "minimum": 0 },
+        "preRevision": { "type": "integer", "minimum": 0 },
+        "postRevision": { "type": "integer", "minimum": 0 },
+        "waitCondition": { "type": "string", "minLength": 1 },
+        "value": { "type": "string" },
+        "secretKey": { "type": "string", "minLength": 1 },
+        "sensitive": { "type": "boolean" }
+      },
+      "allOf": [
+        { "anyOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] },
+        { "if": { "properties": { "sensitive": { "const": true } }, "required": ["sensitive"] }, "then": { "required": ["secretKey"], "not": { "required": ["value"] } } }
+      ]
+    }
+  }
+}

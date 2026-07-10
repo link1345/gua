@@ -83,6 +83,13 @@ func _run() -> void:
 
 	ui.attach(screen)
 	ui.update("title")
+	await process_frame
+	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
+	var capture := ui.capture_viewport_screenshot(smoke_image)
+	if not capture.get("ok", false) or not ui.context.get_screenshot_json().contains("data:image/png;base64,"):
+		_fail("Gua smoke did not publish an opt-in Godot viewport PNG: %s" % capture)
+		return
 
 	var tree_json := ui.get_ui_tree_json()
 	if not tree_json.contains("\"start\"") or not tree_json.contains("\"button\""):

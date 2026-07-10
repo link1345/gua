@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "steps": [
+    {
+      "action": "click",
+      "requestId": 42,
+      "eventId": 42,
+      "target": { "id": "start" },
+      "relativeMilliseconds": 0,
+      "preRevision": 3,
+      "postRevision": 4,
+      "waitCondition": "visible:start",
+      "sensitive": false
+    },
+    {
+      "action": "set_value",
+      "requestId": 43,
+      "eventId": 43,
+      "target": { "role": "textbox", "name": "Password", "scope": "login" },
+      "relativeMilliseconds": 20,
+      "preRevision": 4,
+      "postRevision": 5,
+      "secretKey": "login-password",
+      "sensitive": true
+    }
+  ]
+}
