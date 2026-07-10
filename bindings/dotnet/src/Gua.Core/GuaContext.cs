@@ -116,6 +116,22 @@ public sealed class GuaContext : IGuaContext, IDisposable
         return ReadCopiedJson(JsonSource.UiTree, _handle);
     }
 
+    public string GetDiagnosticsJson()
+    {
+        ThrowIfDisposed();
+        return ReadCopiedJson(JsonSource.Diagnostics, _handle);
+    }
+
+    public void ConfigureDiagnostics(uint historyLimit, string environmentJson = "{}")
+    {
+        ThrowIfDisposed();
+        if (Native.gua_set_diagnostics_history_limit(_handle, historyLimit) == 0 ||
+            Native.gua_set_diagnostics_environment_json(_handle, environmentJson) == 0)
+        {
+            throw new ArgumentException("Invalid Gua diagnostics configuration.", nameof(environmentJson));
+        }
+    }
+
     public unsafe GuaContextStatus GetContextStatus()
     {
         ThrowIfDisposed();
@@ -550,6 +566,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
             JsonSource.UiTree => Native.gua_copy_ui_tree_json(handle, buffer, bufferSize),
             JsonSource.Logs => Native.gua_copy_logs_json(handle, buffer, bufferSize),
             JsonSource.Screenshot => Native.gua_copy_screenshot_json(handle, buffer, bufferSize),
+            JsonSource.Diagnostics => Native.gua_copy_diagnostics_json(handle, buffer, bufferSize),
             _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
         };
     }
@@ -559,6 +576,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
         UiTree,
         Logs,
         Screenshot,
+        Diagnostics,
     }
 
     private static readonly System.Text.Json.JsonSerializerOptions QueryJsonOptions = new()

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "sessionEpoch": 1,
+  "frameSequence": 1,
+  "revision": 1,
+  "historyLimit": 100,
+  "pendingRequestCount": 0,
+  "inFlightRequestCount": 0,
+  "unconsumedEventCount": 0,
+  "environment": { "testName": "fixture" },
+  "uiTree": { "schemaVersion": 2, "sessionEpoch": 1, "frameSequence": 1, "revision": 1, "screen": "title", "nodes": [] },
+  "pendingRequests": [],
+  "operations": [],
+  "events": [],
+  "logs": [],
+  "screenshot": null
+}

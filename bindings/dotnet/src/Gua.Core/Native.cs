@@ -315,6 +315,15 @@ internal static partial class Native
     [LibraryImport("gua")]
     internal static unsafe partial int gua_copy_screenshot_json(nint context, byte* outJson, int outJsonSize);
 
+    [LibraryImport("gua")]
+    internal static partial int gua_set_diagnostics_history_limit(nint context, uint historyLimit);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial int gua_set_diagnostics_environment_json(nint context, string environmentJson);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_diagnostics_json(nint context, byte* outJson, int outJsonSize);
+
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_get_node_state(nint context, string nodeId, out GuaNodeState state);
 

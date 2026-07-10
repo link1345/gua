@@ -2,6 +2,8 @@
 #include "gua/testing.hpp"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -72,6 +74,37 @@ int main()
             message.find("frameSequence=1") != std::string::npos && message.find("revision=1") != std::string::npos;
     }
     assert(stale_snapshot_rejected);
+
+    const auto diagnostics_root = std::filesystem::temp_directory_path() / "gua-native-diagnostics-test";
+    std::filesystem::remove_all(diagnostics_root);
+    bool native_artifact_reported = false;
+    {
+        DiagnosticScope diagnostics({ diagnostics_root, "hidden assertion" });
+        try { Locator(context, "hidden").to_be_visible(); }
+        catch (const std::runtime_error& error) {
+            native_artifact_reported = std::string(error.what()).find("Gua diagnostics:") != std::string::npos;
+        }
+    }
+    assert(native_artifact_reported);
+    bool native_artifact_exists = false;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(diagnostics_root)) {
+        if (entry.path().filename() == "diagnostics.json") native_artifact_exists = true;
+    }
+    assert(native_artifact_exists);
+    const auto blocking_file = diagnostics_root / "not-a-directory";
+    std::ofstream(blocking_file) << "block";
+    bool native_capture_error_preserved = false;
+    {
+        DiagnosticScope diagnostics({ blocking_file, "writer failure" });
+        try { Locator(context, "hidden").to_be_visible(); }
+        catch (const std::runtime_error& error) {
+            const std::string message(error.what());
+            native_capture_error_preserved = message.starts_with("Expected Gua node") &&
+                message.find("Gua diagnostics capture error:") != std::string::npos;
+        }
+    }
+    assert(native_capture_error_preserved);
+    std::filesystem::remove_all(diagnostics_root);
 
     int attempts = 0;
     wait_until([&attempts] { return ++attempts == 3; }, "third predicate evaluation", std::chrono::milliseconds(20), std::chrono::milliseconds(1));

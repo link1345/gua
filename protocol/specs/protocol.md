@@ -58,6 +58,31 @@ epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
 WebSocket connection.
 
+## Failure diagnostics and artifact version 1
+
+`diagnostics.schema.json` is the source of truth for a best-effort failure
+snapshot. The additive C ABI copy-JSON API and WebSocket `get_diagnostics`
+command return the same versioned document. It includes the final semantic UI
+tree, session/frame/revision, pending and in-flight requests, recent operation
+and observed-event history, logs, optional screenshot, and caller-provided
+environment metadata.
+
+Operation and event history are context-owned bounded ring buffers. The default
+limit is 100 entries per history and callers may set another non-negative limit;
+zero disables retention. Polling an event never removes its retained history.
+`GUA_RESET_HISTORY` clears both histories without changing queue semantics.
+
+Sensitive action values are available only while the adapter consumes a
+request. Pending diagnostics and retained history store an empty value with
+`sensitive: true`; they never retain plaintext. A missing screenshot is `null`
+and does not fail semantic diagnostics capture.
+
+Filesystem layout and overwrite policy belong to testing helpers, not the
+runtime core. Writers use a unique failure directory, preserve the original
+assertion/timeout when capture fails, and report capture errors as a secondary
+note. When a wait captured an initial tree, the writer creates a deterministic
+node-id diff with added, removed, and changed IDs.
+
 ## Adapter-Owned Reflection
 
 Runtime adapters should rebuild the semantic tree from the host UI every frame
@@ -161,6 +186,7 @@ The v1 action names map directly to the additive C ABI action enum: `click`, `fo
 - `wait_for_node`
 - `get_screenshot`
 - `get_logs`
+- `get_diagnostics`
 - `poll_events`
 - `get_context_status`
 - `reset_context` with `expectedSessionEpoch`, optional reset `flags`, and optional `strict`
@@ -209,6 +235,7 @@ Initial MCP tools:
 - `wait_for_node`: polls `get_ui_tree` until a node id appears
 - `get_screenshot`: returns the latest screenshot payload
 - `get_logs`: returns ordered runtime logs
+- `get_diagnostics`: returns the versioned best-effort diagnostics snapshot
 - `run_test`: executes a small list of `wait_for_node` and `click_node` steps
 
 The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua

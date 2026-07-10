@@ -39,6 +39,7 @@ struct BridgeHandlers {
     std::function<std::string()> get_ui_tree_json;
     std::function<std::string()> get_logs_json;
     std::function<std::string()> get_screenshot_json;
+    std::function<std::string()> get_diagnostics_json;
     std::function<std::string(const QuerySelector& selector)> query_nodes_json;
     std::function<std::string()> get_context_status_json;
     std::function<std::string(unsigned long long expected_epoch, unsigned int flags, bool strict)> reset_context_json;

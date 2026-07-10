@@ -108,3 +108,26 @@ Node expectations expose `Focus`, `SetValue`, `SetChecked`, `Select`, `Scroll`,
 and `PressKey`. These methods enqueue requests and return a request ID;
 `WaitForAction` waits for the adapter's correlated observed result rather than
 treating enqueue acceptance as completion.
+
+## Failure diagnostics
+
+Configure `GuaAssertionOptions.Diagnostics` to capture a unique artifact
+directory automatically when a semantic assertion or wait fails:
+
+```csharp
+using var scope = GuaAssertionScope.Use(new GuaAssertionOptions
+{
+    Diagnostics = new GuaDiagnosticOptions
+    {
+        TestName = TestContext.CurrentContext.Test.FullName,
+        OutputDirectory = Path.Combine("artifacts", "gua"),
+    },
+});
+```
+
+The directory contains the final UI tree, bounded operation/event history,
+pending requests, logs, environment metadata, and an optional PNG. A wait also
+writes its initial tree and a deterministic node-id diff. Sensitive action
+values are redacted before the writer receives them. If capture fails, the
+original assertion delegate still determines the exception type and a secondary
+capture error is appended to its message.
