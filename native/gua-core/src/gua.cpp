@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <deque>
 #include <cstring>
+#include <cmath>
 #include <memory>
 #include <mutex>
 #include <regex>
@@ -32,8 +33,27 @@ struct Node {
 };
 
 struct Event {
-    int type;
+    int action;
     std::string node_id;
+    unsigned long long request_id = 0;
+    int status = GUA_ACTION_STATUS_SUCCEEDED;
+    int error_code = 0;
+    std::string value;
+    bool sensitive = false;
+};
+
+struct ActionRequest {
+    unsigned long long request_id;
+    int action;
+    std::string node_id;
+    std::string value;
+    float delta_x;
+    float delta_y;
+    int bool_value;
+    std::string key;
+    unsigned int modifiers;
+    bool sensitive;
+    int scroll_unit;
 };
 
 struct LogEntry {
@@ -153,6 +173,33 @@ bool is_in_scope(const std::vector<Node>& nodes, const Node& node, const char* p
     return false;
 }
 
+bool supports_action(const Node& node, int action)
+{
+    if (action == GUA_ACTION_PRESS_KEY) {
+        return node.role == "textbox";
+    }
+    if (action == GUA_ACTION_FOCUS) {
+        return node.role == "button" || node.role == "checkbox" || node.role == "radio" || node.role == "tab" ||
+            node.role == "textbox" || node.role == "slider" || node.role == "combobox" || node.role == "list";
+    }
+    if (action == GUA_ACTION_CLICK) {
+        return node.role == "button" || node.role == "checkbox" || node.role == "radio" || node.role == "tab";
+    }
+    if (action == GUA_ACTION_SET_VALUE) {
+        return node.role == "textbox" || node.role == "slider";
+    }
+    if (action == GUA_ACTION_SET_CHECKED) {
+        return node.role == "checkbox" || node.role == "radio";
+    }
+    if (action == GUA_ACTION_SELECT) {
+        return node.role == "combobox" || node.role == "list" || node.role == "listitem" || node.role == "tablist" || node.role == "tab";
+    }
+    if (action == GUA_ACTION_SCROLL) {
+        return node.role == "list" || node.role == "scrollarea";
+    }
+    return false;
+}
+
 std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_v1_t& selector)
 {
     std::string error;
@@ -191,13 +238,28 @@ std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_
     return json;
 }
 
+const char* action_name(int action)
+{
+    switch (action) {
+    case GUA_ACTION_CLICK: return "click";
+    case GUA_ACTION_FOCUS: return "focus";
+    case GUA_ACTION_SET_VALUE: return "set_value";
+    case GUA_ACTION_SET_CHECKED: return "set_checked";
+    case GUA_ACTION_SELECT: return "select";
+    case GUA_ACTION_SCROLL: return "scroll";
+    case GUA_ACTION_PRESS_KEY: return "press_key";
+    default: return "";
+    }
+}
+
 } // namespace
 
 struct gua_context_t {
     mutable std::mutex mutex;
     std::string screen = "unknown";
     std::vector<Node> nodes;
-    std::deque<std::string> click_requests;
+    std::deque<ActionRequest> action_requests;
+    std::deque<ActionRequest> consumed_requests;
     std::deque<Event> events;
     std::vector<LogEntry> logs;
     Screenshot screenshot;
@@ -207,6 +269,7 @@ struct gua_context_t {
     std::string screenshot_json_cache;
     unsigned long long frame_sequence = 0;
     unsigned long long revision = 0;
+    unsigned long long next_request_id = 1;
     std::string previous_semantic_snapshot;
 };
 
@@ -282,13 +345,15 @@ std::string build_semantic_snapshot_json(const gua_context_t& ctx)
             if ((node.known_mask & GUA_NODE_KNOWN_SELECTED) != 0U) append_state("selected", node.selected);
             json += "}";
         }
-        if ((node.role == "button" || node.role == "checkbox" || node.role == "radio" || node.role == "tab") && node.enabled) {
-            json += ",\"actions\":[\"click\",\"focus\"]}";
-        } else if ((node.role == "textbox" || node.role == "slider" || node.role == "combobox") && node.enabled) {
-            json += ",\"actions\":[\"focus\",\"set_value\"]}";
-        } else {
-            json += ",\"actions\":[]}";
+        json += ",\"actions\":[";
+        bool wrote_action = false;
+        for (int action = GUA_ACTION_CLICK; action <= GUA_ACTION_PRESS_KEY; ++action) {
+            if (!node.enabled || !supports_action(node, action)) continue;
+            if (wrote_action) json += ",";
+            json += "\"" + std::string(action_name(action)) + "\"";
+            wrote_action = true;
         }
+        json += "]}";
     }
 
     json += "]}";
@@ -629,20 +694,10 @@ extern "C" int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t*
 
 extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)
 {
-    if (ctx == nullptr || node_id == nullptr) {
-        return 0;
-    }
-
-    const std::lock_guard lock(ctx->mutex);
-    const auto found = std::any_of(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
-        return node.id == node_id && node.visible && node.enabled;
-    });
-    if (!found) {
-        return 0;
-    }
-
-    ctx->click_requests.push_back(node_id);
-    return 1;
+    const gua_action_request_descriptor_t descriptor {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, node_id, nullptr, 0, 0, 0, nullptr, 0, 0, 0
+    };
+    return gua_enqueue_action(ctx, &descriptor, nullptr) == GUA_ACTION_ACCEPTED ? 1 : 0;
 }
 
 extern "C" int gua_consume_click_request(gua_context_t* ctx, const char* node_id)
@@ -651,21 +706,8 @@ extern "C" int gua_consume_click_request(gua_context_t* ctx, const char* node_id
         return 0;
     }
 
-    const std::lock_guard lock(ctx->mutex);
-    const auto node_found = std::any_of(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) {
-        return node.id == node_id && node.visible && node.enabled;
-    });
-    if (!node_found) {
-        return 0;
-    }
-
-    const auto request = std::find(ctx->click_requests.begin(), ctx->click_requests.end(), node_id);
-    if (request == ctx->click_requests.end()) {
-        return 0;
-    }
-
-    ctx->click_requests.erase(request);
-    return 1;
+    gua_action_request_t request { sizeof(gua_action_request_t) };
+    return gua_consume_action_request(ctx, GUA_ACTION_CLICK, node_id, &request);
 }
 
 extern "C" int gua_emit_click(gua_context_t* ctx, const char* node_id)
@@ -674,9 +716,20 @@ extern "C" int gua_emit_click(gua_context_t* ctx, const char* node_id)
         return 0;
     }
 
-    const std::lock_guard lock(ctx->mutex);
-    ctx->events.push_back(Event { GUA_EVENT_CLICK, node_id });
-    return 1;
+    unsigned long long request_id = 0;
+    {
+        const std::lock_guard lock(ctx->mutex);
+        const auto consumed = std::find_if(ctx->consumed_requests.begin(), ctx->consumed_requests.end(), [&](const ActionRequest& request) {
+            return request.action == GUA_ACTION_CLICK && request.node_id == node_id;
+        });
+        if (consumed != ctx->consumed_requests.end()) {
+            request_id = consumed->request_id;
+        }
+    }
+    const gua_action_result_t result {
+        sizeof(gua_action_result_t), request_id, GUA_ACTION_CLICK, GUA_ACTION_STATUS_SUCCEEDED, 0, node_id, nullptr, 0
+    };
+    return gua_emit_action_result(ctx, &result);
 }
 
 extern "C" int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event)
@@ -686,14 +739,139 @@ extern "C" int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event)
     }
 
     const std::lock_guard lock(ctx->mutex);
-    if (ctx->events.empty()) {
+    const auto legacy_event = std::find_if(ctx->events.begin(), ctx->events.end(), [](const Event& event) {
+        return event.action == GUA_ACTION_CLICK || event.action == GUA_ACTION_FOCUS;
+    });
+    if (legacy_event == ctx->events.end()) {
         return 0;
     }
 
+    const Event event = *legacy_event;
+    ctx->events.erase(legacy_event);
+
+    out_event->type = event.action;
+    std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
+    return 1;
+}
+
+extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id)
+{
+    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_action_request_descriptor_t) ||
+        descriptor->action < GUA_ACTION_CLICK || descriptor->action > GUA_ACTION_PRESS_KEY) {
+        return GUA_ACTION_ERROR_INVALID_ARGUMENT;
+    }
+
+    const std::string node_id = descriptor->node_id != nullptr ? descriptor->node_id : "";
+    const std::string value = descriptor->value != nullptr ? descriptor->value : "";
+    const std::string key = descriptor->key != nullptr ? descriptor->key : "";
+    if ((descriptor->action != GUA_ACTION_PRESS_KEY && node_id.empty()) ||
+        (descriptor->action == GUA_ACTION_PRESS_KEY && key.empty()) ||
+        (descriptor->action == GUA_ACTION_SELECT && value.empty()) ||
+        (descriptor->action == GUA_ACTION_SCROLL && (!std::isfinite(descriptor->delta_x) || !std::isfinite(descriptor->delta_y)))) {
+        return GUA_ACTION_ERROR_INVALID_VALUE;
+    }
+
+    const std::lock_guard lock(ctx->mutex);
+    if (!node_id.empty()) {
+        const auto node = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& candidate) { return candidate.id == node_id; });
+        if (node == ctx->nodes.end()) return GUA_ACTION_ERROR_NODE_NOT_FOUND;
+        if (!node->visible) return GUA_ACTION_ERROR_HIDDEN;
+        if (!node->enabled) return GUA_ACTION_ERROR_DISABLED;
+        if (!supports_action(*node, descriptor->action)) return GUA_ACTION_ERROR_UNSUPPORTED;
+    }
+
+    const unsigned long long request_id = ctx->next_request_id++;
+    ctx->action_requests.push_back(ActionRequest {
+        request_id, descriptor->action, node_id, value, descriptor->delta_x, descriptor->delta_y,
+        descriptor->bool_value, key, descriptor->modifiers, descriptor->sensitive != 0, descriptor->scroll_unit
+    });
+    if (out_request_id != nullptr) *out_request_id = request_id;
+    return GUA_ACTION_ACCEPTED;
+}
+
+extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_id, gua_action_request_t* out_request)
+{
+    if (ctx == nullptr || out_request == nullptr || out_request->struct_size < sizeof(gua_action_request_t)) return 0;
+    const std::string target = node_id != nullptr ? node_id : "";
+    const std::lock_guard lock(ctx->mutex);
+    const auto request = std::find_if(ctx->action_requests.begin(), ctx->action_requests.end(), [&](const ActionRequest& candidate) {
+        return candidate.action == action && candidate.node_id == target;
+    });
+    if (request == ctx->action_requests.end()) return 0;
+    const ActionRequest value = *request;
+    ctx->action_requests.erase(request);
+    ctx->consumed_requests.push_back(value);
+    out_request->request_id = value.request_id;
+    out_request->action = value.action;
+    std::snprintf(out_request->node_id, sizeof(out_request->node_id), "%s", value.node_id.c_str());
+    std::snprintf(out_request->value, sizeof(out_request->value), "%s", value.value.c_str());
+    out_request->delta_x = value.delta_x;
+    out_request->delta_y = value.delta_y;
+    out_request->bool_value = value.bool_value;
+    std::snprintf(out_request->key, sizeof(out_request->key), "%s", value.key.c_str());
+    out_request->modifiers = value.modifiers;
+    out_request->sensitive = value.sensitive ? 1 : 0;
+    out_request->scroll_unit = value.scroll_unit;
+    return 1;
+}
+
+extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_result_t* result)
+{
+    if (ctx == nullptr || result == nullptr || result->struct_size < sizeof(gua_action_result_t) ||
+        result->action < GUA_ACTION_CLICK || result->action > GUA_ACTION_PRESS_KEY) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    auto consumed = ctx->consumed_requests.end();
+    if (result->request_id != 0) {
+        consumed = std::find_if(ctx->consumed_requests.begin(), ctx->consumed_requests.end(), [&](const ActionRequest& request) {
+            return request.request_id == result->request_id && request.action == result->action &&
+                request.node_id == (result->node_id != nullptr ? result->node_id : "");
+        });
+        if (consumed == ctx->consumed_requests.end()) return 0;
+    }
+    ctx->events.push_back(Event {
+        result->action,
+        result->node_id != nullptr ? result->node_id : "",
+        result->request_id,
+        result->status,
+        result->error_code,
+        result->sensitive != 0 ? "" : (result->value != nullptr ? result->value : ""),
+        result->sensitive != 0,
+    });
+    if (consumed != ctx->consumed_requests.end()) ctx->consumed_requests.erase(consumed);
+    return 1;
+}
+
+extern "C" int gua_poll_event_v2(gua_context_t* ctx, gua_event_v2_t* out_event)
+{
+    if (ctx == nullptr || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v2_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (ctx->events.empty()) return 0;
     const Event event = ctx->events.front();
     ctx->events.pop_front();
-
-    out_event->type = event.type;
+    out_event->request_id = event.request_id;
+    out_event->action = event.action;
+    out_event->status = event.status;
+    out_event->error_code = event.error_code;
     std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
+    std::snprintf(out_event->value, sizeof(out_event->value), "%s", event.value.c_str());
+    out_event->sensitive = event.sensitive ? 1 : 0;
+    return 1;
+}
+
+extern "C" int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v2_t* out_event)
+{
+    if (ctx == nullptr || request_id == 0 || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v2_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    const auto found = std::find_if(ctx->events.begin(), ctx->events.end(), [&](const Event& event) { return event.request_id == request_id; });
+    if (found == ctx->events.end()) return 0;
+    const Event event = *found;
+    ctx->events.erase(found);
+    out_event->request_id = event.request_id;
+    out_event->action = event.action;
+    out_event->status = event.status;
+    out_event->error_code = event.error_code;
+    std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
+    std::snprintf(out_event->value, sizeof(out_event->value), "%s", event.value.c_str());
+    out_event->sensitive = event.sensitive ? 1 : 0;
     return 1;
 }

@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cctype>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -30,6 +31,14 @@ struct Command {
     std::string node_id;
     std::string key;
     gua::ws::QuerySelector selector;
+    std::string value;
+    float delta_x = 0;
+    float delta_y = 0;
+    bool bool_value = false;
+    unsigned int modifiers = 0;
+    bool sensitive = false;
+    int scroll_unit = 0;
+    unsigned long long request_id = 0;
 };
 
 struct ClientConnection {
@@ -466,6 +475,47 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
     return std::stoi(std::string(json.substr(start, end - start)));
 }
 
+std::optional<unsigned long long> json_uint64_field(std::string_view json, std::string_view field)
+{
+    const std::string key = "\"" + std::string(field) + "\"";
+    const std::size_t key_position = json.find(key);
+    if (key_position == std::string_view::npos) return std::nullopt;
+    const std::size_t colon = json.find(':', key_position + key.size());
+    if (colon == std::string_view::npos) return std::nullopt;
+    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
+    if (start == std::string_view::npos) return std::nullopt;
+    std::size_t end = start;
+    while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+    if (end == start) return std::nullopt;
+    return std::stoull(std::string(json.substr(start, end - start)));
+}
+
+std::optional<double> json_number_field(std::string_view json, std::string_view field)
+{
+    const std::string key = "\"" + std::string(field) + "\"";
+    const std::size_t key_position = json.find(key);
+    if (key_position == std::string_view::npos) return std::nullopt;
+    const std::size_t colon = json.find(':', key_position + key.size());
+    if (colon == std::string_view::npos) return std::nullopt;
+    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
+    if (start == std::string_view::npos) return std::nullopt;
+    std::size_t end = start;
+    while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.' || json[end] == 'e' || json[end] == 'E')) ++end;
+    if (end == start) return std::nullopt;
+    return std::stod(std::string(json.substr(start, end - start)));
+}
+
+bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
+{
+    const std::string key = "\"" + std::string(field) + "\"";
+    const std::size_t key_position = json.find(key);
+    if (key_position == std::string_view::npos) return fallback;
+    const std::size_t colon = json.find(':', key_position + key.size());
+    if (colon == std::string_view::npos) return fallback;
+    const std::size_t start = json.find_first_not_of(" \t", colon + 1U);
+    return start != std::string_view::npos && json.substr(start, 4) == "true";
+}
+
 Command parse_command(std::string_view json)
 {
     Command command;
@@ -485,6 +535,14 @@ Command parse_command(std::string_view json)
     command.selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
     command.selector.visible = json_int_field(json, "visible").value_or(0);
     command.selector.enabled = json_int_field(json, "enabled").value_or(0);
+    command.value = json_string_field(json, "value").value_or("");
+    command.delta_x = static_cast<float>(json_number_field(json, "deltaX").value_or(0));
+    command.delta_y = static_cast<float>(json_number_field(json, "deltaY").value_or(0));
+    command.bool_value = json_bool_field(json, "checked");
+    command.modifiers = static_cast<unsigned int>(json_int_field(json, "modifiers").value_or(0));
+    command.sensitive = json_bool_field(json, "sensitive");
+    command.scroll_unit = json_int_field(json, "scrollUnit").value_or(0);
+    command.request_id = json_uint64_field(json, "requestId").value_or(0);
     return command;
 }
 
@@ -501,6 +559,19 @@ std::string ok_null_response(int id)
 std::string error_response(int id, std::string_view message)
 {
     return "{\"id\":" + std::to_string(id) + ",\"ok\":false,\"error\":\"" + escape_json(message) + "\"}";
+}
+
+std::string_view action_error_name(long long code)
+{
+    switch (code) {
+    case -1: return "invalid_argument";
+    case -2: return "node_not_found";
+    case -3: return "hidden";
+    case -4: return "disabled";
+    case -5: return "unsupported";
+    case -6: return "invalid_value";
+    default: return "unknown";
+    }
 }
 
 Socket create_listen_socket(unsigned short port)
@@ -745,6 +816,20 @@ private:
                     return error_response(command.id, "query_nodes is not supported by this bridge");
                 }
                 return ok_response(command.id, handlers_.query_nodes_json(command.selector));
+            }
+            if (command.type == "poll_events") {
+                return handlers_.poll_action_event_json
+                    ? ok_response(command.id, handlers_.poll_action_event_json(command.request_id))
+                    : error_response(command.id, "poll_events is not supported by this bridge");
+            }
+            if (handlers_.enqueue_action && (command.type == "click_node" || command.type == "focus_node" || command.type == "press_key" ||
+                command.type == "set_value" || command.type == "set_checked" || command.type == "select" || command.type == "scroll")) {
+                const long long request_id = handlers_.enqueue_action(gua::ws::ActionCommand {
+                    command.type, command.node_id, command.value, command.delta_x, command.delta_y, command.bool_value,
+                    command.key, command.modifiers, command.sensitive, command.scroll_unit });
+                return request_id > 0
+                    ? ok_response(command.id, "{\"requestId\":" + std::to_string(request_id) + "}")
+                    : error_response(command.id, "Gua action rejected: " + std::string(action_error_name(request_id)));
             }
             if (command.type == "click_node") {
                 return handlers_.click_node(command.node_id)

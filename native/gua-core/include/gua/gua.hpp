@@ -3,6 +3,7 @@
 #include "gua/gua.h"
 
 #include <stdexcept>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,6 +34,36 @@ enum class LogLevel {
 struct Event {
     EventType type = EventType::none;
     std::string node_id;
+};
+
+enum class ActionType {
+    click = GUA_ACTION_CLICK, focus = GUA_ACTION_FOCUS, set_value = GUA_ACTION_SET_VALUE,
+    set_checked = GUA_ACTION_SET_CHECKED, select = GUA_ACTION_SELECT, scroll = GUA_ACTION_SCROLL,
+    press_key = GUA_ACTION_PRESS_KEY,
+};
+
+struct ActionRequest {
+    std::uint64_t request_id = 0;
+    ActionType action = ActionType::click;
+    std::string node_id;
+    std::string value;
+    float delta_x = 0;
+    float delta_y = 0;
+    bool bool_value = false;
+    std::string key;
+    std::uint32_t modifiers = 0;
+    bool sensitive = false;
+    int scroll_unit = 0;
+};
+
+struct ActionEvent {
+    std::uint64_t request_id = 0;
+    ActionType action = ActionType::click;
+    int status = GUA_ACTION_STATUS_SUCCEEDED;
+    int error_code = 0;
+    std::string node_id;
+    std::string value;
+    bool sensitive = false;
 };
 
 struct NodeProperties {
@@ -238,6 +269,57 @@ public:
         return true;
     }
 
+    [[nodiscard]] int enqueue_action(const ActionRequest& request, std::uint64_t& request_id)
+    {
+        id_buffer_.assign(request.node_id);
+        value_buffer_.assign(request.value);
+        key_buffer_.assign(request.key);
+        const gua_action_request_descriptor_t descriptor {
+            sizeof(gua_action_request_descriptor_t), static_cast<int>(request.action),
+            id_buffer_.empty() ? nullptr : id_buffer_.c_str(), value_buffer_.empty() ? nullptr : value_buffer_.c_str(),
+            request.delta_x, request.delta_y, request.bool_value ? 1 : 0,
+            key_buffer_.empty() ? nullptr : key_buffer_.c_str(), request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit
+        };
+        return gua_enqueue_action(context_, &descriptor, &request_id);
+    }
+
+    [[nodiscard]] bool consume_action(ActionType action, std::string_view node_id, ActionRequest& out)
+    {
+        id_buffer_.assign(node_id);
+        gua_action_request_t request { sizeof(gua_action_request_t) };
+        if (gua_consume_action_request(context_, static_cast<int>(action), id_buffer_.c_str(), &request) == 0) return false;
+        out = ActionRequest { request.request_id, static_cast<ActionType>(request.action), request.node_id, request.value,
+            request.delta_x, request.delta_y, request.bool_value != 0, request.key, request.modifiers, request.sensitive != 0, request.scroll_unit };
+        return true;
+    }
+
+    [[nodiscard]] bool emit_action_result(const ActionEvent& event)
+    {
+        id_buffer_.assign(event.node_id);
+        value_buffer_.assign(event.value);
+        const gua_action_result_t result { sizeof(gua_action_result_t), event.request_id, static_cast<int>(event.action),
+            event.status, event.error_code, id_buffer_.c_str(), value_buffer_.empty() ? nullptr : value_buffer_.c_str(), event.sensitive ? 1 : 0 };
+        return gua_emit_action_result(context_, &result) != 0;
+    }
+
+    [[nodiscard]] bool poll_action_event(ActionEvent& out)
+    {
+        gua_event_v2_t event { sizeof(gua_event_v2_t) };
+        if (gua_poll_event_v2(context_, &event) == 0) return false;
+        out = ActionEvent { event.request_id, static_cast<ActionType>(event.action), event.status, event.error_code,
+            event.node_id, event.value, event.sensitive != 0 };
+        return true;
+    }
+
+    [[nodiscard]] bool poll_action_event(std::uint64_t request_id, ActionEvent& out)
+    {
+        gua_event_v2_t event { sizeof(gua_event_v2_t) };
+        if (gua_poll_event_v2_for_request(context_, request_id, &event) == 0) return false;
+        out = ActionEvent { event.request_id, static_cast<ActionType>(event.action), event.status, event.error_code,
+            event.node_id, event.value, event.sensitive != 0 };
+        return true;
+    }
+
 private:
     template <typename CopyJson>
     [[nodiscard]] std::string copy_json(CopyJson copy) const
@@ -274,6 +356,7 @@ private:
     mutable std::string parent_id_buffer_;
     mutable std::string text_buffer_;
     mutable std::string value_buffer_;
+    mutable std::string key_buffer_;
     mutable std::string message_buffer_;
     std::string screenshot_buffer_;
     std::string screen_buffer_;

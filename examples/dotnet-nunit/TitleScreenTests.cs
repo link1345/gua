@@ -129,6 +129,41 @@ public sealed class TitleScreenTests
             .ToBeDisabled();
     }
 
+    [Test]
+    public void GenericActionCorrelatesRequestAndRedactsSensitiveValue()
+    {
+        using var ui = new GuaContext();
+        ui.BeginFrame("form");
+        ui.RegisterNode(new GuaNodeDescriptor(
+            "name", "textbox", "Name", new GuaBounds(0, 0, 100, 20), Value: string.Empty));
+        ui.RegisterNode(new GuaNodeDescriptor("remember", "checkbox", "Remember", new GuaBounds(0, 20, 100, 20), Checked: false));
+        ui.RegisterNode(new GuaNodeDescriptor("difficulty", "combobox", "Difficulty", new GuaBounds(0, 40, 100, 20), Value: "Easy"));
+        ui.RegisterNode(new GuaNodeDescriptor("content", "scrollarea", "Content", new GuaBounds(0, 60, 100, 100)));
+        ui.EndFrame();
+
+        var name = GuaAssertions.GetById(ui, "name");
+        var requestId = name.SetValue("secret-marker", sensitive: true);
+        Assert.That(name.Focus(), Is.GreaterThan(requestId));
+        Assert.That(name.PressKey("A"), Is.GreaterThan(requestId));
+        Assert.That(GuaAssertions.GetById(ui, "remember").SetChecked(true), Is.GreaterThan(requestId));
+        Assert.That(GuaAssertions.GetById(ui, "difficulty").Select("Hard"), Is.GreaterThan(requestId));
+        Assert.That(GuaAssertions.GetById(ui, "content").Scroll(1, 2), Is.GreaterThan(requestId));
+        Assert.That(ui.TryConsumeAction(GuaActionType.SetValue, "name", out var request), Is.True);
+        Assert.That(request.RequestId, Is.EqualTo(requestId));
+        Assert.That(request.Value, Is.EqualTo("secret-marker"));
+
+        Assert.That(ui.EmitActionResult(new GuaActionEvent(
+            requestId, GuaActionType.SetValue, true, GuaActionError.None, "name", request.Value!, true)), Is.True);
+        Assert.That(ui.TryPollActionEvent(out var observed), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(observed.RequestId, Is.EqualTo(requestId));
+            Assert.That(observed.Succeeded, Is.True);
+            Assert.That(observed.Sensitive, Is.True);
+            Assert.That(observed.Value, Is.Empty);
+        });
+    }
+
     private static void RenderTitle(GuaTestHost host, bool loading)
     {
         host.Frame(loading ? "loading" : "title", frame =>
@@ -157,6 +192,9 @@ public sealed class TitleScreenTests
         public string FindNodeByRole(string role, string? name = null) => "legacy";
         public string FindNodeByText(string text) => "legacy";
         public bool EnqueueClick(string id) => true;
+        public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) { requestId = 1; return GuaActionError.None; }
+        public bool TryPollActionEvent(out GuaActionEvent e) { e = default; return false; }
+        public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) { e = default; return false; }
         public bool TryPollEvent(out GuaEvent e) { e = default; return false; }
     }
 }

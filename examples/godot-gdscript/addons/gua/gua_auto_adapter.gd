@@ -2,6 +2,7 @@ class_name GuaAutoAdapter
 extends RefCounted
 
 const META_ID := "gua_id"
+const META_SENSITIVE := "gua_sensitive"
 const CONTEXT_CLASS := "GuaContext"
 const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
 const REBUILD_COMMAND := "cmake --build --preset windows-msvc-debug --target gua-godot"
@@ -15,6 +16,10 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_click_request",
 	"emit_click",
 	"poll_event",
+	"enqueue_action",
+	"consume_action_request",
+	"emit_action_result",
+	"poll_event_v2",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -22,6 +27,7 @@ const REQUIRED_CONTEXT_METHODS := [
 var context: Object
 var root: Control
 var buttons_by_id: Dictionary = {}
+var controls_by_id: Dictionary = {}
 var connected_buttons: Dictionary = {}
 var suppressed_clicks: Dictionary = {}
 var gdextension_resource: Resource
@@ -43,9 +49,11 @@ func update(screen: String) -> void:
 
 	context.begin_frame(screen)
 	buttons_by_id.clear()
+	controls_by_id.clear()
 	_collect_control(root, "")
 	context.end_frame()
 	_dispatch_click_requests()
+	_dispatch_action_requests()
 
 
 func start_inspector_bridge(port: int = 8765) -> bool:
@@ -81,6 +89,18 @@ func poll_event() -> Dictionary:
 		return {}
 
 	return context.poll_event()
+
+
+func enqueue_action(request: Dictionary) -> Dictionary:
+	if not _ensure_context():
+		return {"error_code": -1, "request_id": 0}
+	return context.enqueue_action(request)
+
+
+func poll_event_v2() -> Dictionary:
+	if not _ensure_context():
+		return {}
+	return context.poll_event_v2()
 
 
 func _ensure_context() -> bool:
@@ -162,6 +182,7 @@ func _collect_control(control: Control, parent_id: String) -> void:
 	if control is CheckBox:
 		descriptor["checked"] = (control as CheckBox).button_pressed
 	context.register_node_v2(descriptor)
+	controls_by_id[id] = control
 
 	if control is BaseButton:
 		buttons_by_id[id] = control
@@ -220,6 +241,106 @@ func _dispatch_click_requests() -> void:
 			button.emit_signal("pressed")
 
 
+func _dispatch_action_requests() -> void:
+	for id in controls_by_id.keys():
+		var control := controls_by_id[id] as Control
+		for action in ["focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
+			while true:
+				var request: Dictionary = context.consume_action_request(action, id)
+				if request.is_empty():
+					break
+				var error_code := _apply_action(control, action, request)
+				context.emit_action_result({
+					"request_id": request.get("request_id", 0),
+					"action": action,
+					"node_id": id,
+					"succeeded": error_code == 0,
+					"error_code": error_code,
+					"value": request.get("value", ""),
+					"sensitive": request.get("sensitive", false),
+				})
+	while true:
+		var request: Dictionary = context.consume_action_request("press_key", "")
+		if request.is_empty():
+			break
+		var focused := root.get_viewport().gui_get_focus_owner()
+		var error_code := _apply_action(focused, "press_key", request) if focused is Control else -2
+		context.emit_action_result({
+			"request_id": request.get("request_id", 0), "action": "press_key", "node_id": "",
+			"succeeded": error_code == 0, "error_code": error_code,
+		})
+
+
+func _apply_action(control: Control, action: String, request: Dictionary) -> int:
+	if not control.is_visible_in_tree():
+		return -3
+	if not _control_enabled(control):
+		return -4
+	match action:
+		"focus":
+			control.grab_focus()
+		"set_value":
+			var value = request.get("value", "")
+			if request.get("sensitive", false):
+				control.set_meta(META_SENSITIVE, true)
+			if control is LineEdit:
+				(control as LineEdit).text = value
+			elif control is TextEdit:
+				(control as TextEdit).text = value
+			elif control is Range and str(value).is_valid_float():
+				(control as Range).value = float(value)
+			else:
+				return -6
+		"set_checked":
+			if control is BaseButton:
+				(control as BaseButton).button_pressed = request.get("bool_value", false)
+			else:
+				return -5
+		"select":
+			if not _select_value(control, str(request.get("value", ""))):
+				return -6
+		"scroll":
+			if control is ScrollContainer:
+				var scroll := control as ScrollContainer
+				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
+				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
+			else:
+				return -5
+		"press_key":
+			var event := InputEventKey.new()
+			event.keycode = OS.find_keycode_from_string(str(request.get("key", "")))
+			event.pressed = true
+			control.gui_input.emit(event)
+		_:
+			return -5
+	return 0
+
+
+func _select_value(control: Control, value: String) -> bool:
+	if control is OptionButton:
+		var option := control as OptionButton
+		for index in range(option.item_count):
+			var semantic_value := str(option.get_item_metadata(index)) if option.get_item_metadata(index) != null else option.get_item_text(index)
+			if semantic_value == value:
+				option.select(index)
+				option.item_selected.emit(index)
+				return true
+	if control is ItemList:
+		var item_list := control as ItemList
+		for index in range(item_list.item_count):
+			if item_list.get_item_text(index) == value:
+				item_list.select(index)
+				item_list.item_selected.emit(index)
+				return true
+	if control is TabContainer:
+		var tabs := control as TabContainer
+		for index in range(tabs.get_tab_count()):
+			if tabs.get_tab_title(index) == value:
+				tabs.current_tab = index
+				return true
+	return false
+
+
 func _connect_button(button: BaseButton, id: String) -> void:
 	var instance_id := button.get_instance_id()
 	if connected_buttons.has(instance_id):
@@ -261,10 +382,14 @@ func _control_role(control: Control) -> String:
 		return "textbox"
 	if control is Slider:
 		return "slider"
+	if control is ScrollContainer:
+		return "scrollarea"
 	return "panel"
 
 
 func _control_label(control: Control) -> String:
+	if control.has_meta(META_SENSITIVE) and control.get_meta(META_SENSITIVE):
+		return control.name
 	if control is OptionButton:
 		return control.name
 	if control is BaseButton:
@@ -279,6 +404,8 @@ func _control_label(control: Control) -> String:
 
 
 func _control_text(control: Control) -> Variant:
+	if control.has_meta(META_SENSITIVE) and control.get_meta(META_SENSITIVE):
+		return null
 	if control is BaseButton:
 		return (control as BaseButton).text
 	if control is Label:
@@ -291,6 +418,8 @@ func _control_text(control: Control) -> Variant:
 
 
 func _control_value(control: Control) -> Variant:
+	if control.has_meta(META_SENSITIVE) and control.get_meta(META_SENSITIVE):
+		return null
 	if control is OptionButton:
 		var option := control as OptionButton
 		return option.get_item_text(option.selected) if option.selected >= 0 else ""

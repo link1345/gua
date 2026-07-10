@@ -90,6 +90,76 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return true;
     }
 
+    public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId)
+    {
+        var type = request.Action switch
+        {
+            GuaActionType.Click => "click_node",
+            GuaActionType.Focus => "focus_node",
+            GuaActionType.SetValue => "set_value",
+            GuaActionType.SetChecked => "set_checked",
+            GuaActionType.Select => "select",
+            GuaActionType.Scroll => "scroll",
+            GuaActionType.PressKey => "press_key",
+            _ => throw new ArgumentOutOfRangeException(nameof(request)),
+        };
+        var command = new Dictionary<string, object?>
+        {
+            ["type"] = type,
+            ["deltaX"] = request.DeltaX,
+            ["deltaY"] = request.DeltaY,
+            ["checked"] = request.BoolValue,
+            ["modifiers"] = request.Modifiers,
+            ["sensitive"] = request.Sensitive,
+            ["scrollUnit"] = request.ScrollUnit,
+        };
+        if (request.NodeId is not null) command["nodeId"] = request.NodeId;
+        if (request.Value is not null) command["value"] = request.Value;
+        if (request.Key is not null) command["key"] = request.Key;
+        try
+        {
+            var result = Request<ActionRequestResult>(command);
+            requestId = result.RequestId;
+            return GuaActionError.None;
+        }
+        catch (InvalidOperationException error)
+        {
+            requestId = 0;
+            if (error.Message.Contains("node_not_found", StringComparison.Ordinal)) return GuaActionError.NodeNotFound;
+            if (error.Message.Contains("hidden", StringComparison.Ordinal)) return GuaActionError.Hidden;
+            if (error.Message.Contains("disabled", StringComparison.Ordinal)) return GuaActionError.Disabled;
+            if (error.Message.Contains("unsupported", StringComparison.Ordinal)) return GuaActionError.Unsupported;
+            if (error.Message.Contains("invalid_value", StringComparison.Ordinal)) return GuaActionError.InvalidValue;
+            return GuaActionError.InvalidArgument;
+        }
+    }
+
+    public bool TryPollActionEvent(out GuaActionEvent e)
+    {
+        return TryPollActionEventCore(null, out e);
+    }
+
+    public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(requestId);
+        return TryPollActionEventCore(requestId, out e);
+    }
+
+    private bool TryPollActionEventCore(ulong? requestId, out GuaActionEvent e)
+    {
+        var result = Request<ActionEventResult?>(requestId.HasValue
+            ? new { type = "poll_events", requestId = requestId.Value }
+            : new { type = "poll_events" }, allowNullResult: true);
+        if (result is null)
+        {
+            e = default;
+            return false;
+        }
+        e = new GuaActionEvent(result.RequestId, (GuaActionType)result.Action, result.Succeeded,
+            (GuaActionError)result.Error, result.NodeId, result.Value, result.Sensitive);
+        return true;
+    }
+
     public bool TryPollEvent(out GuaEvent e)
     {
         e = default;
@@ -301,4 +371,8 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private sealed record ActionRequestResult(ulong RequestId);
+    private sealed record ActionEventResult(
+        ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive);
 }

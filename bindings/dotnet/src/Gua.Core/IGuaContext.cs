@@ -16,5 +16,11 @@ public interface IGuaContext
 
     bool EnqueueClick(string id);
 
+    GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId);
+
+    bool TryPollActionEvent(out GuaActionEvent e);
+
+    bool TryPollActionEvent(ulong requestId, out GuaActionEvent e);
+
     bool TryPollEvent(out GuaEvent e);
 }

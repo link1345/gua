@@ -58,6 +58,7 @@ and later engine adapters own the engine-specific reflection details.
 | Godot `OptionButton` | `combobox` | parentId, value, focused |
 | Godot `ItemList` | `list` + `listitem` children | stable derived child id, parentId, text, selected |
 | Godot `TabContainer` | `tablist` + `tab` children | stable derived child id, parentId, text, selected |
+| Godot `ScrollContainer` | `scrollarea` | bounds, visible, enabled, scroll action |
 
 ## Semantic selectors
 
@@ -113,6 +114,18 @@ Initial command types:
 - `click_node`
 - `focus_node`
 - `press_key`
+- `set_value`
+- `set_checked`
+- `select`
+- `scroll`
+
+### Semantic action lifecycle (v1)
+
+Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId`, and the adapter must copy that ID into its success or failure event after attempting the host operation.
+
+The v1 action names map directly to the additive C ABI action enum: `click`, `focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. Enqueue validation distinguishes `node_not_found`, `hidden`, `disabled`, `unsupported`, and `invalid_value`. Existing click functions remain compatibility wrappers over the generic queue.
+
+`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
 - `text_input`
 - `move_gamepad`
 - `wait_for_node`

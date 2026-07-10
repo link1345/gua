@@ -16,6 +16,65 @@ internal static partial class Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeActionRequestDescriptor
+    {
+        public uint StructSize;
+        public int Action;
+        public nint NodeId;
+        public nint Value;
+        public float DeltaX;
+        public float DeltaY;
+        public int BoolValue;
+        public nint Key;
+        public uint Modifiers;
+        public int Sensitive;
+        public int ScrollUnit;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeEventV2
+    {
+        public uint StructSize;
+        public ulong RequestId;
+        public int Action;
+        public int Status;
+        public int ErrorCode;
+        public fixed byte NodeId[128];
+        public fixed byte Value[256];
+        public int Sensitive;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeActionRequest
+    {
+        public uint StructSize;
+        public ulong RequestId;
+        public int Action;
+        public fixed byte NodeId[128];
+        public fixed byte Value[256];
+        public float DeltaX;
+        public float DeltaY;
+        public int BoolValue;
+        public fixed byte Key[64];
+        public uint Modifiers;
+        public int Sensitive;
+        public int ScrollUnit;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeActionResult
+    {
+        public uint StructSize;
+        public ulong RequestId;
+        public int Action;
+        public int Status;
+        public int ErrorCode;
+        public nint NodeId;
+        public nint Value;
+        public int Sensitive;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct GuaNativeNodeDescriptorV2
     {
         public uint StructSize;
@@ -235,4 +294,19 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_poll_event(nint context, GuaNativeEvent* outEvent);
+
+    [LibraryImport("gua")]
+    internal static partial int gua_enqueue_action(nint context, in GuaNativeActionRequestDescriptor descriptor, out ulong requestId);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_poll_event_v2(nint context, GuaNativeEventV2* outEvent);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_poll_event_v2_for_request(nint context, ulong requestId, GuaNativeEventV2* outEvent);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial int gua_consume_action_request(nint context, int action, string? nodeId, GuaNativeActionRequest* outRequest);
+
+    [LibraryImport("gua")]
+    internal static partial int gua_emit_action_result(nint context, in GuaNativeActionResult result);
 }
