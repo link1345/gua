@@ -31,6 +31,7 @@ const REQUIRED_CONTEXT_METHODS := [
 var context: Object
 var root: Control
 var buttons_by_id: Dictionary = {}
+var tabs_by_id: Dictionary = {}
 var controls_by_id: Dictionary = {}
 var connected_buttons: Dictionary = {}
 var suppressed_clicks: Dictionary = {}
@@ -53,6 +54,7 @@ func update(screen: String) -> void:
 
 	context.begin_frame(screen)
 	buttons_by_id.clear()
+	tabs_by_id.clear()
 	controls_by_id.clear()
 	_collect_control(root, "")
 	context.end_frame()
@@ -135,6 +137,7 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 	var report: Dictionary = context.reset_context(resolved)
 	if report.get("result", -1) == 1:
 		buttons_by_id.clear()
+		tabs_by_id.clear()
 		controls_by_id.clear()
 		suppressed_clicks.clear()
 	return report
@@ -253,8 +256,10 @@ func _collect_item_list_items(item_list: ItemList, parent_id: String) -> void:
 func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
 	for index in range(tab_container.get_tab_count()):
 		var label := tab_container.get_tab_title(index)
+		var id := "%s$tab:%d" % [parent_id, index]
+		tabs_by_id[id] = {"container": tab_container, "index": index}
 		context.register_node_v2({
-			"id": "%s$tab:%d" % [parent_id, index],
+			"id": id,
 			"parent_id": parent_id,
 			"role": "tab",
 			"label": label,
@@ -276,6 +281,17 @@ func _dispatch_click_requests() -> void:
 			context.emit_click(id)
 			suppressed_clicks[id] = true
 			button.emit_signal("pressed")
+
+	for id in tabs_by_id.keys():
+		var target: Dictionary = tabs_by_id[id]
+		var tab_container := target["container"] as TabContainer
+		var index := int(target["index"])
+		while context.consume_click_request(id):
+			if not tab_container.is_visible_in_tree() or tab_container.is_tab_disabled(index):
+				continue
+
+			tab_container.current_tab = index
+			context.emit_click(id)
 
 
 func _dispatch_action_requests() -> void:

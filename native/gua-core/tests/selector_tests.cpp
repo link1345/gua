@@ -58,6 +58,8 @@ int main()
     char legacy[128] {};
     assert(gua_find_node_by_text(context, "保存", legacy, sizeof(legacy)) == 1);
     assert(std::string(legacy) == "left-save");
+    assert(gua_find_node_by_text(context, "Ready", legacy, sizeof(legacy)) == 1);
+    assert(std::string(legacy) == "status");
 
     Locator status_locator(context, "status");
     status_locator.wait_for_visible(std::chrono::milliseconds(20), std::chrono::milliseconds(1));

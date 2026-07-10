@@ -125,6 +125,15 @@ public static partial class GuaAssertions
             string? OptionalString(string name) => node.TryGetProperty(name, out var value)
                 ? value.GetString()
                 : null;
+            string? OptionalScalar(string name) => node.TryGetProperty(name, out var value)
+                ? value.ValueKind switch
+                {
+                    JsonValueKind.String => value.GetString(),
+                    JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.GetRawText(),
+                    JsonValueKind.Null => null,
+                    _ => throw new JsonException($"Gua node property '{name}' must be a scalar value."),
+                }
+                : null;
             ulong? OptionalRootUInt64(string name) => document.RootElement.TryGetProperty(name, out var value)
                 ? value.GetUInt64()
                 : null;
@@ -143,7 +152,7 @@ public static partial class GuaAssertions
                 Actions: actions,
                 ParentId: OptionalString("parentId"),
                 Text: OptionalString("text"),
-                Value: OptionalString("value"),
+                Value: OptionalScalar("value"),
                 Focused: OptionalBoolean("focused"),
                 Hovered: OptionalBoolean("hovered"),
                 Pressed: OptionalBoolean("pressed"),

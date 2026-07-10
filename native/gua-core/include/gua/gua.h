@@ -285,6 +285,7 @@ const char* gua_get_diagnostics_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int out_json_size);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
+/* Returns 0 rather than a partial state when a v2 string does not fit its fixed output buffer. */
 int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
