@@ -17,6 +17,22 @@ Use a normal run to compare without baseline mutation. Set
 `GUA_UPDATE_BASELINES=1` only for an intentional update, and change a rendered
 control to exercise the diff-failure artifact path.
 
+The opt-in .NET integration test joins real viewport readback, the WebSocket
+screenshot payload, baseline comparison, and semantic recording/replay. It opens
+a real Windows renderer and is skipped unless explicitly enabled:
+
+```powershell
+$env:GODOT_EXECUTABLE = 'C:\path\to\Godot_v4.7-stable_win64_console.exe'
+$env:GUA_GODOT_REAL_RENDERER_TEST = '1'
+dotnet test bindings/dotnet/tests/Gua.Godot.Visual.Integration.Tests/Gua.Godot.Visual.Integration.Tests.csproj
+```
+
+The test uses the explicit `windows-gl-compatibility` baseline variant in a temporary
+directory, exercises update/match/intentional-diff runs, and verifies the four
+failure artifacts plus sensitive-value redaction. It deliberately does not run
+with `--headless`; the deterministic injected-image smoke below remains the fast
+dummy-renderer protocol check.
+
 Build the native extension first:
 
 ```powershell

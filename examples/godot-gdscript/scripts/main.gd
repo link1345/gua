@@ -11,18 +11,30 @@ var title_label: Label
 var start_button: Button
 var settings_button: Button
 var loading_label: Label
+var visual_e2e := false
+var visual_e2e_update_elapsed := 0.0
 
 
 func _ready() -> void:
+	visual_e2e = OS.get_environment("GUA_VISUAL_E2E") == "1"
+	if OS.has_environment("GUA_BRIDGE_PORT"):
+		inspector_bridge_port = int(OS.get_environment("GUA_BRIDGE_PORT"))
 	_build_ui()
 	ui.attach(self)
 	ui.update(_current_screen())
 
 	if start_inspector_bridge_on_ready:
 		_start_inspector_bridge()
+	if visual_e2e:
+		_capture_visual_e2e.call_deferred()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if visual_e2e:
+		visual_e2e_update_elapsed += delta
+		if visual_e2e_update_elapsed < 0.1:
+			return
+		visual_e2e_update_elapsed = 0.0
 	ui.update(_current_screen())
 
 
@@ -58,6 +70,53 @@ func _build_ui() -> void:
 	loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	loading_label.visible = false
 	add_child(loading_label)
+
+	if visual_e2e:
+		_build_visual_e2e_controls()
+
+
+func _build_visual_e2e_controls() -> void:
+	if OS.get_environment("GUA_VISUAL_E2E_DIFF") == "1":
+		title_label.text = "Gua Visual Difference"
+
+	var input := LineEdit.new()
+	input.name = "visual_password"
+	input.set_meta("gua_id", "visual-password")
+	input.set_meta("gua_sensitive", true)
+	input.secret = true
+	input.placeholder_text = "Password"
+	input.position = Vector2(512, 456)
+	input.size = Vector2(256, 40)
+	add_child(input)
+
+	var checkbox := CheckBox.new()
+	checkbox.name = "visual_checkbox"
+	checkbox.set_meta("gua_id", "visual-checkbox")
+	checkbox.text = "Enable visual mode"
+	checkbox.position = Vector2(512, 512)
+	checkbox.size = Vector2(256, 40)
+	add_child(checkbox)
+
+	var select := OptionButton.new()
+	select.name = "visual_select"
+	select.set_meta("gua_id", "visual-select")
+	select.add_item("Alpha")
+	select.add_item("Beta")
+	select.position = Vector2(512, 568)
+	select.size = Vector2(256, 40)
+	add_child(select)
+
+
+func _capture_visual_e2e() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	ui.update(_current_screen())
+	var result := ui.capture_viewport_screenshot()
+	if not result.get("ok", false):
+		push_error("Gua real-renderer visual E2E capture failed: %s" % result)
+	else:
+		print("GUA_VISUAL_E2E_CAPTURED %sx%s" % [result.get("width", 0), result.get("height", 0)])
 
 
 func _show_loading() -> void:
