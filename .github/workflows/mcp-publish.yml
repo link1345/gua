@@ -1,11 +1,18 @@
 name: MCP npm Publish
 
 on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: New major version (major upgrades only; leave empty for an automatic minor release)
+        required: false
+        type: string
   push:
     branches:
       - main
     paths:
       - .github/workflows/mcp-publish.yml
+      - .github/scripts/next-release-version.ps1
       - bun.lock
       - package.json
       - tsconfig.base.json
@@ -15,7 +22,7 @@ on:
       - protocol/**
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -30,6 +37,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_MAJOR: ${{ inputs.major }}
+        run: .github/scripts/next-release-version.ps1 -TagPrefix mcp -RequestedMajor $env:REQUESTED_MAJOR
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -54,8 +70,7 @@ jobs:
         id: prepare
         shell: bash
         run: |
-          short_sha="${GITHUB_SHA::12}"
-          package_version="0.0.0-main.${GITHUB_RUN_NUMBER}.${short_sha}"
+          package_version="${{ steps.version.outputs.version }}"
           publish_dir="${RUNNER_TEMP}/gui-mcp-package"
 
           rm -rf "${publish_dir}"
@@ -89,3 +104,9 @@ jobs:
         run: |
           cd "${{ steps.prepare.outputs.publish_dir }}"
           npm publish --access public --tag latest
+
+      - name: Record published version
+        shell: pwsh
+        run: |
+          git tag '${{ steps.version.outputs.tag }}' $env:GITHUB_SHA
+          git push origin '${{ steps.version.outputs.tag }}'

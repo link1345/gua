@@ -2,11 +2,17 @@ name: NuGet Publish
 
 on:
   workflow_dispatch:
+    inputs:
+      major:
+        description: New major version (major upgrades only; leave empty for an automatic minor release)
+        required: false
+        type: string
   push:
     branches:
       - main
     paths:
       - .github/workflows/nuget-publish.yml
+      - .github/scripts/next-release-version.ps1
       - Directory.Build.props
       - CMakeLists.txt
       - CMakePresets.json
@@ -17,7 +23,7 @@ on:
       - protocol/**
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -32,6 +38,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_MAJOR: ${{ inputs.major }}
+        run: .github/scripts/next-release-version.ps1 -TagPrefix nuget -RequestedMajor $env:REQUESTED_MAJOR
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -48,16 +63,16 @@ jobs:
         run: dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
 
       - name: Build
-        run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore
+        run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Gua.Core
-        run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build
+        run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
 
       - name: Pack Gua.Testing
-        run: dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --no-build
+        run: dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
 
       - name: Pack Gua.Testing.Godot
-        run: dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-build
+        run: dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
@@ -92,3 +107,9 @@ jobs:
               --skip-duplicate
           }
           Pop-Location
+
+      - name: Record published version
+        shell: pwsh
+        run: |
+          git tag '${{ steps.version.outputs.tag }}' $env:GITHUB_SHA
+          git push origin '${{ steps.version.outputs.tag }}'
