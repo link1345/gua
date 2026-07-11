@@ -131,3 +131,13 @@ writes its initial tree and a deterministic node-id diff. Sensitive action
 values are redacted before the writer receives them. If capture fails, the
 original assertion delegate still determines the exception type and a secondary
 capture error is appended to its message.
+
+Protocol v2 operations have one-step sync and async completion APIs for focus,
+set value, set checked, select, scroll, and key press. They return the correlated
+`GuaActionEvent`; `GuaActionException` exposes rejection, host failure, timeout,
+or cancellation together with request/action/node/error and snapshot metadata.
+`GuaAssertions.PressKeyAsync(context, key)` targets the adapter's current focus.
+
+Queries can add `Within`, `ByValue`, `WhereFocused`, `WhereSelected`,
+`WhereChecked`, and `ByAction`. Corresponding async state waits re-fetch the
+latest UI tree on every poll instead of holding the first snapshot.

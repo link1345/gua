@@ -197,6 +197,33 @@ public static partial class GuaAssertions
         }
     }
 
+    internal static string DescribeSnapshot(IGuaContext context)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(context.GetUiTreeJson());
+            var root = document.RootElement;
+            string Metadata(string name) => root.TryGetProperty(name, out var value) ? value.GetRawText() : "<unknown>";
+            var screen = root.TryGetProperty("screen", out var screenValue) ? screenValue.GetString() : "<unknown>";
+            return $"Last screen='{screen}', frameSequence={Metadata("frameSequence")}, revision={Metadata("revision")}. {DescribeTree(context)}";
+        }
+        catch (JsonException)
+        {
+            return "Last UI tree could not be parsed.";
+        }
+    }
+
+    public static GuaActionEvent PressKey(
+        IGuaContext context, string key, uint modifiers = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        GuaActionCompletion.EnqueueAndWait(context,
+            new GuaActionRequest(GuaActionType.PressKey, Key: key, Modifiers: modifiers), timeout, pollInterval);
+
+    public static Task<GuaActionEvent> PressKeyAsync(
+        IGuaContext context, string key, uint modifiers = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        GuaActionCompletion.EnqueueAndWaitAsync(context,
+            new GuaActionRequest(GuaActionType.PressKey, Key: key, Modifiers: modifiers), timeout, pollInterval, cancellationToken);
+
     private static GuaNodeExpectation WaitForQuery(IGuaContext context, Func<GuaNodeExpectation> query, string description, TimeSpan? timeout, TimeSpan? pollInterval)
     {
         var initialUiTreeJson = context.GetUiTreeJson();
@@ -348,6 +375,28 @@ public sealed class GuaNodeExpectation
         return this;
     }
 
+    public GuaNodeExpectation ToBeFocused(bool expected = true) => AssertOptionalState("focused", GetSnapshotOrFail().Focused, expected);
+    public GuaNodeExpectation ToBeSelected(bool expected = true) => AssertOptionalState("selected", GetSnapshotOrFail().Selected, expected);
+    public GuaNodeExpectation ToBeChecked(bool expected = true) => AssertOptionalState("checked", GetSnapshotOrFail().Checked, expected);
+
+    public GuaNodeExpectation ToHaveText(string expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var actual = GetSnapshotOrFail().Text;
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have text '{expected}', but it had '{actual ?? "<unknown>"}'.");
+        return this;
+    }
+
+    public GuaNodeExpectation ToHaveValue(string expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var actual = GetSnapshotOrFail().Value;
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have value '{expected}', but it had '{actual ?? "<unknown>"}'.");
+        return this;
+    }
+
     public GuaNodeExpectation Click()
     {
         ToBeVisible();
@@ -401,6 +450,20 @@ public sealed class GuaNodeExpectation
 
     public ulong PressKey(string key, uint modifiers = 0) =>
         Enqueue(new GuaActionRequest(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), "press_key");
+
+    public GuaActionEvent FocusAndWait(TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Focus, _id), timeout, pollInterval);
+    public GuaActionEvent SetValueAndWait(string value, bool sensitive = false, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.SetValue, _id, Value: value, Sensitive: sensitive), timeout, pollInterval);
+    public GuaActionEvent SetCheckedAndWait(bool value, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.SetChecked, _id, BoolValue: value), timeout, pollInterval);
+    public GuaActionEvent SelectAndWait(string value, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Select, _id, Value: value), timeout, pollInterval);
+    public GuaActionEvent ScrollAndWait(float deltaX, float deltaY, int unit = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Scroll, _id, DeltaX: deltaX, DeltaY: deltaY, ScrollUnit: unit), timeout, pollInterval);
+    public GuaActionEvent PressKeyAndWait(string key, uint modifiers = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), timeout, pollInterval);
+
+    public Task<GuaActionEvent> FocusAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Focus, _id), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> SetValueAsync(string value, bool sensitive = false, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.SetValue, _id, Value: value, Sensitive: sensitive), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> SetCheckedAsync(bool value, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.SetChecked, _id, BoolValue: value), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> SelectAsync(string value, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Select, _id, Value: value), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> ScrollAsync(float deltaX, float deltaY, int unit = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Scroll, _id, DeltaX: deltaX, DeltaY: deltaY, ScrollUnit: unit), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> PressKeyAsync(string key, uint modifiers = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), timeout, pollInterval, cancellationToken);
 
     public GuaNodeExpectation WaitForAction(ulong requestId, TimeSpan? timeout = null)
     {
@@ -462,6 +525,24 @@ public sealed class GuaNodeExpectation
     public Task<GuaNodeExpectation> WaitForValueAsync(string expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
         GuaAssertions.WaitForValueAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
 
+    public GuaNodeExpectation WaitUntilFocused(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        GuaAssertions.WaitForFocused(_context, _id, expected, timeout, pollInterval);
+
+    public GuaNodeExpectation WaitUntilSelected(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        GuaAssertions.WaitForSelected(_context, _id, expected, timeout, pollInterval);
+
+    public GuaNodeExpectation WaitUntilChecked(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        GuaAssertions.WaitForChecked(_context, _id, expected, timeout, pollInterval);
+
+    public Task<GuaNodeExpectation> WaitUntilFocusedAsync(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForFocusedAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitUntilSelectedAsync(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForSelectedAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
+
+    public Task<GuaNodeExpectation> WaitUntilCheckedAsync(bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) =>
+        GuaAssertions.WaitForCheckedAsync(_context, _id, expected, timeout, pollInterval, cancellationToken);
+
     internal GuaNodeExpectation RequireExistingSnapshot()
     {
         ToExist();
@@ -488,5 +569,22 @@ public sealed class GuaNodeExpectation
         var error = _context.EnqueueAction(request, out var requestId);
         if (error != GuaActionError.None) GuaAssertions.Fail(_context, $"Failed to enqueue {action} for Gua node {_description}: {error}.");
         return requestId;
+    }
+
+    private GuaNodeExpectation AssertOptionalState(string name, bool? actual, bool expected)
+    {
+        if (actual != expected)
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have {name}={expected}, but it was {actual?.ToString() ?? "<unknown>"}.");
+        return this;
+    }
+
+    private GuaActionEvent Complete(GuaActionRequest request, TimeSpan? timeout, TimeSpan? pollInterval)
+    {
+        return GuaActionCompletion.EnqueueAndWait(_context, request, timeout, pollInterval);
+    }
+
+    private Task<GuaActionEvent> CompleteAsync(GuaActionRequest request, TimeSpan? timeout, TimeSpan? pollInterval, CancellationToken cancellationToken)
+    {
+        return GuaActionCompletion.EnqueueAndWaitAsync(_context, request, timeout, pollInterval, cancellationToken);
     }
 }

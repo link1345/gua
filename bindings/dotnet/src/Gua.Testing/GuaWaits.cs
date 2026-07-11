@@ -41,6 +41,24 @@ public static partial class GuaAssertions
         WaitForNodeAsync(context, id, node => string.Equals(node?.Value, expected, StringComparison.Ordinal),
             $"have value '{expected}'", timeout, pollInterval, cancellationToken);
 
+    public static Task<GuaNodeExpectation> WaitForFocusedAsync(
+        IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        WaitForNodeAsync(context, id, node => node?.Focused == expected,
+            $"have focused={expected}", timeout, pollInterval, cancellationToken);
+
+    public static Task<GuaNodeExpectation> WaitForSelectedAsync(
+        IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        WaitForNodeAsync(context, id, node => node?.Selected == expected,
+            $"have selected={expected}", timeout, pollInterval, cancellationToken);
+
+    public static Task<GuaNodeExpectation> WaitForCheckedAsync(
+        IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        WaitForNodeAsync(context, id, node => node?.Checked == expected,
+            $"have checked={expected}", timeout, pollInterval, cancellationToken);
+
     public static GuaNodeExpectation WaitForVisible(IGuaContext context, string id, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
         WaitForVisibleAsync(context, id, timeout, pollInterval).GetAwaiter().GetResult();
 
@@ -58,6 +76,15 @@ public static partial class GuaAssertions
 
     public static GuaNodeExpectation WaitForValue(IGuaContext context, string id, string expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
         WaitForValueAsync(context, id, expected, timeout, pollInterval).GetAwaiter().GetResult();
+
+    public static GuaNodeExpectation WaitForFocused(IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForFocusedAsync(context, id, expected, timeout, pollInterval).GetAwaiter().GetResult();
+
+    public static GuaNodeExpectation WaitForSelected(IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForSelectedAsync(context, id, expected, timeout, pollInterval).GetAwaiter().GetResult();
+
+    public static GuaNodeExpectation WaitForChecked(IGuaContext context, string id, bool expected = true, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForCheckedAsync(context, id, expected, timeout, pollInterval).GetAwaiter().GetResult();
 
     public static async Task WaitUntilAsync(
         Func<bool> condition, string description, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
@@ -197,7 +224,7 @@ public static partial class GuaAssertions
     private static string Format(ulong? value) => value?.ToString() ?? "<unknown>";
     private static string DescribeNode(GuaNodeSnapshot? node) => node is null
         ? "<removed or not found>"
-        : $"visible={node.Visible}, enabled={node.Enabled}, text='{node.Text ?? "<unknown>"}', value='{node.Value ?? "<unknown>"}'";
+        : $"visible={node.Visible}, enabled={node.Enabled}, focused={node.Focused?.ToString() ?? "<unknown>"}, selected={node.Selected?.ToString() ?? "<unknown>"}, checked={node.Checked?.ToString() ?? "<unknown>"}, text='{node.Text ?? "<unknown>"}', value='{node.Value ?? "<unknown>"}'";
 
     private sealed record WaitSnapshot(ulong? SessionEpoch, ulong? FrameSequence, ulong? Revision, IReadOnlyList<GuaNodeSnapshot> Nodes);
 }

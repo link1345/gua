@@ -13,6 +13,57 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public async Task V2LocatorAndActionCompletionPreserveUnrelatedEvents()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("form");
+        context.RegisterNode(new GuaNodeDescriptor("form", "panel", "Form", new GuaBounds(0, 0, 10, 10)));
+        context.RegisterNode(new GuaNodeDescriptor("name", "textbox", "Name", new GuaBounds(0, 0, 1, 1),
+            ParentId: "form", Text: "User", Value: "alice", Focused: true));
+        context.RegisterNode(new GuaNodeDescriptor("remember", "checkbox", "Remember", new GuaBounds(0, 1, 1, 1),
+            ParentId: "form", Checked: false));
+        context.EndFrame();
+
+        var located = GuaAssertions.Query(context).ByRole("textbox").Within("form").ByValue("alice").WhereFocused().ByAction("set_value").Get();
+        Assert.That(located.Id, Is.EqualTo("name"));
+        Assert.That(GuaAssertions.Query(context).WhereChecked(false).Get().Id, Is.EqualTo("remember"));
+
+        var completion = located.SetValueAsync("bob", timeout: TimeSpan.FromSeconds(2));
+        Assert.That(context.TryConsumeAction(GuaActionType.SetValue, "name", out var request), Is.True);
+        var otherId = located.Focus();
+        Assert.That(context.TryConsumeAction(GuaActionType.Focus, "name", out var other), Is.True);
+        Assert.That(context.EmitActionResult(new GuaActionEvent(otherId, GuaActionType.Focus, true, GuaActionError.None, "name", "", false)), Is.True);
+        Assert.That(context.EmitActionResult(new GuaActionEvent(request.RequestId, GuaActionType.SetValue, true, GuaActionError.None, "name", "bob", false)), Is.True);
+
+        var result = await completion;
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.RequestId, Is.EqualTo(request.RequestId));
+            Assert.That(result.Action, Is.EqualTo(GuaActionType.SetValue));
+            Assert.That(context.TryPollActionEvent(otherId, out var preserved), Is.True);
+            Assert.That(preserved.Action, Is.EqualTo(GuaActionType.Focus));
+        });
+    }
+
+    [Test]
+    public void TypedActionReportsRejectionDetails()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("form");
+        context.RegisterNode(new GuaNodeDescriptor("disabled", "textbox", "Disabled", new GuaBounds(0, 0, 1, 1), Enabled: false));
+        context.EndFrame();
+
+        var error = Assert.Throws<GuaActionException>(() =>
+            GuaAssertions.GetById(context, "disabled").SetValueAndWait("value"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(error!.Kind, Is.EqualTo(GuaActionFailureKind.Rejected));
+            Assert.That(error.Error, Is.EqualTo(GuaActionError.Disabled));
+            Assert.That(error.Message, Does.Contain("requestId=0").And.Contain("screen='form'").And.Contain("frameSequence="));
+        });
+    }
+
+    [Test]
     public void LocalAndRemoteContextsUseTheSameNativeSelectorEvaluator()
     {
         var port = ReservePort();

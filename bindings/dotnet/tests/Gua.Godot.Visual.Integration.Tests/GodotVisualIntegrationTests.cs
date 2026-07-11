@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Gua.Core;
 using Gua.Testing.Godot;
+using Gua.Testing;
 using Gua.Testing.Visual;
 using NUnit.Framework;
 
@@ -109,6 +110,52 @@ public sealed class GodotVisualIntegrationTests
             Assert.That(Encoding.UTF8.GetString(File.ReadAllBytes(path)), Does.Not.Contain(Secret));
     }
 
+    [Test]
+    public async Task V2TestingApisOperateRealGodotControlsThroughTheBridge()
+    {
+        const string secret = "v2-sensitive-secret-marker";
+        using var host = StartGodot(diff: false, v2: true);
+        await host.WaitForScreenshotAsync(TimeSpan.FromSeconds(15));
+
+        var userName = GuaAssertions.GetById(host.Context, "v2-user-name");
+        var setValue = await userName.SetValueAsync("alice", timeout: TimeSpan.FromSeconds(5));
+        var focus = await userName.FocusAsync(timeout: TimeSpan.FromSeconds(5));
+        var key = await GuaAssertions.PressKeyAsync(host.Context, "Enter", timeout: TimeSpan.FromSeconds(5));
+        var select = await GuaAssertions.GetById(host.Context, "v2-provider").SelectAsync("google", timeout: TimeSpan.FromSeconds(5));
+        var check = GuaAssertions.GetById(host.Context, "v2-remember").SetCheckedAndWait(true, TimeSpan.FromSeconds(5));
+        var scroll = await GuaAssertions.GetById(host.Context, "v2-scroll").ScrollAsync(0, 50, timeout: TimeSpan.FromSeconds(5));
+        var sensitive = await GuaAssertions.GetById(host.Context, "v2-secret").SetValueAsync(secret, sensitive: true, timeout: TimeSpan.FromSeconds(5));
+
+        await userName.WaitForValueAsync("alice", TimeSpan.FromSeconds(5));
+        await userName.WaitUntilFocusedAsync(timeout: TimeSpan.FromSeconds(5));
+        await GuaAssertions.GetById(host.Context, "v2-remember").WaitUntilCheckedAsync(timeout: TimeSpan.FromSeconds(5));
+
+        var scoped = GuaAssertions.Query(host.Context).ByRole("textbox").Within("v2-form").ByValue("alice").WhereFocused().Get();
+        var selected = GuaAssertions.Query(host.Context).ByRole("combobox").ByValue("google").ByAction("select").Get();
+        var checkedNode = GuaAssertions.Query(host.Context).WhereChecked().Get();
+        var screenshot = host.SaveScreenshot(Path.Combine(_root, "attachments"), TestContext.CurrentContext.Test.Name);
+        TestContext.AddTestAttachment(screenshot.AbsolutePath, "Godot v2 fixture screenshot");
+
+        var status = host.GetContextStatus();
+        var reset = host.ResetContext(new GuaResetOptions(Strict: true));
+        Assert.Multiple(() =>
+        {
+            Assert.That(new[] { setValue, focus, key, select, check, scroll, sensitive }, Has.All.Property(nameof(GuaActionEvent.Succeeded)).True);
+            Assert.That(key.NodeId, Is.Empty);
+            Assert.That(sensitive.Value, Is.Empty);
+            Assert.That(scoped.Id, Is.EqualTo("v2-user-name"));
+            Assert.That(selected.Id, Is.EqualTo("v2-provider"));
+            Assert.That(checkedNode.Id, Is.EqualTo("v2-remember"));
+            Assert.That(host.Context.GetUiTreeJson(), Does.Not.Contain(secret));
+            Assert.That(host.Context.GetDiagnosticsJson(), Does.Not.Contain(secret));
+            Assert.That(screenshot.Width, Is.GreaterThan(0));
+            Assert.That(screenshot.Height, Is.GreaterThan(0));
+            Assert.That(Path.IsPathFullyQualified(screenshot.AbsolutePath), Is.True);
+            Assert.That(status.IsClean, Is.True);
+            Assert.That(reset.Result, Is.EqualTo(GuaResetResult.Succeeded));
+        });
+    }
+
     private static async Task<IReadOnlyList<GuaActionEvent>> WaitForActionEventsAsync(
         IGuaContext context, int count, TimeSpan timeout)
     {
@@ -123,7 +170,7 @@ public sealed class GodotVisualIntegrationTests
         return events;
     }
 
-    private static GodotSceneTestHost StartGodot(bool diff)
+    private static GodotSceneTestHost StartGodot(bool diff, bool v2 = false)
     {
         const int port = 18765;
         Environment.SetEnvironmentVariable("GUA_VISUAL_E2E", "1");
@@ -138,6 +185,12 @@ public sealed class GodotVisualIntegrationTests
             ConnectTimeout = TimeSpan.FromSeconds(15),
             RequestTimeout = TimeSpan.FromSeconds(10),
             SceneTimeout = TimeSpan.FromSeconds(15),
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["GUA_VISUAL_E2E"] = "1",
+                ["GUA_V2_E2E"] = v2 ? "1" : "0",
+                ["GUA_BRIDGE_PORT"] = port.ToString(),
+            },
             AdditionalArguments = ["--display-driver", "windows", "--rendering-method", "gl_compatibility", "--resolution", "1280x720", "--position", "0,0"],
         });
     }

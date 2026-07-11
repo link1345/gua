@@ -1,4 +1,5 @@
 using Gua.Core;
+using System.Text.Json;
 
 namespace Gua.Testing;
 
@@ -6,11 +7,26 @@ public sealed record GuaLocatorQuery
 {
     private readonly IGuaContext _context;
     private readonly GuaSelector _selector;
+    private readonly string? _value;
+    private readonly GuaMatchMode _valueMatch;
+    private readonly bool? _focused;
+    private readonly bool? _selected;
+    private readonly bool? _checked;
+    private readonly string? _action;
 
-    internal GuaLocatorQuery(IGuaContext context, GuaSelector? selector = null)
+    internal GuaLocatorQuery(
+        IGuaContext context, GuaSelector? selector = null, string? value = null,
+        GuaMatchMode valueMatch = GuaMatchMode.Exact, bool? focused = null,
+        bool? selected = null, bool? @checked = null, string? action = null)
     {
         _context = context;
         _selector = selector ?? new GuaSelector();
+        _value = value;
+        _valueMatch = valueMatch;
+        _focused = focused;
+        _selected = selected;
+        _checked = @checked;
+        _action = action;
     }
 
     public GuaLocatorQuery ById(string id, GuaMatchMode match = GuaMatchMode.Exact) => Next(_selector with { Id = id, IdMatch = match });
@@ -20,6 +36,11 @@ public sealed record GuaLocatorQuery
     public GuaLocatorQuery Within(string parentId, bool directChild = false) => Next(_selector with { ParentId = parentId, DirectChild = directChild });
     public GuaLocatorQuery WhereVisible(bool visible = true) => Next(_selector with { Visible = visible ? GuaStateFilter.True : GuaStateFilter.False });
     public GuaLocatorQuery WhereEnabled(bool enabled = true) => Next(_selector with { Enabled = enabled ? GuaStateFilter.True : GuaStateFilter.False });
+    public GuaLocatorQuery ByValue(string value, GuaMatchMode match = GuaMatchMode.Exact) => Copy(value: value, valueMatch: match);
+    public GuaLocatorQuery WhereFocused(bool focused = true) => Copy(focused: focused);
+    public GuaLocatorQuery WhereSelected(bool selected = true) => Copy(selected: selected);
+    public GuaLocatorQuery WhereChecked(bool @checked = true) => Copy(@checked: @checked);
+    public GuaLocatorQuery ByAction(string action) => Copy(action: action);
 
     public IReadOnlyList<GuaNodeExpectation> QueryAll()
     {
@@ -31,7 +52,7 @@ public sealed record GuaLocatorQuery
     {
         var result = Execute();
         if (result.Matches.Count == 0)
-            GuaAssertions.Fail(_context, $"Strict Gua selector matched no nodes: {Describe()}.");
+            GuaAssertions.Fail(_context, $"Strict Gua selector matched no nodes: {Describe()}. Candidates: {DescribeAllCandidates()}.");
         if (result.Matches.Count > 1)
         {
             var candidates = string.Join("; ", result.Matches.Select(match =>
@@ -67,7 +88,9 @@ public sealed record GuaLocatorQuery
         }
         if (!result.Valid)
             GuaAssertions.Fail(_context, $"Invalid Gua selector {Describe()}: {result.Error ?? "unknown syntax error"}");
-        return result;
+        if (_value is null && _focused is null && _selected is null && _checked is null && _action is null) return result;
+        var matches = result.Matches.Where(match => MatchesV2(GuaAssertions.TryGetSnapshot(_context, match.Id))).ToArray();
+        return result with { Matches = matches };
     }
 
     private bool CanUseLegacyFallback() =>
@@ -77,7 +100,32 @@ public sealed record GuaLocatorQuery
         _selector.NameMatch == GuaMatchMode.Exact && _selector.TextMatch == GuaMatchMode.Exact &&
         (_selector.Id is not null || _selector.Role is not null || _selector.Text is not null);
 
-    private GuaLocatorQuery Next(GuaSelector selector) => new(_context, selector);
+    private GuaLocatorQuery Next(GuaSelector selector) => new(_context, selector, _value, _valueMatch, _focused, _selected, _checked, _action);
+
+    private GuaLocatorQuery Copy(
+        string? value = null, GuaMatchMode? valueMatch = null, bool? focused = null,
+        bool? selected = null, bool? @checked = null, string? action = null) =>
+        new(_context, _selector, value ?? _value, valueMatch ?? _valueMatch,
+            focused ?? _focused, selected ?? _selected, @checked ?? _checked, action ?? _action);
+
+    private bool MatchesV2(GuaNodeSnapshot? node)
+    {
+        if (node is null) return false;
+        if (_value is not null && !Matches(node.Value, _value, _valueMatch)) return false;
+        if (_focused is not null && node.Focused != _focused) return false;
+        if (_selected is not null && node.Selected != _selected) return false;
+        if (_checked is not null && node.Checked != _checked) return false;
+        return _action is null || node.Actions.Contains(_action, StringComparer.Ordinal);
+    }
+
+    private static bool Matches(string? actual, string expected, GuaMatchMode mode) => mode switch
+    {
+        GuaMatchMode.Exact => string.Equals(actual, expected, StringComparison.Ordinal),
+        GuaMatchMode.Contains => actual?.Contains(expected, StringComparison.Ordinal) == true,
+        GuaMatchMode.Regex => actual is not null && System.Text.RegularExpressions.Regex.IsMatch(actual, expected,
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant),
+        _ => false,
+    };
 
     private string Describe()
     {
@@ -89,6 +137,26 @@ public sealed record GuaLocatorQuery
         if (_selector.ParentId is not null) fields.Add($"scope={_selector.ParentId} ({(_selector.DirectChild ? "direct children" : "descendants")})");
         if (_selector.Visible != GuaStateFilter.Any) fields.Add($"visible={_selector.Visible == GuaStateFilter.True}");
         if (_selector.Enabled != GuaStateFilter.Any) fields.Add($"enabled={_selector.Enabled == GuaStateFilter.True}");
+        if (_value is not null) fields.Add($"value={_valueMatch}:{_value}");
+        if (_focused is not null) fields.Add($"focused={_focused}");
+        if (_selected is not null) fields.Add($"selected={_selected}");
+        if (_checked is not null) fields.Add($"checked={_checked}");
+        if (_action is not null) fields.Add($"action={_action}");
         return "{" + string.Join(", ", fields) + "}";
+    }
+
+    private string DescribeAllCandidates()
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(_context.GetUiTreeJson());
+            if (!document.RootElement.TryGetProperty("nodes", out var nodes) || nodes.GetArrayLength() == 0) return "<none>";
+            return string.Join("; ", nodes.EnumerateArray().Take(12).Select(node =>
+                $"{node.GetProperty("id").GetString()} ({node.GetProperty("role").GetString()}, '{node.GetProperty("label").GetString()}', parentId='{(node.TryGetProperty("parentId", out var parent) ? parent.GetString() : "<root>")}')"));
+        }
+        catch (JsonException)
+        {
+            return "<UI tree could not be parsed>";
+        }
     }
 }
