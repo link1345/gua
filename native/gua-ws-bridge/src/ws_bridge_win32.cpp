@@ -150,7 +150,15 @@ std::string escape_json(std::string_view value)
             out += "\\t";
             break;
         default:
-            out += ch;
+            if (static_cast<unsigned char>(ch) < 0x20U) {
+                constexpr char hex[] = "0123456789abcdef";
+                const unsigned char byte = static_cast<unsigned char>(ch);
+                out += "\\u00";
+                out += hex[byte >> 4U];
+                out += hex[byte & 0x0fU];
+            } else {
+                out += ch;
+            }
             break;
         }
     }
@@ -437,11 +445,72 @@ std::optional<std::string> json_string_field(std::string_view json, std::string_
         return std::nullopt;
     }
 
+    const auto hex_value = [](char ch) -> int {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+    };
+    const auto append_utf8 = [](std::string& out, std::uint32_t codepoint) {
+        if (codepoint <= 0x7fU) {
+            out.push_back(static_cast<char>(codepoint));
+        } else if (codepoint <= 0x7ffU) {
+            out.push_back(static_cast<char>(0xc0U | (codepoint >> 6U)));
+            out.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+        } else if (codepoint <= 0xffffU) {
+            out.push_back(static_cast<char>(0xe0U | (codepoint >> 12U)));
+            out.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+            out.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+        } else {
+            out.push_back(static_cast<char>(0xf0U | (codepoint >> 18U)));
+            out.push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3fU)));
+            out.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+            out.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+        }
+    };
+    const auto read_hex_quad = [&](std::size_t start, std::uint32_t& result) -> bool {
+        if (start + 4U > json.size()) return false;
+        result = 0;
+        for (std::size_t offset = 0; offset < 4U; ++offset) {
+            const int digit = hex_value(json[start + offset]);
+            if (digit < 0) return false;
+            result = (result << 4U) | static_cast<std::uint32_t>(digit);
+        }
+        return true;
+    };
+
     std::string value;
     for (std::size_t i = quote + 1U; i < json.size(); ++i) {
         const char ch = json[i];
-        if (ch == '\\' && i + 1U < json.size()) {
-            value.push_back(json[++i]);
+        if (ch == '\\') {
+            if (++i >= json.size()) return std::nullopt;
+            switch (json[i]) {
+            case '"': value.push_back('"'); break;
+            case '\\': value.push_back('\\'); break;
+            case '/': value.push_back('/'); break;
+            case 'b': value.push_back('\b'); break;
+            case 'f': value.push_back('\f'); break;
+            case 'n': value.push_back('\n'); break;
+            case 'r': value.push_back('\r'); break;
+            case 't': value.push_back('\t'); break;
+            case 'u': {
+                std::uint32_t codepoint = 0;
+                if (!read_hex_quad(i + 1U, codepoint)) return std::nullopt;
+                i += 4U;
+                if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+                    if (i + 6U >= json.size() || json[i + 1U] != '\\' || json[i + 2U] != 'u') return std::nullopt;
+                    std::uint32_t low = 0;
+                    if (!read_hex_quad(i + 3U, low) || low < 0xdc00U || low > 0xdfffU) return std::nullopt;
+                    codepoint = 0x10000U + ((codepoint - 0xd800U) << 10U) + (low - 0xdc00U);
+                    i += 6U;
+                } else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+                    return std::nullopt;
+                }
+                append_utf8(value, codepoint);
+                break;
+            }
+            default: return std::nullopt;
+            }
             continue;
         }
         if (ch == '"') {
@@ -652,12 +721,21 @@ public:
         }
         {
             const std::lock_guard lock(clients_mutex_);
-            for (const ClientConnection& client : clients_) {
-                shutdown(client.socket, SD_BOTH);
+            for (const SOCKET client_socket : active_client_sockets_) {
+                shutdown(client_socket, SD_BOTH);
             }
         }
         if (thread_.joinable()) {
             thread_.join();
+        }
+        {
+            const std::lock_guard lock(client_threads_mutex_);
+            for (std::thread& client_thread : client_threads_) {
+                if (client_thread.joinable()) {
+                    client_thread.join();
+                }
+            }
+            client_threads_.clear();
         }
     }
 
@@ -743,14 +821,35 @@ private:
                     }
                     break;
                 }
-
-                try {
-                    serve_client(client.get());
-                } catch (const std::exception& error) {
-                    if (running_.load()) {
-                        std::cerr << "Gua bridge client error: " << error.what() << std::endl;
-                    }
+                if (!running_.load()) {
+                    break;
                 }
+
+                const SOCKET client_socket = client.release();
+                {
+                    const std::lock_guard clients_lock(clients_mutex_);
+                    active_client_sockets_.push_back(client_socket);
+                }
+                const std::lock_guard lock(client_threads_mutex_);
+                client_threads_.emplace_back([this, client_socket]() {
+                    Socket owned_client(client_socket);
+                    try {
+                        serve_client(owned_client.get());
+                    } catch (const std::exception& error) {
+                        if (running_.load()) {
+                            std::cerr << "Gua bridge client error: " << error.what() << std::endl;
+                        }
+                    }
+                    const std::lock_guard clients_lock(clients_mutex_);
+                    clients_.erase(
+                        std::remove_if(clients_.begin(), clients_.end(), [&](const ClientConnection& entry) {
+                            return entry.socket == client_socket;
+                        }),
+                        clients_.end());
+                    active_client_sockets_.erase(
+                        std::remove(active_client_sockets_.begin(), active_client_sockets_.end(), client_socket),
+                        active_client_sockets_.end());
+                });
             }
 
             listen_socket_ = INVALID_SOCKET;
@@ -890,6 +989,9 @@ private:
     std::atomic<SOCKET> listen_socket_ = INVALID_SOCKET;
     std::mutex clients_mutex_;
     std::vector<ClientConnection> clients_;
+    std::vector<SOCKET> active_client_sockets_;
+    std::mutex client_threads_mutex_;
+    std::vector<std::thread> client_threads_;
 };
 
 BridgeServer::BridgeServer(BridgeHandlers handlers, BridgeOptions options)

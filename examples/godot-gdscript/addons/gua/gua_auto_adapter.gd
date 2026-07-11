@@ -291,9 +291,9 @@ func _dispatch_click_requests() -> void:
 			var group := button.button_group
 			if button.toggle_mode and not (button.button_pressed and group != null and not group.allow_unpress):
 				button.button_pressed = not button.button_pressed
-			_emit_click_result(request, id, 0)
 			suppressed_clicks[id] = true
 			button.emit_signal("pressed")
+			_emit_click_result(request, id, 0)
 
 	for id in tabs_by_id.keys():
 		var target: Dictionary = tabs_by_id[id]

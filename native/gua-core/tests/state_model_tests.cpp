@@ -86,6 +86,11 @@ int main()
     assert(first.find("\"checked\":false") != std::string::npos);
     assert(first.find("\"selected\"") == std::string::npos);
 
+    gua_add_log(context, GUA_LOG_INFO, "control\bcharacter");
+    const std::string escaped_logs = gua_get_logs_json(context);
+    assert(escaped_logs.find("control\\u0008character") != std::string::npos);
+    assert(escaped_logs.find('\b') == std::string::npos);
+
     gua_node_state_v2_t state {};
     state.struct_size = sizeof(state);
     assert(gua_get_node_state_v2(context, "remember", &state) == 1);
@@ -213,10 +218,11 @@ int main()
 		GUA_ACTION_STATUS_FAILED, GUA_ACTION_ERROR_DISABLED, "remember", nullptr, 0 };
 	assert(gua_emit_action_result(context, &failed_click_result) == 1);
 	assert(gua_poll_event(context, &legacy_event) == 0);
+	gua_context_status_t failed_click_status { sizeof(gua_context_status_t) };
+	assert(gua_get_context_status(context, &failed_click_status) == 1);
+	assert(failed_click_status.unconsumed_event_count == 0);
 	gua_event_v2_t failed_click_event { sizeof(gua_event_v2_t) };
-	assert(gua_poll_event_v2_for_request(context, failed_click_id, &failed_click_event) == 1);
-	assert(failed_click_event.status == GUA_ACTION_STATUS_FAILED);
-	assert(failed_click_event.error_code == GUA_ACTION_ERROR_DISABLED);
+	assert(gua_poll_event_v2_for_request(context, failed_click_id, &failed_click_event) == 0);
 
     gua_action_request_t in_flight { sizeof(gua_action_request_t) };
     assert(gua_consume_action_request(context, GUA_ACTION_FOCUS, "name", &in_flight) == 1);

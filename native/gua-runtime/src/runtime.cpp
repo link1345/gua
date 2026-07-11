@@ -441,7 +441,17 @@ std::string escape_json(std::string_view value)
         case '\n': escaped += "\\n"; break;
         case '\r': escaped += "\\r"; break;
         case '\t': escaped += "\\t"; break;
-        default: escaped.push_back(ch); break;
+        default:
+            if (static_cast<unsigned char>(ch) < 0x20U) {
+                constexpr char hex[] = "0123456789abcdef";
+                const unsigned char byte_value = static_cast<unsigned char>(ch);
+                escaped += "\\u00";
+                escaped += hex[byte_value >> 4U];
+                escaped += hex[byte_value & 0x0fU];
+            } else {
+                escaped.push_back(ch);
+            }
+            break;
         }
     }
     return escaped;

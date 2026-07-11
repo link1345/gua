@@ -124,7 +124,15 @@ std::string escape_json(std::string_view value)
             out += "\\t";
             break;
         default:
-            out += ch;
+            if (static_cast<unsigned char>(ch) < 0x20U) {
+                constexpr char hex[] = "0123456789abcdef";
+                const unsigned char byte = static_cast<unsigned char>(ch);
+                out += "\\u00";
+                out += hex[byte >> 4U];
+                out += hex[byte & 0x0fU];
+            } else {
+                out += ch;
+            }
             break;
         }
     }
