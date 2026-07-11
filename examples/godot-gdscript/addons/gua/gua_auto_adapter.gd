@@ -278,6 +278,8 @@ func _dispatch_click_requests() -> void:
 			if button.disabled or not button.is_visible_in_tree():
 				continue
 
+			if button.toggle_mode:
+				button.button_pressed = not button.button_pressed
 			context.emit_click(id)
 			suppressed_clicks[id] = true
 			button.emit_signal("pressed")
@@ -357,6 +359,9 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				var scroll := control as ScrollContainer
 				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
 				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
+			elif control is ItemList:
+				var list_scroll := (control as ItemList).get_v_scroll_bar()
+				list_scroll.value += float(request.get("delta_y", 0.0))
 			else:
 				return -5
 		"press_key":
@@ -434,6 +439,8 @@ func _control_role(control: Control) -> String:
 	if control is LineEdit or control is TextEdit:
 		return "textbox"
 	if control is Slider:
+		return "slider"
+	if control is SpinBox:
 		return "slider"
 	if control is ScrollContainer:
 		return "scrollarea"
