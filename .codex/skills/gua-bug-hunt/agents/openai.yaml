@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gua Bug Hunt"
+  short_description: "Find reproducible bugs across Gua protocol boundaries"
+  default_prompt: "Use $gua-bug-hunt to inspect this Gua change for reproducible bugs and report evidence."
