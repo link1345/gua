@@ -263,6 +263,7 @@ public sealed class GuaNodeExpectation
     private readonly IGuaContext _context;
     private readonly string _id;
     private readonly string _description;
+    private GuaNodeSnapshot? _retainedSnapshot;
 
     internal GuaNodeExpectation(IGuaContext context, string id, string description)
     {
@@ -275,13 +276,20 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeSnapshot Snapshot => GetSnapshotOrFail();
 
+    /// <summary>Discards the retained wait snapshot and captures the node from the latest published frame.</summary>
+    public GuaNodeExpectation Refresh()
+    {
+        _retainedSnapshot = GuaAssertions.TryGetSnapshot(_context, _id);
+        if (_retainedSnapshot is null)
+        {
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist after refresh. {GuaAssertions.DescribeTree(_context)}");
+        }
+        return this;
+    }
+
     public GuaNodeExpectation ToExist()
     {
-        if (GuaAssertions.TryGetSnapshot(_context, _id) is null)
-        {
-            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
-        }
-
+        _ = GetSnapshotOrFail();
         return this;
     }
 
@@ -452,6 +460,7 @@ public sealed class GuaNodeExpectation
         Enqueue(new GuaActionRequest(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), "press_key");
 
     public GuaActionEvent FocusAndWait(TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Focus, _id), timeout, pollInterval);
+    public GuaActionEvent ClickAndWait(TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Click, _id), timeout, pollInterval);
     public GuaActionEvent SetValueAndWait(string value, bool sensitive = false, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.SetValue, _id, Value: value, Sensitive: sensitive), timeout, pollInterval);
     public GuaActionEvent SetCheckedAndWait(bool value, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.SetChecked, _id, BoolValue: value), timeout, pollInterval);
     public GuaActionEvent SelectAndWait(string value, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.Select, _id, Value: value), timeout, pollInterval);
@@ -459,6 +468,7 @@ public sealed class GuaNodeExpectation
     public GuaActionEvent PressKeyAndWait(string key, uint modifiers = 0, TimeSpan? timeout = null, TimeSpan? pollInterval = null) => Complete(new(GuaActionType.PressKey, _id, Key: key, Modifiers: modifiers), timeout, pollInterval);
 
     public Task<GuaActionEvent> FocusAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Focus, _id), timeout, pollInterval, cancellationToken);
+    public Task<GuaActionEvent> ClickAsync(TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Click, _id), timeout, pollInterval, cancellationToken);
     public Task<GuaActionEvent> SetValueAsync(string value, bool sensitive = false, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.SetValue, _id, Value: value, Sensitive: sensitive), timeout, pollInterval, cancellationToken);
     public Task<GuaActionEvent> SetCheckedAsync(bool value, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.SetChecked, _id, BoolValue: value), timeout, pollInterval, cancellationToken);
     public Task<GuaActionEvent> SelectAsync(string value, TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default) => CompleteAsync(new(GuaActionType.Select, _id, Value: value), timeout, pollInterval, cancellationToken);
@@ -545,13 +555,17 @@ public sealed class GuaNodeExpectation
 
     internal GuaNodeExpectation RequireExistingSnapshot()
     {
-        ToExist();
+        _retainedSnapshot = GuaAssertions.TryGetSnapshot(_context, _id);
+        if (_retainedSnapshot is null)
+        {
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
+        }
         return this;
     }
 
     private GuaNodeSnapshot GetSnapshotOrFail()
     {
-        var snapshot = GuaAssertions.TryGetSnapshot(_context, _id);
+        var snapshot = _retainedSnapshot ?? GuaAssertions.TryGetSnapshot(_context, _id);
         if (snapshot is null)
         {
             GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");

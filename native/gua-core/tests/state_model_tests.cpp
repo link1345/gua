@@ -4,6 +4,9 @@
 #include <cstring>
 #include <string>
 #include <cstdint>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -36,6 +39,34 @@ int main()
 {
     gua_context_t* context = gua_create_context();
     assert(context != nullptr);
+
+    // A frame is private until end_frame atomically publishes it.
+    gua_context_t* atomic_context = gua_create_context();
+    gua_begin_frame(atomic_context, "initial-staging");
+    gua_register_node(atomic_context, "private", "button", "Private", { 0, 0, 1, 1 }, 1, 1);
+    const std::string before_first_publish = gua_get_ui_tree_json(atomic_context);
+    assert(before_first_publish.find("\"screen\":\"unknown\"") != std::string::npos);
+    assert(before_first_publish.find("private") == std::string::npos);
+    gua_end_frame(atomic_context);
+
+    gua_begin_frame(atomic_context, "second-staging");
+    gua_register_node(atomic_context, "partial", "button", "Partial", { 0, 0, 1, 1 }, 1, 1);
+    const std::string during_second_frame = gua_get_ui_tree_json(atomic_context);
+    assert(during_second_frame.find("initial-staging") != std::string::npos);
+    assert(during_second_frame.find("partial") == std::string::npos);
+    const gua_selector_v1_t private_selector { sizeof(gua_selector_v1_t), "private" };
+    char query_json[512] {};
+    gua_query_nodes_json(atomic_context, &private_selector, query_json, sizeof(query_json));
+    assert(std::string(query_json).find("private") != std::string::npos);
+    assert(std::string(gua_get_diagnostics_json(atomic_context)).find("initial-staging") != std::string::npos);
+    const gua_action_request_descriptor_t published_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "private" };
+    const gua_action_request_descriptor_t staging_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "partial" };
+    assert(gua_enqueue_action(atomic_context, &published_click, nullptr) == GUA_ACTION_ACCEPTED);
+    assert(gua_enqueue_action(atomic_context, &staging_click, nullptr) == GUA_ACTION_ERROR_NODE_NOT_FOUND);
+    gua_register_node(atomic_context, nullptr, "button", "Invalid", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(atomic_context);
+    assert(std::string(gua_get_ui_tree_json(atomic_context)) == during_second_frame);
+    gua_destroy_context(atomic_context);
 
     gua_begin_frame(context, "settings");
     register_checkbox(context, false);
@@ -229,6 +260,41 @@ int main()
     assert(preserved_event.action == GUA_ACTION_FOCUS);
 
     gua_destroy_context(other);
+
+    // Readers may observe the old or new complete frame, never a partial node count.
+    gua_context_t* concurrent = gua_create_context();
+    gua_begin_frame(concurrent, "stress");
+    for (int i = 0; i < 8; ++i) {
+        const std::string id = "old-" + std::to_string(i);
+        gua_register_node(concurrent, id.c_str(), "text", id.c_str(), { 0, 0, 1, 1 }, 1, 1);
+    }
+    gua_end_frame(concurrent);
+    std::atomic<bool> stop { false };
+    std::atomic<bool> invalid_count { false };
+    std::vector<std::thread> readers;
+    for (int reader = 0; reader < 4; ++reader) {
+        readers.emplace_back([&] {
+            while (!stop.load()) {
+                gua_context_status_t concurrent_status { sizeof(gua_context_status_t) };
+                assert(gua_get_context_status(concurrent, &concurrent_status) == 1);
+                if (concurrent_status.node_count != 8 && concurrent_status.node_count != 64) invalid_count = true;
+            }
+        });
+    }
+    for (int frame = 0; frame < 100; ++frame) {
+        const int count = (frame % 2 == 0) ? 64 : 8;
+        gua_begin_frame(concurrent, "stress");
+        for (int i = 0; i < count; ++i) {
+            const std::string id = "node-" + std::to_string(i);
+            gua_register_node(concurrent, id.c_str(), "text", id.c_str(), { 0, 0, 1, 1 }, 1, 1);
+            if ((i % 8) == 0) std::this_thread::yield();
+        }
+        gua_end_frame(concurrent);
+    }
+    stop = true;
+    for (auto& reader : readers) reader.join();
+    assert(!invalid_count.load());
+    gua_destroy_context(concurrent);
 
     gua_destroy_context(context);
     return 0;

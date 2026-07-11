@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using Gua.Core;
 using Gua.Testing;
 
@@ -9,13 +11,15 @@ public sealed class GodotSceneTestHost : IDisposable
 {
     private readonly GodotSceneTestHostOptions _options;
     private readonly Process _process;
+    private readonly string _bridgeUrl;
     private bool _disposed;
 
-    private GodotSceneTestHost(Process process, GuaRemoteContext context, GodotSceneTestHostOptions options)
+    private GodotSceneTestHost(Process process, GuaRemoteContext context, GodotSceneTestHostOptions options, string bridgeUrl)
     {
         _process = process;
         Context = context;
         _options = options;
+        _bridgeUrl = bridgeUrl;
     }
 
     public IGuaContext Context { get; }
@@ -35,7 +39,7 @@ public sealed class GodotSceneTestHost : IDisposable
             {
                 ["host"] = "Godot",
                 ["processId"] = ProcessId.ToString(),
-                ["bridgeUrl"] = _options.BridgeUrl,
+                ["bridgeUrl"] = _bridgeUrl,
                 ["projectPath"] = _options.ProjectPath ?? string.Empty,
             },
         };
@@ -46,9 +50,11 @@ public sealed class GodotSceneTestHost : IDisposable
         options ??= GodotSceneTestHostOptions.Default;
         var projectPath = ResolveProjectPath(scenePath, options.ProjectPath);
         var godotPath = ResolveGodotExecutable(options.GodotExecutablePath);
-        var process = StartGodot(godotPath, projectPath, ToGodotScenePath(scenePath, projectPath), options);
+        var godotScenePath = ToGodotScenePath(scenePath, projectPath);
+        var bridgeUrl = options.UseAvailableBridgePort ? $"ws://127.0.0.1:{ReserveLoopbackPort()}" : options.BridgeUrl;
+        var process = StartGodot(godotPath, projectPath, godotScenePath, bridgeUrl, options);
         var output = new ProcessOutput(process);
-        var context = new GuaRemoteContext(options.BridgeUrl, options.RequestTimeout);
+        var context = new GuaRemoteContext(bridgeUrl, options.RequestTimeout);
 
         try
         {
@@ -68,16 +74,22 @@ public sealed class GodotSceneTestHost : IDisposable
                 if (!clean.IsClean)
                     throw new InvalidOperationException($"Godot startup reset left queued work: pending={clean.PendingRequestCount}, inFlight={clean.InFlightRequestCount}, events={clean.UnconsumedEventCount}.");
             }
-            return new GodotSceneTestHost(process, context, options);
+            return new GodotSceneTestHost(process, context, options, bridgeUrl);
         }
         catch (Exception error)
         {
             KillProcess(process);
             context.Dispose();
             throw new InvalidOperationException(
-                $"Failed to connect to the Gua bridge at {options.BridgeUrl}. Godot output:\n{output.Read()}",
+                $"Failed to start Godot scene test host. executable='{godotPath}', project='{projectPath}', scene='{godotScenePath}', bridge='{bridgeUrl}'. stdout/stderr:\n{output.Read()}",
                 error);
         }
+    }
+
+    public static GodotSceneTestHost LoadRendered(string scenePath, GodotSceneTestHostOptions? options = null)
+    {
+        options ??= GodotSceneTestHostOptions.Default;
+        return Load(scenePath, CloneWithHeadless(options, false));
     }
 
     public void Click(string nodeId, string? nextScene = null, TimeSpan? timeout = null)
@@ -158,12 +170,27 @@ public sealed class GodotSceneTestHost : IDisposable
             return;
         }
 
+        Exception? teardownError = null;
+        try
+        {
+            if (_options.TeardownReset is { } resetOptions)
+            {
+                var report = ResetContext(resetOptions);
+                if (report.Result != GuaResetResult.Succeeded)
+                    throw new InvalidOperationException($"Godot teardown reset failed: {report.Result}; pending={report.PendingRequestCount}, inFlight={report.InFlightRequestCount}, events={report.UnconsumedEventCount}.");
+            }
+        }
+        catch (Exception error)
+        {
+            teardownError = error;
+        }
         _disposed = true;
         ((IDisposable)Context).Dispose();
         if (_options.KillProcessOnDispose)
         {
             KillProcess(_process);
         }
+        if (teardownError is not null) throw teardownError;
     }
 
     private void ThrowIfDisposed()
@@ -175,6 +202,7 @@ public sealed class GodotSceneTestHost : IDisposable
         string godotPath,
         string projectPath,
         string scenePath,
+        string bridgeUrl,
         GodotSceneTestHostOptions options)
     {
         var arguments = new List<string>();
@@ -207,10 +235,36 @@ public sealed class GodotSceneTestHost : IDisposable
         {
             startInfo.Environment[name] = value;
         }
+        startInfo.Environment["GUA_BRIDGE_PORT"] = new Uri(bridgeUrl).Port.ToString();
 
         return Process.Start(startInfo)
             ?? throw new InvalidOperationException($"Failed to start Godot executable: {godotPath}");
     }
+
+    private static int ReserveLoopbackPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
+        finally { listener.Stop(); }
+    }
+
+    private static GodotSceneTestHostOptions CloneWithHeadless(GodotSceneTestHostOptions source, bool headless) => new()
+    {
+        GodotExecutablePath = source.GodotExecutablePath,
+        ProjectPath = source.ProjectPath,
+        BridgeUrl = source.BridgeUrl,
+        UseAvailableBridgePort = source.UseAvailableBridgePort,
+        Headless = headless,
+        KillProcessOnDispose = source.KillProcessOnDispose,
+        ConnectTimeout = source.ConnectTimeout,
+        RequestTimeout = source.RequestTimeout,
+        SceneTimeout = source.SceneTimeout,
+        AdditionalArguments = source.AdditionalArguments,
+        EnvironmentVariables = source.EnvironmentVariables,
+        StartupReset = source.StartupReset,
+        TeardownReset = source.TeardownReset,
+    };
 
     private static string ResolveGodotExecutable(string? configuredPath)
     {

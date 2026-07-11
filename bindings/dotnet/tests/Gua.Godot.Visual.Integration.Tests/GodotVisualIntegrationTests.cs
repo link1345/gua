@@ -156,6 +156,30 @@ public sealed class GodotVisualIntegrationTests
         });
     }
 
+    [Test]
+    public async Task ParallelHostsUseDistinctAutomaticPortsAndExposeOnlyCompleteTrees()
+    {
+        using var first = StartGodotAutoPort();
+        using var second = StartGodotAutoPort();
+        await Task.WhenAll(
+            first.WaitForScreenshotAsync(TimeSpan.FromSeconds(15)),
+            second.WaitForScreenshotAsync(TimeSpan.FromSeconds(15)));
+
+        var observedCounts = new List<int>();
+        for (var sample = 0; sample < 100; sample++)
+        {
+            using var document = JsonDocument.Parse(first.Context.GetUiTreeJson());
+            observedCounts.Add(document.RootElement.GetProperty("nodes").GetArrayLength());
+            await Task.Delay(2);
+        }
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.ProcessId, Is.Not.EqualTo(second.ProcessId));
+            Assert.That(observedCounts, Has.All.EqualTo(observedCounts[0]));
+            Assert.That(observedCounts[0], Is.GreaterThan(10));
+        });
+    }
+
     private static async Task<IReadOnlyList<GuaActionEvent>> WaitForActionEventsAsync(
         IGuaContext context, int count, TimeSpan timeout)
     {
@@ -192,6 +216,27 @@ public sealed class GodotVisualIntegrationTests
                 ["GUA_BRIDGE_PORT"] = port.ToString(),
             },
             AdditionalArguments = ["--display-driver", "windows", "--rendering-method", "gl_compatibility", "--resolution", "1280x720", "--position", "0,0"],
+        });
+    }
+
+    private static GodotSceneTestHost StartGodotAutoPort()
+    {
+        return GodotSceneTestHost.LoadRendered("res://Main.tscn", new GodotSceneTestHostOptions
+        {
+            GodotExecutablePath = Environment.GetEnvironmentVariable("GODOT_EXECUTABLE"),
+            ProjectPath = Path.Combine(FindRepositoryRoot(), "examples", "godot-gdscript"),
+            UseAvailableBridgePort = true,
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            RequestTimeout = TimeSpan.FromSeconds(10),
+            SceneTimeout = TimeSpan.FromSeconds(15),
+            StartupReset = new GuaResetOptions(Strict: true),
+            TeardownReset = new GuaResetOptions(Strict: true),
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["GUA_VISUAL_E2E"] = "1",
+                ["GUA_V2_E2E"] = "1",
+            },
+            AdditionalArguments = ["--display-driver", "windows", "--rendering-method", "gl_compatibility", "--resolution", "1280x720"],
         });
     }
 
