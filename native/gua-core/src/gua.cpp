@@ -942,7 +942,8 @@ extern "C" int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event)
 
     const std::lock_guard lock(ctx->mutex);
     const auto legacy_event = std::find_if(ctx->events.begin(), ctx->events.end(), [](const Event& event) {
-        return event.action == GUA_ACTION_CLICK || event.action == GUA_ACTION_FOCUS;
+        return event.status == GUA_ACTION_STATUS_SUCCEEDED &&
+            (event.action == GUA_ACTION_CLICK || event.action == GUA_ACTION_FOCUS);
     });
     if (legacy_event == ctx->events.end()) {
         return 0;

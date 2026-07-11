@@ -205,6 +205,19 @@ int main()
     assert(diagnostics.find("secret-marker") == std::string::npos);
     assert(diagnostics.find("\"sensitive\":true") != std::string::npos);
 
+	const gua_action_request_descriptor_t failed_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "remember" };
+	std::uint64_t failed_click_id = 0;
+	assert(gua_enqueue_action(context, &failed_click, &failed_click_id) == GUA_ACTION_ACCEPTED);
+	assert(gua_consume_action_request(context, GUA_ACTION_CLICK, "remember", &consumed) == 1);
+	const gua_action_result_t failed_click_result { sizeof(gua_action_result_t), failed_click_id, GUA_ACTION_CLICK,
+		GUA_ACTION_STATUS_FAILED, GUA_ACTION_ERROR_DISABLED, "remember", nullptr, 0 };
+	assert(gua_emit_action_result(context, &failed_click_result) == 1);
+	assert(gua_poll_event(context, &legacy_event) == 0);
+	gua_event_v2_t failed_click_event { sizeof(gua_event_v2_t) };
+	assert(gua_poll_event_v2_for_request(context, failed_click_id, &failed_click_event) == 1);
+	assert(failed_click_event.status == GUA_ACTION_STATUS_FAILED);
+	assert(failed_click_event.error_code == GUA_ACTION_ERROR_DISABLED);
+
     gua_action_request_t in_flight { sizeof(gua_action_request_t) };
     assert(gua_consume_action_request(context, GUA_ACTION_FOCUS, "name", &in_flight) == 1);
 

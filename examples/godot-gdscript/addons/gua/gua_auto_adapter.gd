@@ -212,7 +212,7 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		"bounds": Rect2(control.global_position, control.size),
 		"visible": control.is_visible_in_tree(),
 		"enabled": _control_enabled(control),
-		"focused": control.has_focus(),
+		"focused": _control_focused(control),
 	}
 	if not parent_id.is_empty():
 		descriptor["parent_id"] = parent_id
@@ -279,11 +279,19 @@ func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
 func _dispatch_click_requests() -> void:
 	for id in buttons_by_id.keys():
 		var button := buttons_by_id[id] as BaseButton
-		while context.consume_click_request(id):
-			if button.disabled or not button.is_visible_in_tree():
+		while true:
+			var request: Dictionary = context.consume_action_request("click", id)
+			if request.is_empty():
+				break
+			var error_code := -3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0)
+			if error_code != 0:
+				_emit_click_result(request, id, error_code)
 				continue
 
-			context.emit_click(id)
+			var group := button.button_group
+			if button.toggle_mode and not (button.button_pressed and group != null and not group.allow_unpress):
+				button.button_pressed = not button.button_pressed
+			_emit_click_result(request, id, 0)
 			suppressed_clicks[id] = true
 			button.emit_signal("pressed")
 
@@ -291,18 +299,33 @@ func _dispatch_click_requests() -> void:
 		var target: Dictionary = tabs_by_id[id]
 		var tab_container := target["container"] as TabContainer
 		var index := int(target["index"])
-		while context.consume_click_request(id):
-			if not tab_container.is_visible_in_tree() or tab_container.is_tab_disabled(index):
+		while true:
+			var request: Dictionary = context.consume_action_request("click", id)
+			if request.is_empty():
+				break
+			var error_code := -3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0)
+			if error_code != 0:
+				_emit_click_result(request, id, error_code)
 				continue
 
 			tab_container.current_tab = index
-			context.emit_click(id)
+			_emit_click_result(request, id, 0)
+
+
+func _emit_click_result(request: Dictionary, id: String, error_code: int) -> void:
+	context.emit_action_result({
+		"request_id": request.get("request_id", 0),
+		"action": "click",
+		"node_id": id,
+		"succeeded": error_code == 0,
+		"error_code": error_code,
+	})
 
 
 func _dispatch_action_requests() -> void:
 	for id in controls_by_id.keys():
 		var control := controls_by_id[id] as Control
-		for action in ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
+		for action in ["focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
 			while true:
 				var request: Dictionary = context.consume_action_request(action, id)
 				if request.is_empty():
@@ -339,18 +362,14 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 	if not _control_enabled(control):
 		return -4
 	match action:
-		"click":
-			if control is BaseButton:
-				var button := control as BaseButton
-				suppressed_clicks[_control_id(button)] = true
-				button.emit_signal("pressed")
-			else:
-				return -5
 		"focus":
 			if control.focus_mode == Control.FOCUS_NONE:
 				return -5
-			control.grab_focus()
-			if not control.has_focus():
+			var focus_target: Control = (control as SpinBox).get_line_edit() if control is SpinBox else control
+			if focus_target.focus_mode == Control.FOCUS_NONE:
+				return -5
+			focus_target.grab_focus()
+			if not focus_target.has_focus():
 				return -5
 		"set_value":
 			var value = request.get("value", "")
@@ -377,6 +396,10 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				var scroll := control as ScrollContainer
 				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
 				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
+			elif control is ItemList:
+				var item_list := control as ItemList
+				item_list.get_h_scroll_bar().value += float(request.get("delta_x", 0.0))
+				item_list.get_v_scroll_bar().value += float(request.get("delta_y", 0.0))
 			else:
 				return -5
 		"press_key":
@@ -506,6 +529,8 @@ func _control_role(control: Control) -> String:
 		return "textbox"
 	if control is Slider:
 		return "slider"
+	if control is SpinBox:
+		return "slider"
 	if control is ScrollContainer:
 		return "scrollarea"
 	return "panel"
@@ -572,3 +597,9 @@ func _control_enabled(control: Control) -> bool:
 	if control is Slider:
 		return (control as Slider).editable
 	return control.mouse_filter != Control.MOUSE_FILTER_IGNORE
+
+
+func _control_focused(control: Control) -> bool:
+	if control is SpinBox:
+		return (control as SpinBox).get_line_edit().has_focus()
+	return control.has_focus()

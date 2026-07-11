@@ -118,6 +118,7 @@ and later engine adapters own the engine-specific reflection details.
 | Godot `Button` | `button` | parentId, text, visible, enabled, focused |
 | Godot `CheckBox` | `checkbox` | parentId, text, focused, checked |
 | Godot `LineEdit` / `TextEdit` | `textbox` | parentId, text, value, focused |
+| Godot `SpinBox` | `slider` | parentId, value, enabled from editable state, focused through the inner editor |
 | Godot `OptionButton` | `combobox` | parentId, value, focused |
 | Godot `ItemList` | `list` + `listitem` children | stable derived child id, parentId, text, selected |
 | Godot `TabContainer` | `tablist` + `tab` children | stable derived child id, parentId, text, selected |

@@ -33,6 +33,16 @@ func _run() -> void:
 	checkbox.text = "Remember me"
 	checkbox.button_pressed = false
 	screen.add_child(checkbox)
+	var exclusive_group := ButtonGroup.new()
+	var grouped_first := CheckBox.new()
+	grouped_first.name = "grouped_first"
+	grouped_first.button_group = exclusive_group
+	grouped_first.button_pressed = true
+	screen.add_child(grouped_first)
+	var grouped_second := CheckBox.new()
+	grouped_second.name = "grouped_second"
+	grouped_second.button_group = exclusive_group
+	screen.add_child(grouped_second)
 
 	var line_edit := LineEdit.new()
 	line_edit.name = "name"
@@ -51,10 +61,19 @@ func _run() -> void:
 	slider.name = "volume"
 	slider.value = 10
 	screen.add_child(slider)
+	var spin_box := SpinBox.new()
+	spin_box.name = "limit"
+	spin_box.value = 5
+	spin_box.focus_mode = Control.FOCUS_ALL
+	screen.add_child(spin_box)
 	var locked_spin_box := SpinBox.new()
 	locked_spin_box.name = "locked_count"
 	locked_spin_box.editable = false
 	screen.add_child(locked_spin_box)
+	var nonfocus_spin_box := SpinBox.new()
+	nonfocus_spin_box.name = "nonfocus_count"
+	nonfocus_spin_box.focus_mode = Control.FOCUS_NONE
+	screen.add_child(nonfocus_spin_box)
 
 	var option := OptionButton.new()
 	option.name = "difficulty"
@@ -65,8 +84,14 @@ func _run() -> void:
 
 	var item_list := ItemList.new()
 	item_list.name = "servers"
+	item_list.size = Vector2(120, 40)
+	item_list.icon_mode = ItemList.ICON_MODE_TOP
+	item_list.max_columns = 0
+	item_list.fixed_column_width = 300
 	item_list.add_item("Tokyo")
 	item_list.add_item("Osaka")
+	for index in range(20):
+		item_list.add_item("Server %d" % index)
 	item_list.select(0)
 	screen.add_child(item_list)
 
@@ -199,21 +224,33 @@ func _run() -> void:
 	if invalid_focus_event.get("request_id", 0) != invalid_focus.get("request_id", 0) or invalid_focus_event.get("succeeded", true) or invalid_focus_event.get("error_code", 0) != -5:
 		_fail("Gua smoke reported success for a non-focusable control: %s" % invalid_focus_event)
 		return
+	var invalid_spin_focus := ui.enqueue_action({"action": "focus", "node_id": "nonfocus_count"})
+	ui.update("title")
+	var invalid_spin_focus_event := ui.poll_event_v2()
+	if invalid_spin_focus_event.get("request_id", 0) != invalid_spin_focus.get("request_id", 0) or invalid_spin_focus_event.get("succeeded", true) or invalid_spin_focus_event.get("error_code", 0) != -5:
+		_fail("Gua focused a SpinBox whose parent disabled focus: %s" % invalid_spin_focus_event)
+		return
 	var action_checkbox := CheckBox.new()
 	action_checkbox.name = "action_check"
 	screen.add_child(action_checkbox)
 	ui.update("title")
+	# Keep the horizontal scrollbar range deterministic in headless mode, where
+	# ItemList layout does not receive a rendered viewport pass.
+	item_list.get_h_scroll_bar().max_value = 100.0
+	item_list.get_h_scroll_bar().page = 0.0
 
 	var action_cases := [
 		[{"action": "focus", "node_id": "start"}, func(): return button.has_focus()],
 		[{"action": "set_value", "node_id": "name", "value": "Codex"}, func(): return line_edit.text == "Codex"],
 		[{"action": "set_value", "node_id": "notes", "value": "New"}, func(): return text_edit.text == "New"],
 		[{"action": "set_value", "node_id": "volume", "value": "42"}, func(): return slider.value == 42],
+		[{"action": "set_value", "node_id": "limit", "value": "12"}, func(): return spin_box.value == 12],
 		[{"action": "set_checked", "node_id": "action_check", "bool_value": true}, func(): return action_checkbox.button_pressed],
 		[{"action": "select", "node_id": "difficulty", "value": "Easy"}, func(): return option.selected == 0],
 		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
 		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
 		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
+		[{"action": "scroll", "node_id": "servers", "delta_x": 30.0}, func(): return item_list.get_h_scroll_bar().value > 0],
 		[{"action": "press_key", "node_id": "name", "key": "A", "modifiers": 5}, func(): return key_events.size() == 2 and key_events[0].pressed and not key_events[1].pressed and key_events[0].shift_pressed and key_events[0].ctrl_pressed],
 	]
 	for action_case in action_cases:
@@ -229,6 +266,34 @@ func _run() -> void:
 		if observed.get("request_id", 0) != accepted.get("request_id", 0) or not observed.get("succeeded", false):
 			_fail("Gua smoke did not correlate observed action event: %s / %s" % [accepted, observed])
 			return
+	var spin_focus := ui.enqueue_action({"action": "focus", "node_id": "limit"})
+	ui.update("title")
+	var spin_focus_event := ui.poll_event_v2()
+	ui.update("title")
+	var spin_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "limit")
+	if spin_focus_event.get("request_id", 0) != spin_focus.get("request_id", 0) or spin_node == null or not spin_node.get("state", {}).get("focused", false):
+		_fail("Gua did not publish SpinBox focus from its inner editor: %s / %s" % [spin_focus_event, spin_node])
+		return
+	var disabled_click := ui.enqueue_action({"action": "click", "node_id": "start"})
+	button.disabled = true
+	ui.update("title")
+	var disabled_click_event := ui.poll_event_v2()
+	button.disabled = false
+	if disabled_click_event.get("request_id", 0) != disabled_click.get("request_id", 0) or disabled_click_event.get("succeeded", true) or disabled_click_event.get("error_code", 0) != -4:
+		_fail("Gua dropped an accepted click after the target became disabled: %s" % disabled_click_event)
+		return
+	var checkbox_click := ui.enqueue_action({"action": "click", "node_id": "action_check"})
+	ui.update("title")
+	var checkbox_click_event := ui.poll_event_v2()
+	if checkbox_click.get("error_code", -1) != 0 or action_checkbox.button_pressed or checkbox_click_event.get("request_id", 0) != checkbox_click.get("request_id", 0):
+		_fail("Gua click action did not toggle the checkbox: %s / %s" % [checkbox_click, checkbox_click_event])
+		return
+	var grouped_click := ui.enqueue_action({"action": "click", "node_id": "grouped_first"})
+	ui.update("title")
+	var grouped_click_event := ui.poll_event_v2()
+	if not grouped_first.button_pressed or grouped_second.button_pressed or grouped_click_event.get("request_id", 0) != grouped_click.get("request_id", 0):
+		_fail("Gua click action cleared an exclusive ButtonGroup selection: %s / %s" % [grouped_click, grouped_click_event])
+		return
 	var sensitive := ui.enqueue_action({"action": "set_value", "node_id": "name", "value": "secret-marker", "sensitive": true})
 	ui.update("title")
 	var sensitive_event := ui.poll_event_v2()
