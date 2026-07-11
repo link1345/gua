@@ -1,5 +1,7 @@
 namespace Gua.Testing.Godot;
 
+using Gua.Core;
+
 public sealed class GodotSceneTestHostOptions
 {
     public static GodotSceneTestHostOptions Default { get; } = new();
@@ -21,4 +23,8 @@ public sealed class GodotSceneTestHostOptions
     public TimeSpan SceneTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     public IReadOnlyList<string> AdditionalArguments { get; init; } = [];
+
+    public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; } = new Dictionary<string, string>();
+
+    public GuaResetOptions? StartupReset { get; init; }
 }

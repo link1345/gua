@@ -12,11 +12,13 @@ var start_button: Button
 var settings_button: Button
 var loading_label: Label
 var visual_e2e := false
+var v2_e2e := false
 var visual_e2e_update_elapsed := 0.0
 
 
 func _ready() -> void:
 	visual_e2e = OS.get_environment("GUA_VISUAL_E2E") == "1"
+	v2_e2e = OS.get_environment("GUA_V2_E2E") == "1"
 	if OS.has_environment("GUA_BRIDGE_PORT"):
 		inspector_bridge_port = int(OS.get_environment("GUA_BRIDGE_PORT"))
 	_build_ui()
@@ -73,6 +75,8 @@ func _build_ui() -> void:
 
 	if visual_e2e:
 		_build_visual_e2e_controls()
+	if v2_e2e:
+		_build_v2_e2e_controls()
 
 
 func _build_visual_e2e_controls() -> void:
@@ -105,6 +109,76 @@ func _build_visual_e2e_controls() -> void:
 	select.position = Vector2(512, 568)
 	select.size = Vector2(256, 40)
 	add_child(select)
+
+
+func _build_v2_e2e_controls() -> void:
+	var form := VBoxContainer.new()
+	form.name = "V2Form"
+	form.set_meta("gua_id", "v2-form")
+	form.position = Vector2(32, 32)
+	form.size = Vector2(360, 620)
+	add_child(form)
+
+	var user_name := LineEdit.new()
+	user_name.name = "UserNameLine"
+	user_name.set_meta("gua_id", "v2-user-name")
+	user_name.placeholder_text = "User name"
+	form.add_child(user_name)
+
+	var secret := LineEdit.new()
+	secret.name = "SecretLine"
+	secret.set_meta("gua_id", "v2-secret")
+	secret.set_meta("gua_sensitive", true)
+	secret.secret = true
+	form.add_child(secret)
+
+	var notes := TextEdit.new()
+	notes.name = "NotesText"
+	notes.set_meta("gua_id", "v2-notes")
+	notes.custom_minimum_size = Vector2(340, 80)
+	form.add_child(notes)
+
+	var provider := OptionButton.new()
+	provider.name = "ProviderOption"
+	provider.set_meta("gua_id", "v2-provider")
+	provider.add_item("local")
+	provider.add_item("google")
+	form.add_child(provider)
+
+	var remember := CheckBox.new()
+	remember.name = "RememberMe"
+	remember.set_meta("gua_id", "v2-remember")
+	remember.text = "Remember me"
+	form.add_child(remember)
+
+	var servers := ItemList.new()
+	servers.name = "ServerList"
+	servers.set_meta("gua_id", "v2-servers")
+	servers.add_item("Tokyo")
+	servers.add_item("Osaka")
+	servers.custom_minimum_size = Vector2(340, 80)
+	form.add_child(servers)
+
+	var tabs := TabContainer.new()
+	tabs.name = "SettingsTabs"
+	tabs.set_meta("gua_id", "v2-tabs")
+	tabs.custom_minimum_size = Vector2(340, 90)
+	var general := Control.new()
+	general.name = "General"
+	tabs.add_child(general)
+	var advanced := Control.new()
+	advanced.name = "Advanced"
+	tabs.add_child(advanced)
+	form.add_child(tabs)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "ManagementContent"
+	scroll.set_meta("gua_id", "v2-scroll")
+	scroll.custom_minimum_size = Vector2(340, 100)
+	var content := Control.new()
+	content.custom_minimum_size = Vector2(700, 700)
+	scroll.add_child(content)
+	form.add_child(scroll)
 
 
 func _capture_visual_e2e() -> void:

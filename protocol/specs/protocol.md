@@ -264,6 +264,11 @@ boundaries. External commands such as `click_node` are requests first; adapters
 consume them and emit events only after the corresponding host UI action has
 been applied.
 
+Testing clients may combine enqueue and request-id-specific polling in one
+convenience operation. Such helpers must not consume unrelated results or
+ordinary events, must preserve sensitive-value redaction, and should report the
+final screen/frame/revision when completion fails.
+
 Initial event types:
 
 - `click`

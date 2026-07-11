@@ -39,3 +39,40 @@ screen names instead of resource paths.
 For failure artifacts, `host.CreateDiagnosticOptions(testName)` includes the
 Godot process id, bridge URL, and project metadata. The remote context captures
 the same versioned diagnostics JSON as an in-process context.
+
+## Protocol v2 form testing
+
+Typed operations wait for the correlated action result, not merely enqueue
+acceptance. Request-id-specific polling leaves unrelated results and ordinary
+events queued. Async methods accept timeout, poll interval, and cancellation.
+
+```csharp
+using var host = GodotSceneTestHost.Load("res://Main.tscn", new GodotSceneTestHostOptions
+{
+    ProjectPath = projectPath,
+    StartupReset = new GuaResetOptions(Strict: true), // opt-in
+});
+
+var userName = GuaAssertions.Query(host.Context)
+    .ByRole("textbox").Within("LoginForm").ByAction("set_value").Get();
+await userName.SetValueAsync("alice");
+await userName.FocusAsync();
+await GuaAssertions.PressKeyAsync(host.Context, "Enter"); // current focus
+await GuaAssertions.GetById(host.Context, "ProviderOption").SelectAsync("google");
+await GuaAssertions.GetById(host.Context, "RememberMe").SetCheckedAsync(true);
+await GuaAssertions.GetById(host.Context, "ManagementContent").ScrollAsync(0, 500);
+await userName.WaitForValueAsync("alice");
+await userName.WaitUntilFocusedAsync();
+
+var saved = host.SaveScreenshot(TestContext.CurrentContext.WorkDirectory,
+    TestContext.CurrentContext.Test.Name);
+TestContext.AddTestAttachment(saved.AbsolutePath, $"{saved.Width}x{saved.Height}");
+```
+
+Use `SetValueAsync(value, sensitive: true)` for secrets. Plaintext is redacted
+from action results, logs, diagnostics, and snapshots for adapter-marked
+sensitive controls. A screenshot can still contain a rendered secret: saving,
+attaching, retaining, and publishing PNG files is the caller's responsibility.
+`SaveScreenshot` creates a collision-resistant absolute path and distinguishes
+unpublished, malformed data-URI, and invalid-PNG payloads. A headless renderer
+without viewport capture is reported as unpublished rather than an empty file.

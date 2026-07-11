@@ -20,6 +20,8 @@ public sealed class GodotSceneTestHost : IDisposable
 
     public IGuaContext Context { get; }
 
+    public GuaRemoteContext RemoteContext => (GuaRemoteContext)Context;
+
     public int ProcessId => _process.Id;
 
     public GuaDiagnosticOptions CreateDiagnosticOptions(string testName, string? outputDirectory = null)
@@ -52,6 +54,20 @@ public sealed class GodotSceneTestHost : IDisposable
         {
             output.Start();
             context.WaitUntilAvailable(options.ConnectTimeout);
+            if (options.StartupReset is { } resetOptions)
+            {
+                var status = context.GetContextStatus();
+                var report = context.Reset(resetOptions with { ExpectedSessionEpoch = status.SessionEpoch });
+                if (report.Result == GuaResetResult.StaleEpoch)
+                    throw new InvalidOperationException($"Godot startup reset rejected stale session epoch {status.SessionEpoch}.");
+                if (report.Result == GuaResetResult.Dirty)
+                    throw new InvalidOperationException($"Godot startup strict reset rejected dirty context: pending={report.PendingRequestCount}, inFlight={report.InFlightRequestCount}, events={report.UnconsumedEventCount}.");
+                if (report.Result != GuaResetResult.Succeeded)
+                    throw new InvalidOperationException($"Godot startup reset failed: {report.Result}.");
+                var clean = context.GetContextStatus();
+                if (!clean.IsClean)
+                    throw new InvalidOperationException($"Godot startup reset left queued work: pending={clean.PendingRequestCount}, inFlight={clean.InFlightRequestCount}, events={clean.UnconsumedEventCount}.");
+            }
             return new GodotSceneTestHost(process, context, options);
         }
         catch (Exception error)
@@ -99,6 +115,40 @@ public sealed class GodotSceneTestHost : IDisposable
             await Task.Delay(25, cancellationToken).ConfigureAwait(false);
         } while (DateTimeOffset.UtcNow < deadline);
         throw new TimeoutException($"Godot did not publish an opt-in viewport screenshot within {limit:g}.");
+    }
+
+    public GuaScreenshot GetScreenshot()
+    {
+        ThrowIfDisposed();
+        return GuaScreenshot.Parse(RemoteContext.GetScreenshotJson());
+    }
+
+    public GuaSavedScreenshot SaveScreenshot(string directory, string testName)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(testName);
+        var screenshot = GetScreenshot();
+        var bytes = screenshot.DecodePng();
+        var absoluteDirectory = Path.GetFullPath(directory);
+        Directory.CreateDirectory(absoluteDirectory);
+        var safeName = string.Concat(testName.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+        var path = Path.Combine(absoluteDirectory, $"{safeName}-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(path, bytes);
+        return new GuaSavedScreenshot(screenshot.Width, screenshot.Height, Path.GetFullPath(path));
+    }
+
+    public GuaContextStatus GetContextStatus() => RemoteContext.GetContextStatus();
+
+    public GuaResetReport ResetContext(GuaResetOptions? options = null)
+    {
+        ThrowIfDisposed();
+        var status = RemoteContext.GetContextStatus();
+        var requested = options ?? new GuaResetOptions();
+        var report = RemoteContext.Reset(requested with { ExpectedSessionEpoch = requested.ExpectedSessionEpoch ?? status.SessionEpoch });
+        if (report.Result == GuaResetResult.Succeeded && !RemoteContext.GetContextStatus().IsClean)
+            throw new InvalidOperationException("Godot context reset succeeded but pending requests or events remain.");
+        return report;
     }
 
     public void Dispose()
@@ -151,6 +201,11 @@ public sealed class GodotSceneTestHost : IDisposable
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        foreach (var (name, value) in options.EnvironmentVariables)
+        {
+            startInfo.Environment[name] = value;
         }
 
         return Process.Start(startInfo)
