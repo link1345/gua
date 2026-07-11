@@ -14,6 +14,26 @@
 
 namespace {
 
+std::string escape_json(const std::string& value);
+
+#ifndef GUA_VERSION
+#define GUA_VERSION "0.0.0-development"
+#endif
+#ifndef GUA_BUILD_ID
+#define GUA_BUILD_ID "development"
+#endif
+
+std::string build_version_json(const char* godot_plugin_version = nullptr)
+{
+    const std::string plugin = godot_plugin_version == nullptr
+        ? "null"
+        : "\"" + escape_json(godot_plugin_version) + "\"";
+    return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
+        "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin +
+        ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\"]}";
+}
+
 struct Node {
     std::string id;
     std::string role;
@@ -504,7 +524,7 @@ std::string build_diagnostics_json(const gua_context_t& ctx)
         ",\"pendingRequestCount\":" + std::to_string(ctx.action_requests.size()) +
         ",\"inFlightRequestCount\":" + std::to_string(ctx.consumed_requests.size()) +
         ",\"unconsumedEventCount\":" + std::to_string(ctx.events.size()) +
-        ",\"environment\":" + ctx.diagnostics_environment_json +
+        ",\"environment\":" + ctx.diagnostics_environment_json + ",\"version\":" + build_version_json() +
         ",\"uiTree\":" + build_ui_tree_json(ctx) + ",\"pendingRequests\":" + pending +
         ",\"operations\":" + build_history_json(ctx.operation_history) +
         ",\"events\":" + build_history_json(ctx.event_history) +
@@ -751,6 +771,11 @@ extern "C" int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int
     if (ctx == nullptr) return copy_json_string("{}", out_json, out_json_size);
     const std::lock_guard lock(ctx->mutex);
     return copy_json_string(build_diagnostics_json(*ctx), out_json, out_json_size);
+}
+
+extern "C" int gua_copy_version_json(char* out_json, int out_json_size)
+{
+    return copy_json_string(build_version_json(), out_json, out_json_size);
 }
 
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)

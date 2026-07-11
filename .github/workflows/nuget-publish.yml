@@ -54,7 +54,15 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Configure native runtime
-        run: cmake --preset windows-msvc-release
+        run: cmake --preset windows-msvc-release "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Verify injected release metadata
+        shell: pwsh
+        run: |
+          $cache = Get-Content build/windows-msvc-release/CMakeCache.txt -Raw
+          if ($cache -notmatch 'GUA_VERSION:STRING=${{ steps.version.outputs.version }}' -or $cache -notmatch 'GUA_BUILD_ID:STRING=${{ github.sha }}') {
+            throw 'Configured Gua version/build ID does not match the release tag and commit.'
+          }
 
       - name: Build native runtime
         run: cmake --build --preset windows-msvc-release --target gua --config Release

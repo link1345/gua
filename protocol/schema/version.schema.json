@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/version.schema.json",
+  "title": "Gua runtime version and capabilities",
+  "type": "object",
+  "required": ["protocolSchemaVersion", "coreVersion", "runtimeVersion", "godotPluginVersion", "abiVersion", "buildId", "capabilities"],
+  "properties": {
+    "protocolSchemaVersion": { "type": "string", "minLength": 1 },
+    "coreVersion": { "type": "string", "minLength": 1 },
+    "runtimeVersion": { "type": "string", "minLength": 1 },
+    "godotPluginVersion": { "type": ["string", "null"] },
+    "abiVersion": { "type": "integer", "minimum": 1 },
+    "buildId": { "type": "string", "minLength": 1 },
+    "capabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9_]+$" } }
+  },
+  "additionalProperties": false
+}

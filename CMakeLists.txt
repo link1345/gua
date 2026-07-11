@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.20)
 
 project(gua LANGUAGES C CXX)
 
+set(GUA_VERSION "0.5.0-preview.3" CACHE STRING "Gua component version")
+set(GUA_BUILD_ID "development" CACHE STRING "Reproducible Gua build identifier")
+set(GUA_GODOT_PLUGIN_VERSION "0.4.0" CACHE STRING "Gua Godot plugin version")
+add_compile_definitions(
+    GUA_VERSION="${GUA_VERSION}"
+    GUA_BUILD_ID="${GUA_BUILD_ID}"
+    GUA_GODOT_PLUGIN_VERSION="${GUA_GODOT_PLUGIN_VERSION}"
+)
+
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)

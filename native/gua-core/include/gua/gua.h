@@ -284,6 +284,8 @@ int gua_set_diagnostics_environment_json(gua_context_t* ctx, const char* environ
 const char* gua_get_diagnostics_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int out_json_size);
+/* Returns version/capability JSON. The required byte size includes the trailing NUL. */
+int gua_copy_version_json(char* out_json, int out_json_size);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
 /* Returns 0 rather than a partial state when a v2 string does not fit its fixed output buffer. */
 int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);

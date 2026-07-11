@@ -152,6 +152,11 @@ public sealed class GodotSceneTestHost : IDisposable
 
     public GuaContextStatus GetContextStatus() => RemoteContext.GetContextStatus();
 
+    public GuaVersion GetVersion() => RemoteContext.GetVersion();
+
+    public Task<GuaVersion> GetVersionAsync(CancellationToken cancellationToken = default) =>
+        RemoteContext.GetVersionAsync(cancellationToken);
+
     public GuaResetReport ResetContext(GuaResetOptions? options = null)
     {
         ThrowIfDisposed();

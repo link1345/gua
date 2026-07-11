@@ -6,6 +6,8 @@ public interface IGuaContext
 
     string GetDiagnosticsJson() => throw new NotSupportedException("This Gua context does not support diagnostics capture.");
 
+    GuaVersion GetVersion() => throw new NotSupportedException("This Gua context does not support version inspection.");
+
     GuaContextStatus GetContextStatus() => throw new NotSupportedException("This Gua context does not support status inspection.");
 
     GuaResetReport Reset(GuaResetOptions? options = null) => throw new NotSupportedException("This Gua context does not support reset.");

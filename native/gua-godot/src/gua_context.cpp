@@ -74,6 +74,7 @@ namespace godot {
 GuaContext::GuaContext()
     : runtime_(gua_runtime_create())
 {
+    gua_runtime_set_godot_plugin_version(runtime_, GUA_GODOT_PLUGIN_VERSION);
     if (runtime_ == nullptr) {
         UtilityFunctions::push_error(
             "GuaContext failed to create a Gua runtime. Check that the Gua native library and dependent DLLs are available.");
@@ -193,6 +194,13 @@ bool GuaContext::register_node_v2(const Dictionary& source)
 String GuaContext::get_ui_tree_json() const
 {
     return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
+}
+
+String GuaContext::get_version_json() const
+{
+    char json[2048] {};
+    gua_runtime_copy_version_json(runtime_, json, static_cast<int>(sizeof(json)));
+    return String::utf8(json);
 }
 
 bool GuaContext::enqueue_click(const String& node_id)
@@ -387,6 +395,7 @@ void GuaContext::_bind_methods()
         DEFVAL(true));
     ClassDB::bind_method(D_METHOD("register_node_v2", "descriptor"), &GuaContext::register_node_v2);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
+    ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
     ClassDB::bind_method(D_METHOD("get_screenshot_json"), &GuaContext::get_screenshot_json);
     ClassDB::bind_method(D_METHOD("enqueue_click", "node_id"), &GuaContext::enqueue_click);

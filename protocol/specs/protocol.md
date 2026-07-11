@@ -211,6 +211,7 @@ Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Contro
 - `get_screenshot`
 - `get_logs`
 - `get_diagnostics`
+- `get_version`
 - `poll_events`
 - `get_context_status`
 - `reset_context` with `expectedSessionEpoch`, optional reset `flags`, and optional `strict`
@@ -260,6 +261,7 @@ Initial MCP tools:
 - `get_screenshot`: returns the latest screenshot payload
 - `get_logs`: returns ordered runtime logs
 - `get_diagnostics`: returns the versioned best-effort diagnostics snapshot
+- `get_version`: returns `version.schema.json` for the components actually loaded. `godotPluginVersion` is `null` outside Godot. Capability IDs are stable public identifiers; new IDs are additive.
 - `run_test`: executes a small list of `wait_for_node` and `click_node` steps
 
 The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua

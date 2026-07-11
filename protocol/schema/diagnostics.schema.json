@@ -3,7 +3,7 @@
   "$id": "https://gua.dev/schema/diagnostics.schema.json",
   "title": "Gua diagnostics snapshot",
   "type": "object",
-  "required": ["schemaVersion", "sessionEpoch", "frameSequence", "revision", "historyLimit", "pendingRequestCount", "inFlightRequestCount", "unconsumedEventCount", "environment", "uiTree", "pendingRequests", "operations", "events", "logs", "screenshot"],
+  "required": ["schemaVersion", "sessionEpoch", "frameSequence", "revision", "historyLimit", "pendingRequestCount", "inFlightRequestCount", "unconsumedEventCount", "environment", "version", "uiTree", "pendingRequests", "operations", "events", "logs", "screenshot"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "sessionEpoch": { "type": "integer", "minimum": 1 },
@@ -14,6 +14,7 @@
     "inFlightRequestCount": { "type": "integer", "minimum": 0 },
     "unconsumedEventCount": { "type": "integer", "minimum": 0 },
     "environment": { "type": "object" },
+    "version": { "$ref": "version.schema.json" },
     "uiTree": { "$ref": "ui-tree.schema.json" },
     "pendingRequests": { "type": "array", "items": { "$ref": "#/$defs/request" } },
     "operations": { "type": "array", "items": { "$ref": "#/$defs/history" } },
