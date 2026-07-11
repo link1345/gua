@@ -38,3 +38,6 @@ bot, or full UI framework.
 - Keep generated output, dependency folders, and local build artifacts out of git.
 - When changing schema behavior, update protocol docs and affected clients together.
 - Preserve the monorepo shape unless the user explicitly asks to split packages.
+- For independent defect investigation, use the project-local `$gua-bug-hunt`
+  skill. Keep bug-hunting subagents read-only and require reproducible evidence;
+  fixes are a separate task unless the user explicitly requests them.
