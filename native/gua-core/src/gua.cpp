@@ -140,7 +140,15 @@ std::string escape_json(const std::string& value)
             out += "\\t";
             break;
         default:
-            out += ch;
+            if (static_cast<unsigned char>(ch) < 0x20U) {
+                constexpr char hex[] = "0123456789abcdef";
+                const unsigned char byte_value = static_cast<unsigned char>(ch);
+                out += "\\u00";
+                out += hex[byte_value >> 4U];
+                out += hex[byte_value & 0x0fU];
+            } else {
+                out += ch;
+            }
             break;
         }
     }
@@ -941,20 +949,24 @@ extern "C" int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event)
     }
 
     const std::lock_guard lock(ctx->mutex);
-    const auto legacy_event = std::find_if(ctx->events.begin(), ctx->events.end(), [](const Event& event) {
-        return event.status == GUA_ACTION_STATUS_SUCCEEDED &&
-            (event.action == GUA_ACTION_CLICK || event.action == GUA_ACTION_FOCUS);
-    });
-    if (legacy_event == ctx->events.end()) {
-        return 0;
+    while (true) {
+        const auto legacy_event = std::find_if(ctx->events.begin(), ctx->events.end(), [](const Event& event) {
+            return event.action == GUA_ACTION_CLICK || event.action == GUA_ACTION_FOCUS;
+        });
+        if (legacy_event == ctx->events.end()) {
+            return 0;
+        }
+
+        const Event event = *legacy_event;
+        ctx->events.erase(legacy_event);
+        if (event.status != GUA_ACTION_STATUS_SUCCEEDED) {
+            continue;
+        }
+
+        out_event->type = event.action;
+        std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
+        return 1;
     }
-
-    const Event event = *legacy_event;
-    ctx->events.erase(legacy_event);
-
-    out_event->type = event.action;
-    std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
-    return 1;
 }
 
 extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id)

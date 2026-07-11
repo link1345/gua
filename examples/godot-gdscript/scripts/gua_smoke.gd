@@ -3,6 +3,9 @@ extends SceneTree
 const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 
 var pressed_count := 0
+var adapter: Variant
+var expected_click_request_id := 0
+var click_completed_before_handler := false
 
 
 func _initialize() -> void:
@@ -115,6 +118,7 @@ func _run() -> void:
 	await process_frame
 
 	var ui := GuaAutoAdapterScript.new()
+	adapter = ui
 	var missing_methods := ui._missing_context_methods(RefCounted.new())
 	if not missing_methods.has("consume_click_request"):
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
@@ -197,9 +201,13 @@ func _run() -> void:
 		_fail("Gua smoke expected one Button.pressed signal, got %d." % pressed_count)
 		return
 	var action_click := ui.enqueue_action({"action": "click", "node_id": "start"})
+	expected_click_request_id = action_click.get("request_id", 0)
 	ui.update("title")
 	var action_click_event := ui.poll_event_v2()
-	if pressed_count != 2 or action_click_event.get("request_id", 0) != action_click.get("request_id", 0) or not action_click_event.get("succeeded", false):
+	if click_completed_before_handler:
+		_fail("Gua completed a v2 click before the pressed handler returned.")
+		return
+	if pressed_count != 2 or action_click_event.get("request_id", 0) != expected_click_request_id or not action_click_event.get("succeeded", false):
 		_fail("Gua smoke did not drain and apply a v2 click request: %s" % action_click_event)
 		return
 	var list_item_select := ui.enqueue_action({"action": "select", "node_id": "servers$item:1"})
@@ -331,6 +339,9 @@ func _run() -> void:
 
 
 func _on_start_pressed() -> void:
+	if expected_click_request_id != 0:
+		var premature: Dictionary = adapter.poll_event_v2()
+		click_completed_before_handler = premature.get("request_id", 0) == expected_click_request_id
 	pressed_count += 1
 
 
