@@ -212,7 +212,7 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		"bounds": Rect2(control.global_position, control.size),
 		"visible": control.is_visible_in_tree(),
 		"enabled": _control_enabled(control),
-		"focused": control.has_focus(),
+		"focused": _control_focused(control),
 	}
 	if not parent_id.is_empty():
 		descriptor["parent_id"] = parent_id
@@ -279,14 +279,19 @@ func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
 func _dispatch_click_requests() -> void:
 	for id in buttons_by_id.keys():
 		var button := buttons_by_id[id] as BaseButton
-		while context.consume_click_request(id):
-			if button.disabled or not button.is_visible_in_tree():
+		while true:
+			var request: Dictionary = context.consume_action_request("click", id)
+			if request.is_empty():
+				break
+			var error_code := -3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0)
+			if error_code != 0:
+				_emit_click_result(request, id, error_code)
 				continue
 
 			var group := button.button_group
 			if button.toggle_mode and not (button.button_pressed and group != null and not group.allow_unpress):
 				button.button_pressed = not button.button_pressed
-			context.emit_click(id)
+			_emit_click_result(request, id, 0)
 			suppressed_clicks[id] = true
 			button.emit_signal("pressed")
 
@@ -294,12 +299,27 @@ func _dispatch_click_requests() -> void:
 		var target: Dictionary = tabs_by_id[id]
 		var tab_container := target["container"] as TabContainer
 		var index := int(target["index"])
-		while context.consume_click_request(id):
-			if not tab_container.is_visible_in_tree() or tab_container.is_tab_disabled(index):
+		while true:
+			var request: Dictionary = context.consume_action_request("click", id)
+			if request.is_empty():
+				break
+			var error_code := -3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0)
+			if error_code != 0:
+				_emit_click_result(request, id, error_code)
 				continue
 
 			tab_container.current_tab = index
-			context.emit_click(id)
+			_emit_click_result(request, id, 0)
+
+
+func _emit_click_result(request: Dictionary, id: String, error_code: int) -> void:
+	context.emit_action_result({
+		"request_id": request.get("request_id", 0),
+		"action": "click",
+		"node_id": id,
+		"succeeded": error_code == 0,
+		"error_code": error_code,
+	})
 
 
 func _dispatch_action_requests() -> void:
@@ -575,3 +595,9 @@ func _control_enabled(control: Control) -> bool:
 	if control is Slider:
 		return (control as Slider).editable
 	return control.mouse_filter != Control.MOUSE_FILTER_IGNORE
+
+
+func _control_focused(control: Control) -> bool:
+	if control is SpinBox:
+		return (control as SpinBox).get_line_edit().has_focus()
+	return control.has_focus()

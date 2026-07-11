@@ -230,7 +230,6 @@ func _run() -> void:
 
 	var action_cases := [
 		[{"action": "focus", "node_id": "start"}, func(): return button.has_focus()],
-		[{"action": "focus", "node_id": "limit"}, func(): return spin_box.get_line_edit().has_focus()],
 		[{"action": "set_value", "node_id": "name", "value": "Codex"}, func(): return line_edit.text == "Codex"],
 		[{"action": "set_value", "node_id": "notes", "value": "New"}, func(): return text_edit.text == "New"],
 		[{"action": "set_value", "node_id": "volume", "value": "42"}, func(): return slider.value == 42],
@@ -256,6 +255,22 @@ func _run() -> void:
 		if observed.get("request_id", 0) != accepted.get("request_id", 0) or not observed.get("succeeded", false):
 			_fail("Gua smoke did not correlate observed action event: %s / %s" % [accepted, observed])
 			return
+	var spin_focus := ui.enqueue_action({"action": "focus", "node_id": "limit"})
+	ui.update("title")
+	var spin_focus_event := ui.poll_event_v2()
+	ui.update("title")
+	var spin_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "limit")
+	if spin_focus_event.get("request_id", 0) != spin_focus.get("request_id", 0) or spin_node == null or not spin_node.get("state", {}).get("focused", false):
+		_fail("Gua did not publish SpinBox focus from its inner editor: %s / %s" % [spin_focus_event, spin_node])
+		return
+	var disabled_click := ui.enqueue_action({"action": "click", "node_id": "start"})
+	button.disabled = true
+	ui.update("title")
+	var disabled_click_event := ui.poll_event_v2()
+	button.disabled = false
+	if disabled_click_event.get("request_id", 0) != disabled_click.get("request_id", 0) or disabled_click_event.get("succeeded", true) or disabled_click_event.get("error_code", 0) != -4:
+		_fail("Gua dropped an accepted click after the target became disabled: %s" % disabled_click_event)
+		return
 	var checkbox_click := ui.enqueue_action({"action": "click", "node_id": "action_check"})
 	ui.update("title")
 	var checkbox_click_event := ui.poll_event_v2()
