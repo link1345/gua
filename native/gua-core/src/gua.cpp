@@ -270,6 +270,10 @@ struct gua_context_t {
     mutable std::mutex mutex;
     std::string screen = "unknown";
     std::vector<Node> nodes;
+    std::string staging_screen = "unknown";
+    std::vector<Node> staging_nodes;
+    bool frame_in_progress = false;
+    bool staging_valid = true;
     std::deque<ActionRequest> action_requests;
     std::deque<ActionRequest> consumed_requests;
     std::deque<Event> events;
@@ -303,12 +307,12 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
     return required_size;
 }
 
-std::string build_semantic_snapshot_json(const gua_context_t& ctx)
+std::string build_semantic_snapshot_json(const std::string& screen, const std::vector<Node>& nodes)
 {
-    std::string json = "{\"screen\":\"" + escape_json(ctx.screen) + "\",\"nodes\":[";
+    std::string json = "{\"screen\":\"" + escape_json(screen) + "\",\"nodes\":[";
 
-    for (std::size_t i = 0; i < ctx.nodes.size(); ++i) {
-        const Node& node = ctx.nodes[i];
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const Node& node = nodes[i];
         if (i > 0) {
             json += ",";
         }
@@ -377,6 +381,11 @@ std::string build_semantic_snapshot_json(const gua_context_t& ctx)
 
     json += "]}";
     return json;
+}
+
+std::string build_semantic_snapshot_json(const gua_context_t& ctx)
+{
+    return build_semantic_snapshot_json(ctx.screen, ctx.nodes);
 }
 
 std::string build_ui_tree_json(const gua_context_t& ctx)
@@ -522,8 +531,10 @@ extern "C" void gua_begin_frame(gua_context_t* ctx, const char* screen)
     }
 
     const std::lock_guard lock(ctx->mutex);
-    ctx->screen = screen != nullptr ? screen : "unknown";
-    ctx->nodes.clear();
+    ctx->staging_screen = screen != nullptr ? screen : "unknown";
+    ctx->staging_nodes.clear();
+    ctx->frame_in_progress = true;
+    ctx->staging_valid = true;
 }
 
 extern "C" void gua_end_frame(gua_context_t* ctx)
@@ -533,7 +544,17 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
     }
 
     const std::lock_guard lock(ctx->mutex);
-    const std::string semantic_snapshot = build_semantic_snapshot_json(*ctx);
+    if (!ctx->frame_in_progress || !ctx->staging_valid) {
+        ctx->staging_nodes.clear();
+        ctx->frame_in_progress = false;
+        ctx->staging_valid = true;
+        return;
+    }
+    const std::string semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, ctx->staging_nodes);
+    ctx->screen.swap(ctx->staging_screen);
+    ctx->nodes.swap(ctx->staging_nodes);
+    ctx->staging_nodes.clear();
+    ctx->frame_in_progress = false;
     ++ctx->frame_sequence;
     if (semantic_snapshot != ctx->previous_semantic_snapshot) {
         ++ctx->revision;
@@ -551,12 +572,16 @@ extern "C" void gua_register_node(
     int visible,
     int enabled)
 {
-    if (ctx == nullptr || id == nullptr || role == nullptr) {
+    if (ctx == nullptr) {
         return;
     }
 
     const std::lock_guard lock(ctx->mutex);
-    ctx->nodes.push_back(Node {
+    if (!ctx->frame_in_progress || id == nullptr || role == nullptr) {
+        ctx->staging_valid = false;
+        return;
+    }
+    ctx->staging_nodes.push_back(Node {
         id,
         role,
         label != nullptr ? label : "",
@@ -568,13 +593,17 @@ extern "C" void gua_register_node(
 
 extern "C" int gua_register_node_v2(gua_context_t* ctx, const gua_node_descriptor_v2_t* descriptor)
 {
-    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v2_t) ||
-        descriptor->id == nullptr || descriptor->role == nullptr) {
+    if (ctx == nullptr) {
         return 0;
     }
 
     const std::lock_guard lock(ctx->mutex);
-    ctx->nodes.push_back(Node {
+    if (!ctx->frame_in_progress || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v2_t) ||
+        descriptor->id == nullptr || descriptor->role == nullptr) {
+        ctx->staging_valid = false;
+        return 0;
+    }
+    ctx->staging_nodes.push_back(Node {
         descriptor->id,
         descriptor->role,
         descriptor->label != nullptr ? descriptor->label : "",
@@ -912,17 +941,19 @@ extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_d
     const std::string node_id = descriptor->node_id != nullptr ? descriptor->node_id : "";
     const std::string value = descriptor->value != nullptr ? descriptor->value : "";
     const std::string key = descriptor->key != nullptr ? descriptor->key : "";
-    if ((descriptor->action != GUA_ACTION_PRESS_KEY && node_id.empty()) ||
-        (descriptor->action == GUA_ACTION_PRESS_KEY && key.empty()) ||
-        (descriptor->action == GUA_ACTION_SELECT && value.empty()) ||
-        (descriptor->action == GUA_ACTION_SCROLL && (!std::isfinite(descriptor->delta_x) || !std::isfinite(descriptor->delta_y)))) {
+	if ((descriptor->action != GUA_ACTION_PRESS_KEY && node_id.empty()) ||
+		(descriptor->action == GUA_ACTION_PRESS_KEY && key.empty()) ||
+		(descriptor->action == GUA_ACTION_SCROLL && (!std::isfinite(descriptor->delta_x) || !std::isfinite(descriptor->delta_y)))) {
         return GUA_ACTION_ERROR_INVALID_VALUE;
     }
 
     const std::lock_guard lock(ctx->mutex);
     if (!node_id.empty()) {
-        const auto node = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& candidate) { return candidate.id == node_id; });
-        if (node == ctx->nodes.end()) return GUA_ACTION_ERROR_NODE_NOT_FOUND;
+		const auto node = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& candidate) { return candidate.id == node_id; });
+		if (node == ctx->nodes.end()) return GUA_ACTION_ERROR_NODE_NOT_FOUND;
+		if (descriptor->action == GUA_ACTION_SELECT && value.empty() && node->role != "listitem" && node->role != "tab") {
+			return GUA_ACTION_ERROR_INVALID_VALUE;
+		}
         if (!node->visible) return GUA_ACTION_ERROR_HIDDEN;
         if (!node->enabled) return GUA_ACTION_ERROR_DISABLED;
         if (!supports_action(*node, descriptor->action)) return GUA_ACTION_ERROR_UNSUPPORTED;
@@ -1095,6 +1126,10 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     if ((options->flags & GUA_RESET_NODES) != 0U) {
         ctx->screen = "unknown";
         ctx->nodes.clear();
+        ctx->staging_screen = "unknown";
+        ctx->staging_nodes.clear();
+        ctx->frame_in_progress = false;
+        ctx->staging_valid = true;
     }
     if ((options->flags & GUA_RESET_REQUESTS) != 0U) {
         ctx->action_requests.clear();

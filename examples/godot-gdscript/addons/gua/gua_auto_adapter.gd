@@ -32,6 +32,7 @@ var context: Object
 var root: Control
 var buttons_by_id: Dictionary = {}
 var tabs_by_id: Dictionary = {}
+var list_items_by_id: Dictionary = {}
 var controls_by_id: Dictionary = {}
 var connected_buttons: Dictionary = {}
 var suppressed_clicks: Dictionary = {}
@@ -55,6 +56,7 @@ func update(screen: String) -> void:
 	context.begin_frame(screen)
 	buttons_by_id.clear()
 	tabs_by_id.clear()
+	list_items_by_id.clear()
 	controls_by_id.clear()
 	_collect_control(root, "")
 	context.end_frame()
@@ -138,6 +140,7 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 	if report.get("result", -1) == 1:
 		buttons_by_id.clear()
 		tabs_by_id.clear()
+		list_items_by_id.clear()
 		controls_by_id.clear()
 		suppressed_clicks.clear()
 	return report
@@ -240,8 +243,10 @@ func _collect_control(control: Control, parent_id: String) -> void:
 func _collect_item_list_items(item_list: ItemList, parent_id: String) -> void:
 	for index in range(item_list.item_count):
 		var label := item_list.get_item_text(index)
+		var id := "%s$item:%d" % [parent_id, index]
+		list_items_by_id[id] = {"list": item_list, "index": index}
 		context.register_node_v2({
-			"id": "%s$item:%d" % [parent_id, index],
+			"id": id,
 			"parent_id": parent_id,
 			"role": "listitem",
 			"label": label,
@@ -299,7 +304,7 @@ func _dispatch_click_requests() -> void:
 func _dispatch_action_requests() -> void:
 	for id in controls_by_id.keys():
 		var control := controls_by_id[id] as Control
-		for action in ["focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
+		for action in ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
 			while true:
 				var request: Dictionary = context.consume_action_request(action, id)
 				if request.is_empty():
@@ -314,6 +319,10 @@ func _dispatch_action_requests() -> void:
 					"value": request.get("value", ""),
 					"sensitive": request.get("sensitive", false),
 				})
+	for id in list_items_by_id.keys():
+		_dispatch_derived_select_requests(id, list_items_by_id[id])
+	for id in tabs_by_id.keys():
+		_dispatch_derived_select_requests(id, tabs_by_id[id])
 	while true:
 		var request: Dictionary = context.consume_action_request("press_key", "")
 		if request.is_empty():
@@ -332,8 +341,19 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 	if not _control_enabled(control):
 		return -4
 	match action:
+		"click":
+			if control is BaseButton:
+				var button := control as BaseButton
+				suppressed_clicks[_control_id(button)] = true
+				button.emit_signal("pressed")
+			else:
+				return -5
 		"focus":
+			if control.focus_mode == Control.FOCUS_NONE:
+				return -5
 			control.grab_focus()
+			if not control.has_focus():
+				return -5
 		"set_value":
 			var value = request.get("value", "")
 			if request.get("sensitive", false):
@@ -365,12 +385,63 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 			else:
 				return -5
 		"press_key":
+			if control.focus_mode == Control.FOCUS_NONE:
+				return -5
+			if not control.has_focus():
+				control.grab_focus()
+			if not control.has_focus():
+				return -5
 			var event := InputEventKey.new()
 			event.keycode = OS.find_keycode_from_string(str(request.get("key", "")))
+			if event.keycode == KEY_NONE:
+				return -6
+			var modifiers := int(request.get("modifiers", 0))
+			event.shift_pressed = (modifiers & 1) != 0
+			event.alt_pressed = (modifiers & 2) != 0
+			event.ctrl_pressed = (modifiers & 4) != 0
+			event.meta_pressed = (modifiers & 8) != 0
 			event.pressed = true
-			control.gui_input.emit(event)
+			control.get_viewport().push_input(event, true)
+			var release := event.duplicate() as InputEventKey
+			release.pressed = false
+			control.get_viewport().push_input(release, true)
 		_:
 			return -5
+	return 0
+
+
+func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
+	while true:
+		var request: Dictionary = context.consume_action_request("select", id)
+		if request.is_empty():
+			break
+		var error_code := _select_derived_item(target)
+		context.emit_action_result({
+			"request_id": request.get("request_id", 0),
+			"action": "select",
+			"node_id": id,
+			"succeeded": error_code == 0,
+			"error_code": error_code,
+		})
+
+
+func _select_derived_item(target: Dictionary) -> int:
+	var index := int(target["index"])
+	if target.has("list"):
+		var item_list := target["list"] as ItemList
+		if not item_list.is_visible_in_tree():
+			return -3
+		if item_list.is_item_disabled(index):
+			return -4
+		item_list.select(index)
+		item_list.item_selected.emit(index)
+		return 0
+	var tab_container := target["container"] as TabContainer
+	if not tab_container.is_visible_in_tree():
+		return -3
+	if tab_container.is_tab_disabled(index):
+		return -4
+	tab_container.current_tab = index
 	return 0
 
 
@@ -499,6 +570,8 @@ func _control_enabled(control: Control) -> bool:
 		return (control as LineEdit).editable
 	if control is TextEdit:
 		return (control as TextEdit).editable
+	if control is SpinBox:
+		return (control as SpinBox).editable
 	if control is ItemList:
 		return true
 	if control is TabContainer:

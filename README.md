@@ -128,6 +128,16 @@ host.Click("CenterPanel/Content/ButtonBox/StartButton", nextScene: "game/scenes/
 GuaAssertions.GetByRole(host.Context, "button", "Create").ToBeVisible();
 ```
 
+For v0.2.0 and later, repository-local `GuaLiveAssertions` helpers can migrate
+directly to `WaitForId` / `WaitForText` / `WaitForVisible` / `WaitForEnabled`,
+locator `WaitForCount*`, and correlated node actions such as `ClickAsync`.
+Wait-returned expectations retain the successful completed-frame snapshot;
+use `Refresh()` or `WaitUntil*` when a later frame is required. Repository
+`GodotHostFactory` wrappers should keep only game-specific process and fixture
+policy while `GodotSceneTestHost` owns executable/project discovery, automatic
+loopback ports, rendered/headless startup, bridge diagnostics, and reset policy.
+All APIs are additive over the existing C ABI and WebSocket protocol.
+
 Want to try that in GitHub Actions without wiring every setup step by hand?
 [`link1345/gua-tester`](https://github.com/link1345/gua-tester) provides
 reusable Actions for Godot GDScript projects. It downloads Godot on the runner,

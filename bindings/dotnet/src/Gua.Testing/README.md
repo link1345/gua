@@ -141,3 +141,21 @@ or cancellation together with request/action/node/error and snapshot metadata.
 Queries can add `Within`, `ByValue`, `WhereFocused`, `WhereSelected`,
 `WhereChecked`, and `ByAction`. Corresponding async state waits re-fetch the
 latest UI tree on every poll instead of holding the first snapshot.
+Wait-returned expectations retain the exact successful node snapshot, including
+`sessionEpoch`, `frameSequence`, and `revision`, so chained assertions evaluate
+one completed frame. Call `Refresh()` or a `WaitUntil*` method to opt into a
+newer published frame. A retained snapshot from an older session epoch remains
+readable evidence but must be refreshed before making current-session decisions.
+
+Locator counts can wait on every selector dimension, including scope, state,
+value, and action:
+
+```csharp
+await GuaAssertions.Query(context).ByRole("listitem").Within("ServerList")
+    .WaitForCountAsync(count => count >= 3, timeout, pollInterval, cancellationToken);
+GuaAssertions.Query(context).ByAction("scroll").WaitForCount(1, timeout, pollInterval);
+```
+
+Node expectations expose correlated sync/async action completion for `click`,
+`focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. These
+helpers wait for the same `requestId`; unrelated events remain queued.

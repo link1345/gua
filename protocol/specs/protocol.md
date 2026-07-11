@@ -29,6 +29,14 @@ semantic tree in consecutive frames increments `frameSequence` but leaves
 `revision` unchanged. Changing the screen, node membership, hierarchy, bounds,
 text, value, state, or actions increments `revision` at `end_frame`.
 
+Frame construction is transactional. `begin_frame` creates a private staging
+frame, registration functions update only that staging frame, and `end_frame`
+atomically publishes the screen, nodes, `frameSequence`, and `revision` under
+one context lock. Reads, selectors, action validation, diagnostics, and remote
+transports only observe the last completed frame. Before the first successful
+publish they observe the empty `unknown` snapshot. An invalid or abandoned
+staging frame never changes the last completed snapshot or its metadata.
+
 `sessionEpoch` starts at 1. A successful reset starts a new epoch and resets
 `frameSequence` and `revision` to zero. Consumers must use the epoch together
 with frame/revision metadata; values from an older epoch are stale.
@@ -196,6 +204,7 @@ Semantic actions follow `enqueue -> consume -> host action -> observed event`. E
 The v1 action names map directly to the additive C ABI action enum: `click`, `focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. Enqueue validation distinguishes `node_not_found`, `hidden`, `disabled`, `unsupported`, and `invalid_value`. Existing click functions remain compatibility wrappers over the generic queue.
 
 `sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
+Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Control is `4`, and Meta/Command is `8`. Adapters must route both key-down and key-up through the host input pipeline and report success only after accepting the complete key gesture.
 - `text_input`
 - `move_gamepad`
 - `wait_for_node`
