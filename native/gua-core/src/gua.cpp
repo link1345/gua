@@ -941,17 +941,19 @@ extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_d
     const std::string node_id = descriptor->node_id != nullptr ? descriptor->node_id : "";
     const std::string value = descriptor->value != nullptr ? descriptor->value : "";
     const std::string key = descriptor->key != nullptr ? descriptor->key : "";
-    if ((descriptor->action != GUA_ACTION_PRESS_KEY && node_id.empty()) ||
-        (descriptor->action == GUA_ACTION_PRESS_KEY && key.empty()) ||
-        (descriptor->action == GUA_ACTION_SELECT && value.empty()) ||
-        (descriptor->action == GUA_ACTION_SCROLL && (!std::isfinite(descriptor->delta_x) || !std::isfinite(descriptor->delta_y)))) {
+	if ((descriptor->action != GUA_ACTION_PRESS_KEY && node_id.empty()) ||
+		(descriptor->action == GUA_ACTION_PRESS_KEY && key.empty()) ||
+		(descriptor->action == GUA_ACTION_SCROLL && (!std::isfinite(descriptor->delta_x) || !std::isfinite(descriptor->delta_y)))) {
         return GUA_ACTION_ERROR_INVALID_VALUE;
     }
 
     const std::lock_guard lock(ctx->mutex);
     if (!node_id.empty()) {
-        const auto node = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& candidate) { return candidate.id == node_id; });
-        if (node == ctx->nodes.end()) return GUA_ACTION_ERROR_NODE_NOT_FOUND;
+		const auto node = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& candidate) { return candidate.id == node_id; });
+		if (node == ctx->nodes.end()) return GUA_ACTION_ERROR_NODE_NOT_FOUND;
+		if (descriptor->action == GUA_ACTION_SELECT && value.empty() && node->role != "listitem" && node->role != "tab") {
+			return GUA_ACTION_ERROR_INVALID_VALUE;
+		}
         if (!node->visible) return GUA_ACTION_ERROR_HIDDEN;
         if (!node->enabled) return GUA_ACTION_ERROR_DISABLED;
         if (!supports_action(*node, descriptor->action)) return GUA_ACTION_ERROR_UNSUPPORTED;

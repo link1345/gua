@@ -132,7 +132,8 @@ int main()
     };
     assert(gua_register_node_v2(context, &textbox) == 1);
     register_checkbox(context, false);
-    gua_register_node(context, "difficulty", "combobox", "Difficulty", { 0, 0, 100, 20 }, 1, 1);
+	gua_register_node(context, "difficulty", "combobox", "Difficulty", { 0, 0, 100, 20 }, 1, 1);
+	gua_register_node(context, "difficulty$item:0", "listitem", "Easy", { 0, 0, 100, 20 }, 1, 1);
     gua_register_node(context, "content", "scrollarea", "Content", { 0, 0, 100, 100 }, 1, 1);
     gua_end_frame(context);
 
@@ -149,13 +150,15 @@ int main()
 
     const gua_action_request_descriptor_t focus { sizeof(gua_action_request_descriptor_t), GUA_ACTION_FOCUS, "name" };
     const gua_action_request_descriptor_t checked { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SET_CHECKED, "remember", nullptr, 0, 0, 1 };
-    const gua_action_request_descriptor_t select { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SELECT, "difficulty", "hard" };
+	const gua_action_request_descriptor_t select { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SELECT, "difficulty", "hard" };
+	const gua_action_request_descriptor_t select_item { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SELECT, "difficulty$item:0" };
     const gua_action_request_descriptor_t scroll { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SCROLL, "content", nullptr, 2, 3 };
     const gua_action_request_descriptor_t key { sizeof(gua_action_request_descriptor_t), GUA_ACTION_PRESS_KEY, "name", nullptr, 0, 0, 0, "A" };
     std::uint64_t action_ids[5] {};
     assert(gua_enqueue_action(context, &focus, &action_ids[0]) == GUA_ACTION_ACCEPTED);
     assert(gua_enqueue_action(context, &checked, &action_ids[1]) == GUA_ACTION_ACCEPTED);
-    assert(gua_enqueue_action(context, &select, &action_ids[2]) == GUA_ACTION_ACCEPTED);
+	assert(gua_enqueue_action(context, &select, &action_ids[2]) == GUA_ACTION_ACCEPTED);
+	assert(gua_enqueue_action(context, &select_item, nullptr) == GUA_ACTION_ACCEPTED);
     assert(gua_enqueue_action(context, &scroll, &action_ids[3]) == GUA_ACTION_ACCEPTED);
     assert(gua_enqueue_action(context, &key, &action_ids[4]) == GUA_ACTION_ACCEPTED);
     for (std::size_t i = 1; i < 5; ++i) assert(action_ids[i] > action_ids[i - 1]);
@@ -202,7 +205,7 @@ int main()
     gua_context_status_t status { sizeof(gua_context_status_t) };
     assert(gua_get_context_status(context, &status) == 1);
     assert(status.session_epoch == 1);
-    assert(status.pending_request_count == 4);
+    assert(status.pending_request_count == 5);
     assert(status.in_flight_request_count == 1);
     assert(status.unconsumed_event_count == 0);
     assert(status.first_pending_action == GUA_ACTION_SET_CHECKED);
@@ -212,11 +215,11 @@ int main()
     const gua_reset_options_t strict_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 1, 1 };
     assert(gua_reset_context(context, &strict_reset, &report) == GUA_RESET_ERROR_DIRTY);
     assert(report.session_epoch == 1);
-    assert(report.pending_request_count == 4);
+    assert(report.pending_request_count == 5);
     assert(report.in_flight_request_count == 1);
     assert(report.discarded_pending_request_count == 0);
     assert(gua_get_context_status(context, &status) == 1);
-    assert(status.pending_request_count == 4);
+    assert(status.pending_request_count == 5);
     assert(status.in_flight_request_count == 1);
 
     gua_context_t* other = gua_create_context();
@@ -233,7 +236,7 @@ int main()
     const gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 1 };
     assert(gua_reset_context(context, &reset, &report) == GUA_RESET_SUCCEEDED);
     assert(report.previous_session_epoch == 1 && report.session_epoch == 2);
-    assert(report.discarded_pending_request_count == 4);
+    assert(report.discarded_pending_request_count == 5);
     assert(report.discarded_in_flight_request_count == 1);
     assert(gua_get_context_status(context, &status) == 1);
     assert(status.session_epoch == 2 && status.frame_sequence == 0 && status.revision == 0);
