@@ -204,6 +204,12 @@ project.
 
 ## Native Toolchain
 
+Runtime compatibility can be inspected through the additive C ABI
+`gua_copy_version_json`, the WebSocket `get_version` command, or .NET
+`GetVersion()`. The response follows `protocol/schema/version.schema.json` and
+lists stable capability IDs. Non-Godot runtimes report `godotPluginVersion` as
+`null`; release workflows inject the release version and commit build ID.
+
 Windows native development uses MSVC as the primary toolchain:
 
 ```powershell

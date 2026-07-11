@@ -1,0 +1,9 @@
+{
+  "protocolSchemaVersion": "2",
+  "coreVersion": "0.5.0-preview.3",
+  "runtimeVersion": "0.5.0-preview.3",
+  "godotPluginVersion": null,
+  "abiVersion": 1,
+  "buildId": "development",
+  "capabilities": ["semantic_ui_tree_v2", "semantic_actions_v2", "context_reset_v1", "diagnostics_v1", "version_v1"]
+}

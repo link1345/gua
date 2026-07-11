@@ -37,6 +37,12 @@ void register_checkbox(gua_context_t* context, bool checked)
 
 int main()
 {
+    const int version_size = gua_copy_version_json(nullptr, 0);
+    assert(version_size > 1);
+    std::vector<char> version(static_cast<std::size_t>(version_size));
+    assert(gua_copy_version_json(version.data(), version_size) == version_size);
+    assert(std::string(version.data()).find("\"godotPluginVersion\":null") != std::string::npos);
+    assert(std::string(version.data()).find("\"version_v1\"") != std::string::npos);
     gua_context_t* context = gua_create_context();
     assert(context != nullptr);
 

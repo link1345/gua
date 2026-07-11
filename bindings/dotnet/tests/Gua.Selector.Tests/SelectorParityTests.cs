@@ -13,6 +13,20 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void VersionModelReportsCapabilitiesAndCompatibilityFailures()
+    {
+        using var context = new GuaContext();
+        var version = context.GetVersion();
+        Assert.That(version.GodotPluginVersion, Is.Null);
+        Assert.That(version.Capabilities, Does.Contain("version_v1"));
+        Assert.DoesNotThrow(() => version.EnsureCompatible("2", 1, ["version_v1"]));
+        var error = Assert.Throws<GuaCompatibilityException>(() =>
+            version.EnsureCompatible("999", 999, ["missing_capability"]));
+        Assert.That(error!.Message, Does.Contain("actual protocol=2"));
+        Assert.That(error.MissingCapabilities, Does.Contain("missing_capability"));
+    }
+
+    [Test]
     public async Task WaitExpectationRetainsSnapshotAndCountWaitPollsLatestFrames()
     {
         using var context = new GuaContext();
@@ -118,6 +132,16 @@ public sealed class SelectorParityTests
             var localResult = local.Query(selector);
             Assert.That(remoteResult.Matches.Select(match => match.Id),
                 Is.EqualTo(localResult.Matches.Select(match => match.Id)));
+            var remoteVersion = remote.GetVersion();
+            var localVersion = local.GetVersion();
+            Assert.Multiple(() =>
+            {
+                Assert.That(remoteVersion.ProtocolSchemaVersion, Is.EqualTo(localVersion.ProtocolSchemaVersion));
+                Assert.That(remoteVersion.AbiVersion, Is.EqualTo(localVersion.AbiVersion));
+                Assert.That(remoteVersion.BuildId, Is.EqualTo(localVersion.BuildId));
+                Assert.That(remoteVersion.Capabilities, Is.EqualTo(localVersion.Capabilities));
+            });
+            Assert.That(remoteVersion.Capabilities, Does.Contain("version_v1"));
 
             var invalid = new GuaSelector(Text: "[", TextMatch: GuaMatchMode.Regex);
             Assert.Multiple(() =>
@@ -131,6 +155,7 @@ public sealed class SelectorParityTests
                 Assert.That(diagnostics.RootElement.GetProperty("schemaVersion").GetInt32(), Is.EqualTo(1));
                 Assert.That(diagnostics.RootElement.GetProperty("uiTree").GetProperty("screen").GetString(), Is.EqualTo("fixture"));
                 Assert.That(diagnostics.RootElement.GetProperty("screenshot").ValueKind, Is.EqualTo(JsonValueKind.Null));
+                Assert.That(diagnostics.RootElement.GetProperty("version").GetProperty("abiVersion").GetInt32(), Is.EqualTo(1));
             });
         }
         finally

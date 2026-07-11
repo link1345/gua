@@ -20,6 +20,7 @@ struct gua_runtime_t {
     std::string logs_json;
     std::string screenshot_json;
     std::string diagnostics_json;
+    std::string godot_plugin_version;
 };
 
 std::string escape_json(std::string_view value);
@@ -61,7 +62,30 @@ std::string copy_screenshot_json(gua_runtime_t* runtime)
 std::string copy_diagnostics_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
-    return gua_get_diagnostics_json(runtime->context);
+    std::string json = gua_get_diagnostics_json(runtime->context);
+    if (!runtime->godot_plugin_version.empty()) {
+        const std::string marker = "\"godotPluginVersion\":null";
+        const auto position = json.find(marker);
+        if (position != std::string::npos) {
+            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
+        }
+    }
+    return json;
+}
+
+std::string copy_version_json(gua_runtime_t* runtime)
+{
+    char buffer[2048] {};
+    gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
+    std::string json = buffer;
+    if (!runtime->godot_plugin_version.empty()) {
+        const std::string marker = "\"godotPluginVersion\":null";
+        const auto position = json.find(marker);
+        if (position != std::string::npos) {
+            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
+        }
+    }
+    return json;
 }
 
 std::string status_json(gua_runtime_t* runtime)
@@ -292,6 +316,19 @@ extern "C" int gua_runtime_copy_diagnostics_json(gua_runtime_t* runtime, char* o
     return copy_json_string(copy_diagnostics_json(runtime), out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_copy_version_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    return copy_json_string(copy_version_json(runtime), out_json, out_json_size);
+}
+
+extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* version)
+{
+    if (!valid_runtime(runtime)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    runtime->godot_plugin_version = version == nullptr ? "" : version;
+}
+
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)
 {
     if (!valid_runtime(runtime)) {
@@ -482,6 +519,9 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_diagnostics_json = [runtime] {
             return copy_diagnostics_json(runtime);
+        },
+        .get_version_json = [runtime] {
+            return copy_version_json(runtime);
         },
         .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {
             gua_selector_v1_t native {

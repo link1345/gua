@@ -36,6 +36,17 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return RequestRawResult(new { type = "get_diagnostics" });
     }
 
+    public GuaVersion GetVersion()
+    {
+        return GuaVersion.Parse(RequestRawResult(new { type = "get_version" }));
+    }
+
+    public Task<GuaVersion> GetVersionAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.Run(GetVersion, cancellationToken);
+    }
+
     public string GetScreenshotJson()
     {
         return RequestRawResult(new { type = "get_screenshot" });

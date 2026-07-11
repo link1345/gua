@@ -8,6 +8,7 @@
   "inFlightRequestCount": 0,
   "unconsumedEventCount": 0,
   "environment": { "testName": "fixture" },
+  "version": { "protocolSchemaVersion": "2", "coreVersion": "0.5.0-preview.3", "runtimeVersion": "0.5.0-preview.3", "godotPluginVersion": null, "abiVersion": 1, "buildId": "development", "capabilities": ["version_v1"] },
   "uiTree": { "schemaVersion": 2, "sessionEpoch": 1, "frameSequence": 1, "revision": 1, "screen": "title", "nodes": [] },
   "pendingRequests": [],
   "operations": [],

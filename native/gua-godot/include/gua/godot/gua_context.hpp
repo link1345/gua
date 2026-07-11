@@ -28,6 +28,7 @@ public:
     bool register_node_v2(const Dictionary& descriptor);
 
     String get_ui_tree_json() const;
+    String get_version_json() const;
     void set_screenshot(const String& data_uri, int width, int height);
     String get_screenshot_json() const;
     bool enqueue_click(const String& node_id);

@@ -822,6 +822,11 @@ private:
                     ? ok_response(command.id, handlers_.get_diagnostics_json())
                     : error_response(command.id, "get_diagnostics is not supported by this bridge");
             }
+            if (command.type == "get_version") {
+                return handlers_.get_version_json
+                    ? ok_response(command.id, handlers_.get_version_json())
+                    : error_response(command.id, "get_version is not supported by this bridge");
+            }
             if (command.type == "query_nodes") {
                 if (!handlers_.query_nodes_json) {
                     return error_response(command.id, "query_nodes is not supported by this bridge");
