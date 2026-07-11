@@ -64,11 +64,16 @@ func _run() -> void:
 	var spin_box := SpinBox.new()
 	spin_box.name = "limit"
 	spin_box.value = 5
+	spin_box.focus_mode = Control.FOCUS_ALL
 	screen.add_child(spin_box)
 	var locked_spin_box := SpinBox.new()
 	locked_spin_box.name = "locked_count"
 	locked_spin_box.editable = false
 	screen.add_child(locked_spin_box)
+	var nonfocus_spin_box := SpinBox.new()
+	nonfocus_spin_box.name = "nonfocus_count"
+	nonfocus_spin_box.focus_mode = Control.FOCUS_NONE
+	screen.add_child(nonfocus_spin_box)
 
 	var option := OptionButton.new()
 	option.name = "difficulty"
@@ -218,6 +223,12 @@ func _run() -> void:
 	var invalid_focus_event := ui.poll_event_v2()
 	if invalid_focus_event.get("request_id", 0) != invalid_focus.get("request_id", 0) or invalid_focus_event.get("succeeded", true) or invalid_focus_event.get("error_code", 0) != -5:
 		_fail("Gua smoke reported success for a non-focusable control: %s" % invalid_focus_event)
+		return
+	var invalid_spin_focus := ui.enqueue_action({"action": "focus", "node_id": "nonfocus_count"})
+	ui.update("title")
+	var invalid_spin_focus_event := ui.poll_event_v2()
+	if invalid_spin_focus_event.get("request_id", 0) != invalid_spin_focus.get("request_id", 0) or invalid_spin_focus_event.get("succeeded", true) or invalid_spin_focus_event.get("error_code", 0) != -5:
+		_fail("Gua focused a SpinBox whose parent disabled focus: %s" % invalid_spin_focus_event)
 		return
 	var action_checkbox := CheckBox.new()
 	action_checkbox.name = "action_check"

@@ -363,6 +363,8 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 		return -4
 	match action:
 		"focus":
+			if control.focus_mode == Control.FOCUS_NONE:
+				return -5
 			var focus_target: Control = (control as SpinBox).get_line_edit() if control is SpinBox else control
 			if focus_target.focus_mode == Control.FOCUS_NONE:
 				return -5
