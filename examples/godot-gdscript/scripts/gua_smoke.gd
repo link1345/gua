@@ -230,6 +230,7 @@ func _run() -> void:
 
 	var action_cases := [
 		[{"action": "focus", "node_id": "start"}, func(): return button.has_focus()],
+		[{"action": "focus", "node_id": "limit"}, func(): return spin_box.get_line_edit().has_focus()],
 		[{"action": "set_value", "node_id": "name", "value": "Codex"}, func(): return line_edit.text == "Codex"],
 		[{"action": "set_value", "node_id": "notes", "value": "New"}, func(): return text_edit.text == "New"],
 		[{"action": "set_value", "node_id": "volume", "value": "42"}, func(): return slider.value == 42],

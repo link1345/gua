@@ -305,7 +305,7 @@ func _dispatch_click_requests() -> void:
 func _dispatch_action_requests() -> void:
 	for id in controls_by_id.keys():
 		var control := controls_by_id[id] as Control
-		for action in ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
+		for action in ["focus", "set_value", "set_checked", "select", "scroll", "press_key"]:
 			while true:
 				var request: Dictionary = context.consume_action_request(action, id)
 				if request.is_empty():
@@ -342,18 +342,12 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 	if not _control_enabled(control):
 		return -4
 	match action:
-		"click":
-			if control is BaseButton:
-				var button := control as BaseButton
-				suppressed_clicks[_control_id(button)] = true
-				button.emit_signal("pressed")
-			else:
-				return -5
 		"focus":
-			if control.focus_mode == Control.FOCUS_NONE:
+			var focus_target: Control = (control as SpinBox).get_line_edit() if control is SpinBox else control
+			if focus_target.focus_mode == Control.FOCUS_NONE:
 				return -5
-			control.grab_focus()
-			if not control.has_focus():
+			focus_target.grab_focus()
+			if not focus_target.has_focus():
 				return -5
 		"set_value":
 			var value = request.get("value", "")
