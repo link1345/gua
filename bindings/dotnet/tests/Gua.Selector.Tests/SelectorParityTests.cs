@@ -13,6 +13,32 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public async Task WaitExpectationRetainsSnapshotAndCountWaitPollsLatestFrames()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("first");
+        context.RegisterNode(new GuaNodeDescriptor("item-1", "listitem", "One", new GuaBounds(0, 0, 1, 1)));
+        context.EndFrame();
+
+        var retained = GuaAssertions.WaitForId(context, "item-1");
+        var firstFrame = retained.Snapshot.FrameSequence;
+        Assert.That(firstFrame, Is.Not.Null);
+        context.BeginFrame("second");
+        context.RegisterNode(new GuaNodeDescriptor("item-1", "listitem", "One", new GuaBounds(0, 0, 1, 1), Enabled: false));
+        context.RegisterNode(new GuaNodeDescriptor("item-2", "listitem", "Two", new GuaBounds(0, 1, 1, 1)));
+        context.EndFrame();
+
+        retained.ToExist().ToBeEnabled();
+        Assert.That(retained.Snapshot.FrameSequence, Is.EqualTo(firstFrame));
+        retained.Refresh().ToBeDisabled();
+        Assert.That(retained.Snapshot.FrameSequence, Is.GreaterThan(firstFrame!.Value));
+
+        await GuaAssertions.Query(context).ByRole("listitem")
+            .WaitForCountAsync(count => count >= 2, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(5));
+        GuaAssertions.Query(context).ByRole("missing").WaitForCount(0, TimeSpan.FromSeconds(1));
+    }
+
+    [Test]
     public async Task V2LocatorAndActionCompletionPreserveUnrelatedEvents()
     {
         using var context = new GuaContext();

@@ -12,6 +12,8 @@ public sealed class GodotSceneTestHostOptions
 
     public string BridgeUrl { get; init; } = "ws://127.0.0.1:8765";
 
+    public bool UseAvailableBridgePort { get; init; }
+
     public bool Headless { get; init; } = true;
 
     public bool KillProcessOnDispose { get; init; } = true;
@@ -27,4 +29,6 @@ public sealed class GodotSceneTestHostOptions
     public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; } = new Dictionary<string, string>();
 
     public GuaResetOptions? StartupReset { get; init; }
+
+    public GuaResetOptions? TeardownReset { get; init; }
 }

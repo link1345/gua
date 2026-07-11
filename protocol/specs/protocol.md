@@ -29,6 +29,14 @@ semantic tree in consecutive frames increments `frameSequence` but leaves
 `revision` unchanged. Changing the screen, node membership, hierarchy, bounds,
 text, value, state, or actions increments `revision` at `end_frame`.
 
+Frame construction is transactional. `begin_frame` creates a private staging
+frame, registration functions update only that staging frame, and `end_frame`
+atomically publishes the screen, nodes, `frameSequence`, and `revision` under
+one context lock. Reads, selectors, action validation, diagnostics, and remote
+transports only observe the last completed frame. Before the first successful
+publish they observe the empty `unknown` snapshot. An invalid or abandoned
+staging frame never changes the last completed snapshot or its metadata.
+
 `sessionEpoch` starts at 1. A successful reset starts a new epoch and resets
 `frameSequence` and `revision` to zero. Consumers must use the epoch together
 with frame/revision metadata; values from an older epoch are stale.

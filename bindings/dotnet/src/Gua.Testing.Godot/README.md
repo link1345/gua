@@ -26,6 +26,28 @@ Set `GODOT_EXECUTABLE` or pass `GodotSceneTestHostOptions.GodotExecutablePath`
 when Godot is not on `PATH`. The running game must start a Gua bridge, normally
 at `ws://127.0.0.1:8765`.
 
+For parallel tests, set `UseAvailableBridgePort = true`; the host reserves a
+loopback port, connects to it, and passes it to the child as `GUA_BRIDGE_PORT`.
+`EnvironmentVariables` adds per-test child settings. `LoadRendered(...)` is the
+rendering-enabled shortcut for `Headless = false`. Optional `StartupReset` and
+`TeardownReset` enforce session isolation; a strict teardown reports dirty
+requests/events instead of silently discarding them.
+
+```csharp
+using var host = GodotSceneTestHost.LoadRendered(scene, new()
+{
+    UseAvailableBridgePort = true,
+    EnvironmentVariables = new Dictionary<string, string> { ["GUA_TEST_CASE"] = "servers" },
+    StartupReset = new GuaResetOptions(Strict: true),
+    TeardownReset = new GuaResetOptions(Strict: true),
+});
+```
+
+Repository-specific factories should retain only game concerns such as locating
+API/database fixtures, choosing repository timeouts, and mapping game-relative
+scene names. Executable discovery, `project.godot` discovery, bridge ports,
+process output, rendering mode, and Gua reset policy belong to this package.
+
 When `ProjectPath` is omitted, the host walks up from the scene file to the
 nearest `project.godot` and uses that directory as Godot's `--path`. Pass
 `ProjectPath` explicitly when loading a `res://` scene path.

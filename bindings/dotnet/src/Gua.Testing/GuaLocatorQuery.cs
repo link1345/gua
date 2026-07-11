@@ -1,5 +1,6 @@
 using Gua.Core;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Gua.Testing;
 
@@ -68,6 +69,60 @@ public sealed record GuaLocatorQuery
         if (actual != expected)
             GuaAssertions.Fail(_context, $"Expected selector {Describe()} to match {expected} nodes, but matched {actual}.");
         return this;
+    }
+
+    public GuaLocatorQuery WaitForCount(int expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForCount(count => count == expected, $"exactly {expected}", timeout, pollInterval);
+
+    public GuaLocatorQuery WaitForMinimumCount(int minimum, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForCount(count => count >= minimum, $"at least {minimum}", timeout, pollInterval);
+
+    public GuaLocatorQuery WaitForCount(
+        Func<int, bool> condition, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
+        WaitForCount(condition, "the requested count condition", timeout, pollInterval);
+
+    public async Task<GuaLocatorQuery> WaitForCountAsync(
+        int expected, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        await WaitForCountAsync(count => count == expected, $"exactly {expected}", timeout, pollInterval, cancellationToken).ConfigureAwait(false);
+
+    public async Task<GuaLocatorQuery> WaitForMinimumCountAsync(
+        int minimum, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        await WaitForCountAsync(count => count >= minimum, $"at least {minimum}", timeout, pollInterval, cancellationToken).ConfigureAwait(false);
+
+    public Task<GuaLocatorQuery> WaitForCountAsync(
+        Func<int, bool> condition, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
+        CancellationToken cancellationToken = default) =>
+        WaitForCountAsync(condition, "the requested count condition", timeout, pollInterval, cancellationToken);
+
+    private GuaLocatorQuery WaitForCount(
+        Func<int, bool> condition, string expected, TimeSpan? timeout, TimeSpan? pollInterval) =>
+        WaitForCountAsync(condition, expected, timeout, pollInterval).GetAwaiter().GetResult();
+
+    private async Task<GuaLocatorQuery> WaitForCountAsync(
+        Func<int, bool> condition, string expected, TimeSpan? timeout, TimeSpan? pollInterval,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+        var limit = timeout ?? TimeSpan.FromSeconds(1);
+        var interval = pollInterval ?? TimeSpan.FromMilliseconds(10);
+        if (limit < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        if (interval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(pollInterval));
+        var stopwatch = Stopwatch.StartNew();
+        var lastCount = 0;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lastCount = Execute().Matches.Count;
+            if (condition(lastCount)) return this;
+            if (stopwatch.Elapsed >= limit) break;
+            await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+        } while (true);
+
+        GuaAssertions.Fail(_context,
+            $"Timed out after {limit:g} waiting for selector {Describe()} to match {expected}; last count={lastCount}. {GuaAssertions.DescribeSnapshot(_context)}");
+        throw new UnreachableException();
     }
 
     private GuaQueryResult Execute()
