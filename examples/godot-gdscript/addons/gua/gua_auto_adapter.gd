@@ -283,7 +283,8 @@ func _dispatch_click_requests() -> void:
 			if button.disabled or not button.is_visible_in_tree():
 				continue
 
-			if button.toggle_mode:
+			var group := button.button_group
+			if button.toggle_mode and not (button.button_pressed and group != null and not group.allow_unpress):
 				button.button_pressed = not button.button_pressed
 			context.emit_click(id)
 			suppressed_clicks[id] = true
@@ -380,8 +381,9 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
 				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
 			elif control is ItemList:
-				var list_scroll := (control as ItemList).get_v_scroll_bar()
-				list_scroll.value += float(request.get("delta_y", 0.0))
+				var item_list := control as ItemList
+				item_list.get_h_scroll_bar().value += float(request.get("delta_x", 0.0))
+				item_list.get_v_scroll_bar().value += float(request.get("delta_y", 0.0))
 			else:
 				return -5
 		"press_key":

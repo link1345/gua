@@ -33,6 +33,16 @@ func _run() -> void:
 	checkbox.text = "Remember me"
 	checkbox.button_pressed = false
 	screen.add_child(checkbox)
+	var exclusive_group := ButtonGroup.new()
+	var grouped_first := CheckBox.new()
+	grouped_first.name = "grouped_first"
+	grouped_first.button_group = exclusive_group
+	grouped_first.button_pressed = true
+	screen.add_child(grouped_first)
+	var grouped_second := CheckBox.new()
+	grouped_second.name = "grouped_second"
+	grouped_second.button_group = exclusive_group
+	screen.add_child(grouped_second)
 
 	var line_edit := LineEdit.new()
 	line_edit.name = "name"
@@ -70,6 +80,9 @@ func _run() -> void:
 	var item_list := ItemList.new()
 	item_list.name = "servers"
 	item_list.size = Vector2(120, 40)
+	item_list.icon_mode = ItemList.ICON_MODE_TOP
+	item_list.max_columns = 0
+	item_list.fixed_column_width = 300
 	item_list.add_item("Tokyo")
 	item_list.add_item("Osaka")
 	for index in range(20):
@@ -210,6 +223,10 @@ func _run() -> void:
 	action_checkbox.name = "action_check"
 	screen.add_child(action_checkbox)
 	ui.update("title")
+	# Keep the horizontal scrollbar range deterministic in headless mode, where
+	# ItemList layout does not receive a rendered viewport pass.
+	item_list.get_h_scroll_bar().max_value = 100.0
+	item_list.get_h_scroll_bar().page = 0.0
 
 	var action_cases := [
 		[{"action": "focus", "node_id": "start"}, func(): return button.has_focus()],
@@ -222,7 +239,7 @@ func _run() -> void:
 		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
 		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
 		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
-		[{"action": "scroll", "node_id": "servers", "delta_y": 30.0}, func(): return item_list.get_v_scroll_bar().value > 0],
+		[{"action": "scroll", "node_id": "servers", "delta_x": 30.0}, func(): return item_list.get_h_scroll_bar().value > 0],
 		[{"action": "press_key", "node_id": "name", "key": "A", "modifiers": 5}, func(): return key_events.size() == 2 and key_events[0].pressed and not key_events[1].pressed and key_events[0].shift_pressed and key_events[0].ctrl_pressed],
 	]
 	for action_case in action_cases:
@@ -243,6 +260,12 @@ func _run() -> void:
 	var checkbox_click_event := ui.poll_event_v2()
 	if checkbox_click.get("error_code", -1) != 0 or action_checkbox.button_pressed or checkbox_click_event.get("request_id", 0) != checkbox_click.get("request_id", 0):
 		_fail("Gua click action did not toggle the checkbox: %s / %s" % [checkbox_click, checkbox_click_event])
+		return
+	var grouped_click := ui.enqueue_action({"action": "click", "node_id": "grouped_first"})
+	ui.update("title")
+	var grouped_click_event := ui.poll_event_v2()
+	if not grouped_first.button_pressed or grouped_second.button_pressed or grouped_click_event.get("request_id", 0) != grouped_click.get("request_id", 0):
+		_fail("Gua click action cleared an exclusive ButtonGroup selection: %s / %s" % [grouped_click, grouped_click_event])
 		return
 	var sensitive := ui.enqueue_action({"action": "set_value", "node_id": "name", "value": "secret-marker", "sensitive": true})
 	ui.update("title")
