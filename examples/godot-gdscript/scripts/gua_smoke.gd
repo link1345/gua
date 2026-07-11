@@ -22,6 +22,11 @@ func _run() -> void:
 	button.size = Vector2(256, 56)
 	button.pressed.connect(_on_start_pressed)
 	screen.add_child(button)
+	var nonfocus_button := Button.new()
+	nonfocus_button.name = "nonfocus"
+	nonfocus_button.text = "No Focus"
+	nonfocus_button.focus_mode = Control.FOCUS_NONE
+	screen.add_child(nonfocus_button)
 
 	var checkbox := CheckBox.new()
 	checkbox.name = "remember"
@@ -33,6 +38,11 @@ func _run() -> void:
 	line_edit.name = "name"
 	line_edit.text = "Gua"
 	screen.add_child(line_edit)
+	var key_events := []
+	line_edit.gui_input.connect(func(event):
+		if event is InputEventKey:
+			key_events.append(event)
+	)
 	var text_edit := TextEdit.new()
 	text_edit.name = "notes"
 	text_edit.text = "Old"
@@ -41,6 +51,10 @@ func _run() -> void:
 	slider.name = "volume"
 	slider.value = 10
 	screen.add_child(slider)
+	var locked_spin_box := SpinBox.new()
+	locked_spin_box.name = "locked_count"
+	locked_spin_box.editable = false
+	screen.add_child(locked_spin_box)
 
 	var option := OptionButton.new()
 	option.name = "difficulty"
@@ -108,6 +122,10 @@ func _run() -> void:
 	if not tree_json.contains("servers$item:0") or not tree_json.contains("tabs$tab:1"):
 		_fail("Gua smoke did not publish stable ItemList/TabContainer semantic children: %s" % tree_json)
 		return
+	var locked_spin_node = _find_node(tree, "locked_count")
+	if locked_spin_node == null or locked_spin_node.get("enabled", true):
+		_fail("Gua smoke exposed a read-only SpinBox as enabled: %s" % tree_json)
+		return
 
 	var first_revision = tree.get("revision", 0)
 	ui.update("title")
@@ -153,6 +171,34 @@ func _run() -> void:
 	if pressed_count != 1:
 		_fail("Gua smoke expected one Button.pressed signal, got %d." % pressed_count)
 		return
+	var action_click := ui.enqueue_action({"action": "click", "node_id": "start"})
+	ui.update("title")
+	var action_click_event := ui.poll_event_v2()
+	if pressed_count != 2 or action_click_event.get("request_id", 0) != action_click.get("request_id", 0) or not action_click_event.get("succeeded", false):
+		_fail("Gua smoke did not drain and apply a v2 click request: %s" % action_click_event)
+		return
+	var list_item_select := ui.enqueue_action({"action": "select", "node_id": "servers$item:1"})
+	ui.update("title")
+	var list_item_event := ui.poll_event_v2()
+	if not item_list.is_selected(1) or list_item_event.get("request_id", 0) != list_item_select.get("request_id", 0) or not list_item_event.get("succeeded", false):
+		_fail("Gua smoke did not route a synthetic list item selection: %s / %s" % [list_item_select, list_item_event])
+		return
+	var tab_item_select := ui.enqueue_action({"action": "select", "node_id": "tabs$tab:0"})
+	ui.update("title")
+	var tab_item_event := ui.poll_event_v2()
+	if tabs.current_tab != 0 or tab_item_event.get("request_id", 0) != tab_item_select.get("request_id", 0) or not tab_item_event.get("succeeded", false):
+		_fail("Gua smoke did not route a synthetic tab selection: %s" % tab_item_event)
+		return
+	var locked_spin_action := ui.enqueue_action({"action": "set_value", "node_id": "locked_count", "value": "3"})
+	if locked_spin_action.get("error_code", 0) != -4:
+		_fail("Gua smoke accepted set_value for a read-only SpinBox: %s" % locked_spin_action)
+		return
+	var invalid_focus := ui.enqueue_action({"action": "focus", "node_id": "nonfocus"})
+	ui.update("title")
+	var invalid_focus_event := ui.poll_event_v2()
+	if invalid_focus_event.get("request_id", 0) != invalid_focus.get("request_id", 0) or invalid_focus_event.get("succeeded", true) or invalid_focus_event.get("error_code", 0) != -5:
+		_fail("Gua smoke reported success for a non-focusable control: %s" % invalid_focus_event)
+		return
 	var action_checkbox := CheckBox.new()
 	action_checkbox.name = "action_check"
 	screen.add_child(action_checkbox)
@@ -168,7 +214,7 @@ func _run() -> void:
 		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
 		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
 		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
-		[{"action": "press_key", "node_id": "name", "key": "A"}, func(): return true],
+		[{"action": "press_key", "node_id": "name", "key": "A", "modifiers": 5}, func(): return key_events.size() == 2 and key_events[0].pressed and not key_events[1].pressed and key_events[0].shift_pressed and key_events[0].ctrl_pressed],
 	]
 	for action_case in action_cases:
 		var accepted: Dictionary = ui.enqueue_action(action_case[0])
