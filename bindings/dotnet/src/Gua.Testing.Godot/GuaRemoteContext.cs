@@ -52,6 +52,29 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         return RequestRawResult(new { type = "get_screenshot" });
     }
 
+    public GuaScreenshot CaptureScreenshot(TimeSpan timeout, ulong? afterFrameSequence = null)
+    {
+        try
+        {
+            return GuaScreenshot.Parse(RequestRawResult(new
+            {
+                type = "capture_screenshot",
+                afterFrameSequence,
+                timeoutMs = Math.Max(1, (int)timeout.TotalMilliseconds),
+            }));
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("headless", StringComparison.Ordinal))
+        { throw new GuaScreenshotException(GuaScreenshotError.Headless, "Godot viewport capture is unavailable in headless mode.", error); }
+        catch (InvalidOperationException error) when (error.Message.Contains("rendering_disabled", StringComparison.Ordinal))
+        { throw new GuaScreenshotException(GuaScreenshotError.RenderingDisabled, "Godot viewport rendering is disabled.", error); }
+        catch (InvalidOperationException error) when (error.Message.Contains("unsupported", StringComparison.Ordinal))
+        { throw new GuaScreenshotException(GuaScreenshotError.Unsupported, "The connected adapter does not support viewport capture.", error); }
+        catch (InvalidOperationException error) when (error.Message.Contains("timed out", StringComparison.Ordinal))
+        { throw new GuaScreenshotException(GuaScreenshotError.Timeout, $"Godot viewport capture timed out after {timeout:g}.", error); }
+        catch (InvalidOperationException error) when (error.Message.Contains("stale_session", StringComparison.Ordinal))
+        { throw new GuaScreenshotException(GuaScreenshotError.StaleSession, "The screenshot request belongs to a stale Gua session epoch.", error); }
+    }
+
     public GuaContextStatus GetContextStatus()
     {
         var status = Request<ContextStatusResult>(new { type = "get_context_status" });

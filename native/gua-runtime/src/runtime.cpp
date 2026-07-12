@@ -3,6 +3,11 @@
 #include "gua/ws_bridge.hpp"
 
 #include <cstdio>
+#include <chrono>
+#include <deque>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +26,10 @@ struct gua_runtime_t {
     std::string screenshot_json;
     std::string diagnostics_json;
     std::string godot_plugin_version;
+    uint64_t next_screenshot_request_id = 1;
+    std::deque<gua_screenshot_request_t> screenshot_requests;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> screenshot_batches;
+    std::unordered_map<uint64_t, std::string> screenshot_results;
 };
 
 std::string escape_json(std::string_view value);
@@ -57,6 +66,14 @@ std::string copy_screenshot_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     return gua_get_screenshot_json(runtime->context);
+}
+
+const char* screenshot_unavailable_name(int result)
+{
+    if (result == GUA_SCREENSHOT_UNAVAILABLE_HEADLESS) return "headless";
+    if (result == GUA_SCREENSHOT_UNAVAILABLE_RENDERING_DISABLED) return "rendering_disabled";
+    if (result == GUA_SCREENSHOT_UNAVAILABLE_STALE_SESSION) return "stale_session";
+    return "unsupported";
 }
 
 std::string copy_diagnostics_json(gua_runtime_t* runtime)
@@ -292,6 +309,104 @@ extern "C" int gua_runtime_copy_screenshot_json(gua_runtime_t* runtime, char* ou
     }
 
     return copy_json_string(copy_screenshot_json(runtime), out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_enqueue_screenshot_request(gua_runtime_t* runtime, uint64_t after_frame_sequence, uint64_t* out_request_id)
+{
+    if (!valid_runtime(runtime) || out_request_id == nullptr) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    if (gua_get_context_status(runtime->context, &status) == 0) return 0;
+    const uint64_t id = runtime->next_screenshot_request_id++;
+    runtime->screenshot_requests.push_back({ sizeof(gua_screenshot_request_t), id, status.session_epoch, after_frame_sequence });
+    *out_request_id = id;
+    return 1;
+}
+
+extern "C" int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gua_screenshot_request_t* out_request)
+{
+    if (!valid_runtime(runtime) || out_request == nullptr || out_request->struct_size < sizeof(gua_screenshot_request_t)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    gua_get_context_status(runtime->context, &status);
+    while (!runtime->screenshot_requests.empty() && runtime->screenshot_requests.front().session_epoch != status.session_epoch) {
+        const auto stale = runtime->screenshot_requests.front();
+        runtime->screenshot_requests.pop_front();
+        runtime->screenshot_results[stale.request_id] = "{\"requestId\":" + std::to_string(stale.request_id) +
+            ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+            ",\"frameSequence\":" + std::to_string(status.frame_sequence) + ",\"unavailable\":\"stale_session\"}";
+    }
+    if (runtime->screenshot_requests.empty()) return 0;
+    auto first = runtime->screenshot_requests.front();
+    std::vector<uint64_t> batch;
+    uint64_t after = first.after_frame_sequence;
+    while (!runtime->screenshot_requests.empty() && runtime->screenshot_requests.front().session_epoch == first.session_epoch) {
+        batch.push_back(runtime->screenshot_requests.front().request_id);
+        after = std::max(after, runtime->screenshot_requests.front().after_frame_sequence);
+        runtime->screenshot_requests.pop_front();
+    }
+    first.after_frame_sequence = after;
+    runtime->screenshot_batches[first.request_id] = std::move(batch);
+    *out_request = first;
+    return 1;
+}
+
+extern "C" int gua_runtime_complete_screenshot_request(gua_runtime_t* runtime, uint64_t request_id, int result, const char* data_uri, int width, int height)
+{
+    if (!valid_runtime(runtime) || request_id == 0) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    const auto batch = runtime->screenshot_batches.find(request_id);
+    if (batch == runtime->screenshot_batches.end()) return 0;
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    gua_get_context_status(runtime->context, &status);
+    if (result == GUA_SCREENSHOT_AVAILABLE) gua_set_screenshot(runtime->context, data_uri, width, height);
+    for (const auto id : batch->second) {
+        if (result == GUA_SCREENSHOT_AVAILABLE) {
+            runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
+                ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+                ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
+                ",\"width\":" + std::to_string(std::max(0, width)) + ",\"height\":" + std::to_string(std::max(0, height)) +
+                ",\"dataUri\":\"" + escape_json(data_uri == nullptr ? "" : data_uri) + "\"}";
+        } else {
+            runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
+                ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+                ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
+                ",\"unavailable\":\"" + screenshot_unavailable_name(result) + "\"}";
+        }
+    }
+    runtime->screenshot_batches.erase(batch);
+    return 1;
+}
+
+extern "C" int gua_runtime_poll_screenshot_result_json(gua_runtime_t* runtime, uint64_t request_id, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime) || request_id == 0) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    const auto found = runtime->screenshot_results.find(request_id);
+    if (found == runtime->screenshot_results.end()) return 0;
+    const int size = copy_json_string(found->second, out_json, out_json_size);
+    if (out_json != nullptr && out_json_size >= size) runtime->screenshot_results.erase(found);
+    return size;
+}
+
+extern "C" int gua_runtime_cancel_screenshot_request(gua_runtime_t* runtime, uint64_t request_id)
+{
+    if (!valid_runtime(runtime) || request_id == 0) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    bool removed = runtime->screenshot_results.erase(request_id) != 0;
+    const auto before = runtime->screenshot_requests.size();
+    runtime->screenshot_requests.erase(
+        std::remove_if(runtime->screenshot_requests.begin(), runtime->screenshot_requests.end(),
+            [request_id](const auto& request) { return request.request_id == request_id; }),
+        runtime->screenshot_requests.end());
+    removed = removed || before != runtime->screenshot_requests.size();
+    for (auto& [leader, batch] : runtime->screenshot_batches) {
+        (void)leader;
+        const auto batch_before = batch.size();
+        batch.erase(std::remove(batch.begin(), batch.end(), request_id), batch.end());
+        removed = removed || batch_before != batch.size();
+    }
+    return removed ? 1 : 0;
 }
 
 extern "C" int gua_runtime_set_diagnostics_history_limit(gua_runtime_t* runtime, uint32_t history_limit)
@@ -541,6 +656,26 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_screenshot_json = [runtime] {
             return copy_screenshot_json(runtime);
+        },
+        .capture_screenshot = [runtime](unsigned long long after_frame_sequence, unsigned int timeout_ms) {
+            uint64_t request_id = 0;
+            if (gua_runtime_enqueue_screenshot_request(runtime, after_frame_sequence, &request_id) == 0)
+                return gua::ws::CommandResult { false, {}, "capture_screenshot request could not be queued" };
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms == 0 ? 1 : timeout_ms);
+            while (std::chrono::steady_clock::now() < deadline) {
+                const int size = gua_runtime_poll_screenshot_result_json(runtime, request_id, nullptr, 0);
+                if (size > 0) {
+                    std::string json(static_cast<std::size_t>(size), '\0');
+                    gua_runtime_poll_screenshot_result_json(runtime, request_id, json.data(), size);
+                    json.resize(static_cast<std::size_t>(size - 1));
+                    if (json.find("\"unavailable\"") != std::string::npos)
+                        return gua::ws::CommandResult { false, {}, json };
+                    return gua::ws::CommandResult { true, std::move(json), {} };
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            gua_runtime_cancel_screenshot_request(runtime, request_id);
+            return gua::ws::CommandResult { false, {}, "capture_screenshot timed out" };
         },
         .get_diagnostics_json = [runtime] {
             return copy_diagnostics_json(runtime);

@@ -135,6 +135,23 @@ public sealed class GodotSceneTestHost : IDisposable
         return GuaScreenshot.Parse(RemoteContext.GetScreenshotJson());
     }
 
+    public async Task<GuaScreenshot> CaptureScreenshotAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var limit = timeout ?? _options.SceneTimeout;
+        var status = RemoteContext.GetContextStatus();
+        using var captureContext = new GuaRemoteContext(_bridgeUrl, limit + TimeSpan.FromSeconds(1));
+        using var registration = cancellationToken.Register(captureContext.Dispose);
+        try
+        {
+            return await Task.Run(() => captureContext.CaptureScreenshot(limit, status.FrameSequence), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
     public GuaSavedScreenshot SaveScreenshot(string directory, string testName)
     {
         ThrowIfDisposed();

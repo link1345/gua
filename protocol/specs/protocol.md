@@ -173,6 +173,15 @@ The screenshot payload stores an already encoded `dataUri` plus `width` and
 `height`. This keeps the C ABI small and avoids forcing the core protocol to own
 PNG encoding, GPU readback, or platform-specific capture code.
 
+`capture_screenshot` is explicit and on demand. The runtime queues and correlates
+requests while the adapter owns viewport readback and PNG encoding on the next
+drawable frame. Concurrent pending requests are coalesced into one capture and
+receive the same image with distinct request IDs. Results include `sessionEpoch`
+and `frameSequence`; `headless`, `rendering_disabled`, and `unsupported` are
+distinct unavailable errors defined by `screenshot-capture.schema.json`; a reset
+while queued produces `stale_session`. `get_screenshot` remains the latest-published-image
+compatibility API. Screenshots can contain rendered secrets and are not redacted.
+
 ## Visual comparison and operation recording v1
 
 Visual comparison is an opt-in consumer of the existing PNG screenshot payload;
@@ -218,6 +227,7 @@ Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Contro
 - `move_gamepad`
 - `wait_for_node`
 - `get_screenshot`
+- `capture_screenshot` with optional `afterFrameSequence`
 - `get_logs`
 - `get_diagnostics`
 - `get_version`

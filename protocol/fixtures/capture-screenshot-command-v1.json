@@ -1,0 +1,5 @@
+{
+  "type": "capture_screenshot",
+  "afterFrameSequence": 17,
+  "timeoutMs": 10000
+}

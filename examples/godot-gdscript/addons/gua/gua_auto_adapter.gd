@@ -14,6 +14,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"get_ui_tree_json",
 	"set_screenshot",
 	"get_screenshot_json",
+	"consume_screenshot_request",
+	"complete_screenshot_request",
 	"enqueue_click",
 	"consume_click_request",
 	"emit_click",
@@ -38,6 +40,7 @@ var connected_buttons: Dictionary = {}
 var suppressed_clicks: Dictionary = {}
 var gdextension_resource: Resource
 var unavailable := false
+var screenshot_capture_scheduled := false
 
 
 func attach(root_control: Control) -> void:
@@ -62,6 +65,7 @@ func update(screen: String) -> void:
 	context.end_frame()
 	_dispatch_click_requests()
 	_dispatch_action_requests()
+	_schedule_screenshot_capture()
 
 
 func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
@@ -75,6 +79,45 @@ func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
 	var png := image.save_png_to_buffer()
 	context.set_screenshot("data:image/png;base64," + Marshalls.raw_to_base64(png), image.get_width(), image.get_height())
 	return {"ok": true, "width": image.get_width(), "height": image.get_height()}
+
+
+func _schedule_screenshot_capture() -> void:
+	if screenshot_capture_scheduled:
+		return
+	var request: Dictionary = context.consume_screenshot_request()
+	if request.is_empty():
+		return
+	if DisplayServer.get_name() == "headless":
+		context.complete_screenshot_request({"request_id": request.get("request_id", 0), "unavailable": "headless"})
+		return
+	screenshot_capture_scheduled = true
+	_capture_requested_screenshot.call_deferred(request)
+
+
+func _capture_requested_screenshot(request: Dictionary) -> void:
+	while context.get_context_status().get("session_epoch", 0) == request.get("session_epoch", 0) and context.get_context_status().get("frame_sequence", 0) <= request.get("after_frame_sequence", 0):
+		await root.get_tree().process_frame
+	if context.get_context_status().get("session_epoch", 0) != request.get("session_epoch", 0):
+		context.complete_screenshot_request({"request_id": request.get("request_id", 0), "unavailable": "unsupported"})
+		screenshot_capture_scheduled = false
+		_schedule_screenshot_capture()
+		return
+	await RenderingServer.frame_post_draw
+	var result := {"request_id": request.get("request_id", 0)}
+	if DisplayServer.get_name() == "headless":
+		result["unavailable"] = "headless"
+	else:
+		var image := root.get_viewport().get_texture().get_image() if root != null else null
+		if image == null or image.is_empty():
+			result["unavailable"] = "rendering_disabled"
+		else:
+			var png := image.save_png_to_buffer()
+			result["data_uri"] = "data:image/png;base64," + Marshalls.raw_to_base64(png)
+			result["width"] = image.get_width()
+			result["height"] = image.get_height()
+	context.complete_screenshot_request(result)
+	screenshot_capture_scheduled = false
+	_schedule_screenshot_capture()
 
 
 func start_inspector_bridge(port: int = 8765) -> bool:

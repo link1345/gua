@@ -221,6 +221,30 @@ public sealed class SelectorParityTests
         }
     }
 
+    [Test]
+    public void OnDemandScreenshotTimeoutIsTypedAndDoesNotReturnTheStaleLatestImage()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Native.gua_runtime_begin_frame(runtime, "fixture");
+            Native.gua_runtime_end_frame(runtime);
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var error = Assert.Throws<GuaScreenshotException>(() =>
+                remote.CaptureScreenshot(TimeSpan.FromMilliseconds(30), afterFrameSequence: 1));
+            Assert.That(error!.Error, Is.EqualTo(GuaScreenshotError.Timeout));
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
+        }
+    }
+
     private static int ReservePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

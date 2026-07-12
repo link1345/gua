@@ -35,10 +35,17 @@ struct ActionCommand {
     int scroll_unit = 0;
 };
 
+struct CommandResult {
+    bool ok = false;
+    std::string json;
+    std::string error;
+};
+
 struct BridgeHandlers {
     std::function<std::string()> get_ui_tree_json;
     std::function<std::string()> get_logs_json;
     std::function<std::string()> get_screenshot_json;
+    std::function<CommandResult(unsigned long long after_frame_sequence, unsigned int timeout_ms)> capture_screenshot;
     std::function<std::string()> get_diagnostics_json;
     std::function<std::string()> get_version_json;
     std::function<std::string(const QuerySelector& selector)> query_nodes_json;

@@ -40,6 +40,13 @@ else()
     )
 endif()
 
+if(BUILD_TESTING)
+    add_executable(gua-runtime-screenshot-tests tests/screenshot_request_tests.cpp)
+    target_link_libraries(gua-runtime-screenshot-tests PRIVATE gua-runtime)
+    target_compile_features(gua-runtime-screenshot-tests PRIVATE cxx_std_20)
+    add_test(NAME gua-runtime-screenshot-tests COMMAND gua-runtime-screenshot-tests)
+endif()
+
 if(WIN32)
     add_custom_command(TARGET gua-runtime POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
