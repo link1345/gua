@@ -69,6 +69,10 @@ satisfies the wait. Hidden waiting succeeds for either `visible=false` or a
 removed node. Timeout messages include the condition, last node state, frame,
 and revision. Sync wrappers remain available for compatibility.
 
+`WaitForStateAsync(context, id, predicate)` polls fresh snapshots for detailed state such as caret/selection,
+scroll offsets, range bounds, and selected index. Action completion includes session/frame/revision metadata,
+but remains distinct from observing the requested state; chain a state wait when the UI result matters.
+
 Use `GuaTestSession` as the explicit process-reuse boundary. The default reset
 clears semantic nodes, requests, events, and retained history while preserving
 logs and screenshots. Strict teardown detects leaked requests/events without

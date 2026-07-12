@@ -53,6 +53,27 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public async Task DetailedSemanticStatePreservesObservedZeroAndWaitsByPredicate()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("details");
+        context.RegisterNode(new GuaNodeDescriptor("editor", "textbox", "Editor", new GuaBounds(0, 0, 1, 1),
+            CaretPosition: 0, SelectionStart: 0, SelectionEnd: 0, ScrollX: 0, ScrollY: 12,
+            ScrollMaxX: 0, ScrollMaxY: 100, RangeValue: 5, RangeMin: 0, RangeMax: 10, SelectedIndex: 0));
+        context.EndFrame();
+
+        var state = await GuaAssertions.WaitForStateAsync(context, "editor", node =>
+            node.CaretPosition == 0 && node.ScrollY == 12 && node.RangeValue == 5 && node.SelectedIndex == 0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(state.Snapshot.CaretPosition, Is.Zero);
+            Assert.That(state.Snapshot.SelectionStart, Is.Zero);
+            Assert.That(state.Snapshot.ScrollMaxY, Is.EqualTo(100));
+            Assert.That(state.Snapshot.RangeMin, Is.Zero);
+        });
+    }
+
+    [Test]
     public async Task V2LocatorAndActionCompletionPreserveUnrelatedEvents()
     {
         using var context = new GuaContext();
@@ -80,6 +101,9 @@ public sealed class SelectorParityTests
         {
             Assert.That(result.RequestId, Is.EqualTo(request.RequestId));
             Assert.That(result.Action, Is.EqualTo(GuaActionType.SetValue));
+            Assert.That(result.SessionEpoch, Is.EqualTo(1));
+            Assert.That(result.FrameSequence, Is.EqualTo(1));
+            Assert.That(result.Revision, Is.EqualTo(1));
             Assert.That(context.TryPollActionEvent(otherId, out var preserved), Is.True);
             Assert.That(preserved.Action, Is.EqualTo(GuaActionType.Focus));
         });

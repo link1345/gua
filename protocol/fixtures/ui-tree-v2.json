@@ -14,7 +14,7 @@
       "visible": true,
       "enabled": true,
       "bounds": { "x": 10, "y": 20, "w": 100, "h": 24 },
-      "state": { "focused": false, "checked": false },
+      "state": { "focused": false, "checked": false, "caretPosition": 0, "selectionStart": 0, "selectionEnd": 0 },
       "actions": ["click", "focus"]
     },
     {
@@ -26,6 +26,7 @@
       "visible": true,
       "enabled": true,
       "bounds": { "x": 10, "y": 50, "w": 100, "h": 24 },
+      "state": { "selectedIndex": 2, "rangeValue": 2, "rangeMin": 0, "rangeMax": 3 },
       "actions": ["focus", "set_value"]
     }
   ]

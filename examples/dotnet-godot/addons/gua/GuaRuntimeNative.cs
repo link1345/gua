@@ -14,6 +14,24 @@ internal static class GuaRuntimeNative
         public fixed byte NodeId[NodeIdBufferSize];
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeNodeV2
+    {
+        internal uint StructSize; internal ulong KnownMask;
+        internal nint Id, ParentId, Role, Label, Text, Value;
+        internal GuaBounds Bounds;
+        internal int Visible, Enabled, Focused, Hovered, Pressed, Checked, Selected;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeNodeV3
+    {
+        internal uint StructSize; internal NativeNodeV2 Base;
+        internal long CaretPosition, SelectionStart, SelectionEnd;
+        internal double ScrollX, ScrollY, ScrollMaxX, ScrollMaxY, RangeValue, RangeMin, RangeMax;
+        internal long SelectedIndex;
+    }
+
     static GuaRuntimeNative()
     {
         NativeLibrary.SetDllImportResolver(typeof(GuaRuntimeNative).Assembly, ResolveRuntimeLibrary);
@@ -96,6 +114,9 @@ internal static class GuaRuntimeNative
         GuaBounds bounds,
         int visible,
         int enabled);
+
+    [DllImport("gua_runtime")]
+    internal static extern int gua_runtime_register_node_v3(nint runtime, in NativeNodeV3 descriptor);
 
     [DllImport("gua_runtime")]
     internal static extern nint gua_runtime_get_ui_tree_json(nint runtime);

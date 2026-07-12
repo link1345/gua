@@ -31,7 +31,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\"]}";
 }
 
 struct Node {
@@ -50,6 +50,10 @@ struct Node {
     bool pressed = false;
     bool checked = false;
     bool selected = false;
+    long long caret_position = 0, selection_start = 0, selection_end = 0;
+    double scroll_x = 0, scroll_y = 0, scroll_max_x = 0, scroll_max_y = 0;
+    double range_value = 0, range_min = 0, range_max = 0;
+    long long selected_index = -1;
 };
 
 struct Event {
@@ -60,6 +64,9 @@ struct Event {
     int error_code = 0;
     std::string value;
     bool sensitive = false;
+    unsigned long long session_epoch = 0;
+    unsigned long long frame_sequence = 0;
+    unsigned long long revision = 0;
 };
 
 struct ActionRequest {
@@ -376,7 +383,10 @@ std::string build_semantic_snapshot_json(const std::string& screen, const std::v
         const unsigned long long boolean_state_mask =
             GUA_NODE_KNOWN_FOCUSED | GUA_NODE_KNOWN_HOVERED | GUA_NODE_KNOWN_PRESSED |
             GUA_NODE_KNOWN_CHECKED | GUA_NODE_KNOWN_SELECTED;
-        if ((node.known_mask & boolean_state_mask) != 0U) {
+        const unsigned long long detailed_state_mask = GUA_NODE_KNOWN_CARET_POSITION | GUA_NODE_KNOWN_SELECTION |
+            GUA_NODE_KNOWN_SCROLL | GUA_NODE_KNOWN_SCROLL_MAX | GUA_NODE_KNOWN_RANGE_VALUE |
+            GUA_NODE_KNOWN_RANGE_MIN | GUA_NODE_KNOWN_RANGE_MAX | GUA_NODE_KNOWN_SELECTED_INDEX;
+        if ((node.known_mask & (boolean_state_mask | detailed_state_mask)) != 0U) {
             json += ",\"state\":{";
             bool wrote_state = false;
             const auto append_state = [&](const char* name, bool value) {
@@ -394,6 +404,19 @@ std::string build_semantic_snapshot_json(const std::string& screen, const std::v
             if ((node.known_mask & GUA_NODE_KNOWN_PRESSED) != 0U) append_state("pressed", node.pressed);
             if ((node.known_mask & GUA_NODE_KNOWN_CHECKED) != 0U) append_state("checked", node.checked);
             if ((node.known_mask & GUA_NODE_KNOWN_SELECTED) != 0U) append_state("selected", node.selected);
+            const auto append_number = [&](const char* name, auto value) {
+                if (wrote_state) json += ",";
+                json += "\"" + std::string(name) + "\":" + std::to_string(value);
+                wrote_state = true;
+            };
+            if ((node.known_mask & GUA_NODE_KNOWN_CARET_POSITION) != 0U) append_number("caretPosition", node.caret_position);
+            if ((node.known_mask & GUA_NODE_KNOWN_SELECTION) != 0U) { append_number("selectionStart", node.selection_start); append_number("selectionEnd", node.selection_end); }
+            if ((node.known_mask & GUA_NODE_KNOWN_SCROLL) != 0U) { append_number("scrollX", node.scroll_x); append_number("scrollY", node.scroll_y); }
+            if ((node.known_mask & GUA_NODE_KNOWN_SCROLL_MAX) != 0U) { append_number("scrollMaxX", node.scroll_max_x); append_number("scrollMaxY", node.scroll_max_y); }
+            if ((node.known_mask & GUA_NODE_KNOWN_RANGE_VALUE) != 0U) append_number("rangeValue", node.range_value);
+            if ((node.known_mask & GUA_NODE_KNOWN_RANGE_MIN) != 0U) append_number("rangeMin", node.range_min);
+            if ((node.known_mask & GUA_NODE_KNOWN_RANGE_MAX) != 0U) append_number("rangeMax", node.range_max);
+            if ((node.known_mask & GUA_NODE_KNOWN_SELECTED_INDEX) != 0U) append_number("selectedIndex", node.selected_index);
             json += "}";
         }
         json += ",\"actions\":[";
@@ -578,6 +601,14 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
         ctx->staging_valid = true;
         return;
     }
+    const auto focused_count = std::count_if(ctx->staging_nodes.begin(), ctx->staging_nodes.end(), [](const Node& node) {
+        return (node.known_mask & GUA_NODE_KNOWN_FOCUSED) != 0U && node.focused;
+    });
+    if (focused_count > 1) {
+        ctx->staging_nodes.clear();
+        ctx->frame_in_progress = false;
+        return;
+    }
     const std::string semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, ctx->staging_nodes);
     ctx->screen.swap(ctx->staging_screen);
     ctx->nodes.swap(ctx->staging_nodes);
@@ -648,6 +679,20 @@ extern "C" int gua_register_node_v2(gua_context_t* ctx, const gua_node_descripto
         descriptor->checked != 0,
         descriptor->selected != 0,
     });
+    return 1;
+}
+
+extern "C" int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor)
+{
+    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v3_t) ||
+        descriptor->base.struct_size < sizeof(gua_node_descriptor_v2_t)) return 0;
+    if (gua_register_node_v2(ctx, &descriptor->base) == 0) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    Node& node = ctx->staging_nodes.back();
+    node.caret_position = descriptor->caret_position; node.selection_start = descriptor->selection_start; node.selection_end = descriptor->selection_end;
+    node.scroll_x = descriptor->scroll_x; node.scroll_y = descriptor->scroll_y; node.scroll_max_x = descriptor->scroll_max_x; node.scroll_max_y = descriptor->scroll_max_y;
+    node.range_value = descriptor->range_value; node.range_min = descriptor->range_min; node.range_max = descriptor->range_max;
+    node.selected_index = descriptor->selected_index;
     return 1;
 }
 
@@ -834,6 +879,20 @@ extern "C" int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gu
     std::snprintf(out_state->parent_id, sizeof(out_state->parent_id), "%s", found->parent_id.c_str());
     std::snprintf(out_state->text, sizeof(out_state->text), "%s", found->text.c_str());
     std::snprintf(out_state->value, sizeof(out_state->value), "%s", found->value.c_str());
+    return 1;
+}
+
+extern "C" int gua_get_node_state_v3(gua_context_t* ctx, const char* node_id, gua_node_state_v3_t* out_state)
+{
+    if (ctx == nullptr || node_id == nullptr || out_state == nullptr || out_state->struct_size < sizeof(gua_node_state_v3_t)) return 0;
+    out_state->base.struct_size = sizeof(gua_node_state_v2_t);
+    if (gua_get_node_state_v2(ctx, node_id, &out_state->base) == 0) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    const auto found = std::find_if(ctx->nodes.begin(), ctx->nodes.end(), [&](const Node& node) { return node.id == node_id; });
+    if (found == ctx->nodes.end()) return 0;
+    out_state->caret_position = found->caret_position; out_state->selection_start = found->selection_start; out_state->selection_end = found->selection_end;
+    out_state->scroll_x = found->scroll_x; out_state->scroll_y = found->scroll_y; out_state->scroll_max_x = found->scroll_max_x; out_state->scroll_max_y = found->scroll_max_y;
+    out_state->range_value = found->range_value; out_state->range_min = found->range_min; out_state->range_max = found->range_max; out_state->selected_index = found->selected_index;
     return 1;
 }
 
@@ -1057,6 +1116,9 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
         result->error_code,
         result->sensitive != 0 ? "" : (result->value != nullptr ? result->value : ""),
         result->sensitive != 0,
+        ctx->session_epoch,
+        ctx->frame_sequence,
+        ctx->revision,
     });
     append_history(*ctx, ctx->event_history, "observed", result->request_id, result->action,
         result->node_id != nullptr ? result->node_id : "", result->status, result->error_code,
@@ -1097,6 +1159,35 @@ extern "C" int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t reques
     std::snprintf(out_event->node_id, sizeof(out_event->node_id), "%s", event.node_id.c_str());
     std::snprintf(out_event->value, sizeof(out_event->value), "%s", event.value.c_str());
     out_event->sensitive = event.sensitive ? 1 : 0;
+    return 1;
+}
+
+extern "C" int gua_poll_event_v3(gua_context_t* ctx, gua_event_v3_t* out_event)
+{
+    if (ctx == nullptr || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v3_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (ctx->events.empty()) return 0;
+    const Event event = ctx->events.front(); ctx->events.pop_front();
+    out_event->base.struct_size = sizeof(gua_event_v2_t);
+    out_event->base.request_id = event.request_id; out_event->base.action = event.action; out_event->base.status = event.status; out_event->base.error_code = event.error_code;
+    std::snprintf(out_event->base.node_id, sizeof(out_event->base.node_id), "%s", event.node_id.c_str());
+    std::snprintf(out_event->base.value, sizeof(out_event->base.value), "%s", event.value.c_str()); out_event->base.sensitive = event.sensitive ? 1 : 0;
+    out_event->session_epoch = event.session_epoch; out_event->frame_sequence = event.frame_sequence; out_event->revision = event.revision;
+    return 1;
+}
+
+extern "C" int gua_poll_event_v3_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v3_t* out_event)
+{
+    if (ctx == nullptr || request_id == 0 || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v3_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    const auto found = std::find_if(ctx->events.begin(), ctx->events.end(), [&](const Event& event) { return event.request_id == request_id; });
+    if (found == ctx->events.end()) return 0;
+    const Event event = *found; ctx->events.erase(found);
+    out_event->base.struct_size = sizeof(gua_event_v2_t);
+    out_event->base.request_id = event.request_id; out_event->base.action = event.action; out_event->base.status = event.status; out_event->base.error_code = event.error_code;
+    std::snprintf(out_event->base.node_id, sizeof(out_event->base.node_id), "%s", event.node_id.c_str());
+    std::snprintf(out_event->base.value, sizeof(out_event->base.value), "%s", event.value.c_str()); out_event->base.sensitive = event.sensitive ? 1 : 0;
+    out_event->session_epoch = event.session_epoch; out_event->frame_sequence = event.frame_sequence; out_event->revision = event.revision;
     return 1;
 }
 

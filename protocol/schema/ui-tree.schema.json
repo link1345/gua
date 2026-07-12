@@ -78,6 +78,17 @@
             "pressed": { "type": "boolean" },
             "checked": { "type": "boolean" },
             "selected": { "type": "boolean" },
+            "caretPosition": { "type": "integer", "minimum": 0 },
+            "selectionStart": { "type": "integer", "minimum": 0 },
+            "selectionEnd": { "type": "integer", "minimum": 0 },
+            "scrollX": { "type": "number" },
+            "scrollY": { "type": "number" },
+            "scrollMaxX": { "type": "number", "minimum": 0 },
+            "scrollMaxY": { "type": "number", "minimum": 0 },
+            "rangeValue": { "type": "number" },
+            "rangeMin": { "type": "number" },
+            "rangeMax": { "type": "number" },
+            "selectedIndex": { "type": "integer", "minimum": -1 },
             "value": {
               "type": ["number", "string", "boolean", "null"]
             }

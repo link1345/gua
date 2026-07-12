@@ -43,6 +43,34 @@ int main()
     assert(gua_copy_version_json(version.data(), version_size) == version_size);
     assert(std::string(version.data()).find("\"godotPluginVersion\":null") != std::string::npos);
     assert(std::string(version.data()).find("\"version_v1\"") != std::string::npos);
+    gua_context_t* detailed_context = gua_create_context();
+    gua_begin_frame(detailed_context, "details");
+    const gua_node_descriptor_v3_t detailed {
+        sizeof(gua_node_descriptor_v3_t),
+        { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_FOCUSED | GUA_NODE_KNOWN_CARET_POSITION |
+            GUA_NODE_KNOWN_SELECTION | GUA_NODE_KNOWN_SCROLL | GUA_NODE_KNOWN_SCROLL_MAX |
+            GUA_NODE_KNOWN_RANGE_VALUE | GUA_NODE_KNOWN_RANGE_MIN | GUA_NODE_KNOWN_RANGE_MAX |
+            GUA_NODE_KNOWN_SELECTED_INDEX, "detail", nullptr, "textbox", "Detail", nullptr, nullptr,
+            {0, 0, 10, 10}, 1, 1, 1, 0, 0, 0, 0 },
+        0, 0, 0, 0, 12, 0, 100, 5, 0, 10, 0
+    };
+    assert(gua_register_node_v3(detailed_context, &detailed) == 1);
+    gua_end_frame(detailed_context);
+    const std::string detailed_json = gua_get_ui_tree_json(detailed_context);
+    assert(detailed_json.find("\"caretPosition\":0") != std::string::npos);
+    assert(detailed_json.find("\"scrollY\":12.000000") != std::string::npos);
+    assert(detailed_json.find("\"rangeValue\":5.000000") != std::string::npos);
+    gua_node_state_v3_t detailed_state { sizeof(gua_node_state_v3_t) };
+    assert(gua_get_node_state_v3(detailed_context, "detail", &detailed_state) == 1);
+    assert(detailed_state.caret_position == 0 && detailed_state.scroll_y == 12 && detailed_state.range_value == 5);
+
+    gua_begin_frame(detailed_context, "invalid-focus");
+    auto focused = detailed.base;
+    focused.id = "one"; assert(gua_register_node_v2(detailed_context, &focused) == 1);
+    focused.id = "two"; assert(gua_register_node_v2(detailed_context, &focused) == 1);
+    gua_end_frame(detailed_context);
+    assert(std::string(gua_get_ui_tree_json(detailed_context)) == detailed_json);
+    gua_destroy_context(detailed_context);
     gua_context_t* context = gua_create_context();
     assert(context != nullptr);
 
@@ -192,13 +220,14 @@ int main()
     assert(gua_poll_event(context, &legacy_event) == 1);
     assert(legacy_event.type == GUA_EVENT_CLICK);
 
-    gua_event_v2_t event { sizeof(gua_event_v2_t) };
-    assert(gua_poll_event_v2_for_request(context, request_id, &event) == 1);
-    assert(event.request_id == request_id);
-    assert(event.action == GUA_ACTION_SET_VALUE);
-    assert(event.status == GUA_ACTION_STATUS_SUCCEEDED);
-    assert(event.sensitive == 1);
-    assert(std::strlen(event.value) == 0);
+    gua_event_v3_t event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_request(context, request_id, &event) == 1);
+    assert(event.base.request_id == request_id);
+    assert(event.base.action == GUA_ACTION_SET_VALUE);
+    assert(event.base.status == GUA_ACTION_STATUS_SUCCEEDED);
+    assert(event.base.sensitive == 1);
+    assert(std::strlen(event.base.value) == 0);
+    assert(event.session_epoch == 1 && event.frame_sequence > 0 && event.revision > 0);
 
     assert(gua_set_diagnostics_history_limit(context, 2) == 1);
     assert(gua_set_diagnostics_environment_json(context, "{\"testName\":\"native-state\"}") == 1);

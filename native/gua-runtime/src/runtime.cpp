@@ -212,6 +212,11 @@ extern "C" int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_no
     return gua_register_node_v2(runtime->context, descriptor);
 }
 
+extern "C" int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descriptor_v3_t* descriptor)
+{
+    return runtime != nullptr ? gua_register_node_v3(runtime->context, descriptor) : 0;
+}
+
 extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
 {
     if (!valid_runtime(runtime)) {
@@ -492,6 +497,16 @@ extern "C" int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uin
     return gua_poll_event_v2_for_request(runtime->context, request_id, out_event);
 }
 
+extern "C" int gua_runtime_poll_event_v3(gua_runtime_t* runtime, gua_event_v3_t* out_event)
+{
+    return runtime != nullptr ? gua_poll_event_v3(runtime->context, out_event) : 0;
+}
+
+extern "C" int gua_runtime_poll_event_v3_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v3_t* out_event)
+{
+    return runtime != nullptr ? gua_poll_event_v3_for_request(runtime->context, request_id, out_event) : 0;
+}
+
 extern "C" int gua_runtime_get_context_status(gua_runtime_t* runtime, gua_context_status_t* out_status)
 {
     if (!valid_runtime(runtime)) return 0;
@@ -600,19 +615,22 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             return result == GUA_ACTION_ACCEPTED ? static_cast<long long>(request_id) : static_cast<long long>(result);
         },
         .poll_action_event_json = [runtime](unsigned long long request_id) {
-            gua_event_v2_t event { sizeof(gua_event_v2_t) };
+            gua_event_v3_t event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
             const std::lock_guard lock(runtime->context_mutex);
             const int found = request_id == 0
-                ? gua_poll_event_v2(runtime->context, &event)
-                : gua_poll_event_v2_for_request(runtime->context, request_id, &event);
+                ? gua_poll_event_v3(runtime->context, &event)
+                : gua_poll_event_v3_for_request(runtime->context, request_id, &event);
             if (found == 0) return std::string("null");
-            return std::string("{\"requestId\":") + std::to_string(event.request_id) +
-                ",\"action\":" + std::to_string(event.action) +
-                ",\"succeeded\":" + (event.status == GUA_ACTION_STATUS_SUCCEEDED ? "true" : "false") +
-                ",\"error\":" + std::to_string(event.error_code) +
-                ",\"nodeId\":\"" + escape_json(event.node_id) + "\"" +
-                ",\"value\":\"" + escape_json(event.value) + "\"" +
-                ",\"sensitive\":" + (event.sensitive != 0 ? "true" : "false") + "}";
+            return std::string("{\"requestId\":") + std::to_string(event.base.request_id) +
+                ",\"action\":" + std::to_string(event.base.action) +
+                ",\"succeeded\":" + (event.base.status == GUA_ACTION_STATUS_SUCCEEDED ? "true" : "false") +
+                ",\"error\":" + std::to_string(event.base.error_code) +
+                ",\"nodeId\":\"" + escape_json(event.base.node_id) + "\"" +
+                ",\"value\":\"" + escape_json(event.base.value) + "\"" +
+                ",\"sensitive\":" + (event.base.sensitive != 0 ? "true" : "false") +
+                ",\"sessionEpoch\":" + std::to_string(event.session_epoch) +
+                ",\"frameSequence\":" + std::to_string(event.frame_sequence) +
+                ",\"revision\":" + std::to_string(event.revision) + "}";
         },
     };
 

@@ -75,6 +75,10 @@ struct NodeProperties {
     std::optional<bool> pressed;
     std::optional<bool> checked;
     std::optional<bool> selected;
+    std::optional<std::int64_t> caret_position, selection_start, selection_end;
+    std::optional<double> scroll_x, scroll_y, scroll_max_x, scroll_max_y;
+    std::optional<double> range_value, range_min, range_max;
+    std::optional<std::int64_t> selected_index;
 };
 
 class Context {
@@ -173,6 +177,14 @@ public:
         if (properties.pressed) known_mask |= GUA_NODE_KNOWN_PRESSED;
         if (properties.checked) known_mask |= GUA_NODE_KNOWN_CHECKED;
         if (properties.selected) known_mask |= GUA_NODE_KNOWN_SELECTED;
+        if (properties.caret_position) known_mask |= GUA_NODE_KNOWN_CARET_POSITION;
+        if (properties.selection_start && properties.selection_end) known_mask |= GUA_NODE_KNOWN_SELECTION;
+        if (properties.scroll_x && properties.scroll_y) known_mask |= GUA_NODE_KNOWN_SCROLL;
+        if (properties.scroll_max_x && properties.scroll_max_y) known_mask |= GUA_NODE_KNOWN_SCROLL_MAX;
+        if (properties.range_value) known_mask |= GUA_NODE_KNOWN_RANGE_VALUE;
+        if (properties.range_min) known_mask |= GUA_NODE_KNOWN_RANGE_MIN;
+        if (properties.range_max) known_mask |= GUA_NODE_KNOWN_RANGE_MAX;
+        if (properties.selected_index) known_mask |= GUA_NODE_KNOWN_SELECTED_INDEX;
 
         const gua_node_descriptor_v2_t descriptor {
             sizeof(gua_node_descriptor_v2_t),
@@ -192,7 +204,13 @@ public:
             properties.checked.value_or(false) ? 1 : 0,
             properties.selected.value_or(false) ? 1 : 0,
         };
-        if (gua_register_node_v2(context_, &descriptor) == 0) {
+        const gua_node_descriptor_v3_t detailed {
+            sizeof(gua_node_descriptor_v3_t), descriptor,
+            properties.caret_position.value_or(0), properties.selection_start.value_or(0), properties.selection_end.value_or(0),
+            properties.scroll_x.value_or(0), properties.scroll_y.value_or(0), properties.scroll_max_x.value_or(0), properties.scroll_max_y.value_or(0),
+            properties.range_value.value_or(0), properties.range_min.value_or(0), properties.range_max.value_or(0), properties.selected_index.value_or(-1)
+        };
+        if (gua_register_node_v3(context_, &detailed) == 0) {
             throw std::runtime_error("Failed to register Gua v2 node");
         }
     }

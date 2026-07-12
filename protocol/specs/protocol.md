@@ -24,6 +24,12 @@ it was false. Adapters must not fill unsupported state with false. Values
 crossing the initial C ABI are normalized to UTF-8 strings; the schema also
 allows native JSON scalar values for future transports.
 
+Detailed state is an additive v2-tree extension backed by the versioned v3 C ABI descriptor. It includes
+`caretPosition`, `selectionStart`/`selectionEnd`, `scrollX`/`scrollY`, `scrollMaxX`/`scrollMaxY`,
+`rangeValue`/`rangeMin`/`rangeMax`, and `selectedIndex`. Unsupported properties are omitted, so an observed
+zero remains distinct from unknown. At most one published node may have `focused: true`; adapters reject a
+staged frame with multiple focused nodes. Sensitive controls continue to omit text/value.
+
 `frameSequence` and `revision` have different purposes. Rebuilding the same
 semantic tree in consecutive frames increments `frameSequence` but leaves
 `revision` unchanged. Changing the screen, node membership, hierarchy, bounds,
@@ -201,6 +207,8 @@ Initial command types:
 ### Semantic action lifecycle (v1)
 
 Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId`, and the adapter must copy that ID into its success or failure event after attempting the host operation.
+
+The core captures `sessionEpoch`, `frameSequence`, and `revision` when the adapter emits completion; additive v3 event APIs and remote responses preserve that metadata even when polled later. Callers must still wait for the expected semantic state: action completion proves host processing, while `WaitForStateAsync` repeatedly obtains fresh snapshots until its predicate succeeds.
 
 The v1 action names map directly to the additive C ABI action enum: `click`, `focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. Enqueue validation distinguishes `node_not_found`, `hidden`, `disabled`, `unsupported`, and `invalid_value`. Existing click functions remain compatibility wrappers over the generic queue.
 

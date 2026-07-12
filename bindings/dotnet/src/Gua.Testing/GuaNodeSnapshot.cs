@@ -21,4 +21,15 @@ public sealed record GuaNodeSnapshot(
     int? SchemaVersion = null,
     ulong? SessionEpoch = null,
     ulong? FrameSequence = null,
-    ulong? Revision = null);
+    ulong? Revision = null,
+    long? CaretPosition = null,
+    long? SelectionStart = null,
+    long? SelectionEnd = null,
+    double? ScrollX = null,
+    double? ScrollY = null,
+    double? ScrollMaxX = null,
+    double? ScrollMaxY = null,
+    double? RangeValue = null,
+    double? RangeMin = null,
+    double? RangeMax = null,
+    long? SelectedIndex = null);

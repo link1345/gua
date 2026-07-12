@@ -72,6 +72,14 @@ public sealed class GuaContext : IGuaContext, IDisposable
         if (descriptor.Pressed.HasValue) known |= GuaNodeKnownState.Pressed;
         if (descriptor.Checked.HasValue) known |= GuaNodeKnownState.Checked;
         if (descriptor.Selected.HasValue) known |= GuaNodeKnownState.Selected;
+        if (descriptor.CaretPosition.HasValue) known |= GuaNodeKnownState.CaretPosition;
+        if (descriptor.SelectionStart.HasValue && descriptor.SelectionEnd.HasValue) known |= GuaNodeKnownState.Selection;
+        if (descriptor.ScrollX.HasValue && descriptor.ScrollY.HasValue) known |= GuaNodeKnownState.Scroll;
+        if (descriptor.ScrollMaxX.HasValue && descriptor.ScrollMaxY.HasValue) known |= GuaNodeKnownState.ScrollMax;
+        if (descriptor.RangeValue.HasValue) known |= GuaNodeKnownState.RangeValue;
+        if (descriptor.RangeMin.HasValue) known |= GuaNodeKnownState.RangeMin;
+        if (descriptor.RangeMax.HasValue) known |= GuaNodeKnownState.RangeMax;
+        if (descriptor.SelectedIndex.HasValue) known |= GuaNodeKnownState.SelectedIndex;
 
         var strings = new[] { descriptor.Id, descriptor.ParentId, descriptor.Role, descriptor.Label, descriptor.Text, descriptor.Value };
         var pointers = strings.Select(value => value is null ? nint.Zero : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
@@ -96,7 +104,16 @@ public sealed class GuaContext : IGuaContext, IDisposable
                 Checked = descriptor.Checked == true ? 1 : 0,
                 Selected = descriptor.Selected == true ? 1 : 0,
             };
-            if (Native.gua_register_node_v2(_handle, in native) == 0)
+            var detailed = new Native.GuaNativeNodeDescriptorV3
+            {
+                StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.GuaNativeNodeDescriptorV3>(),
+                Base = native,
+                CaretPosition = descriptor.CaretPosition ?? 0, SelectionStart = descriptor.SelectionStart ?? 0, SelectionEnd = descriptor.SelectionEnd ?? 0,
+                ScrollX = descriptor.ScrollX ?? 0, ScrollY = descriptor.ScrollY ?? 0, ScrollMaxX = descriptor.ScrollMaxX ?? 0, ScrollMaxY = descriptor.ScrollMaxY ?? 0,
+                RangeValue = descriptor.RangeValue ?? 0, RangeMin = descriptor.RangeMin ?? 0, RangeMax = descriptor.RangeMax ?? 0,
+                SelectedIndex = descriptor.SelectedIndex ?? -1,
+            };
+            if (Native.gua_register_node_v3(_handle, in detailed) == 0)
             {
                 throw new InvalidOperationException($"Failed to register Gua v2 node: {descriptor.Id}");
             }
@@ -394,26 +411,28 @@ public sealed class GuaContext : IGuaContext, IDisposable
         ThrowIfDisposed();
         unsafe
         {
-            Native.GuaNativeEventV2 nativeEvent = new()
+            Native.GuaNativeEventV3 nativeEvent = new()
             {
-                StructSize = (uint)sizeof(Native.GuaNativeEventV2),
+                StructSize = (uint)sizeof(Native.GuaNativeEventV3),
+                Base = new Native.GuaNativeEventV2 { StructSize = (uint)sizeof(Native.GuaNativeEventV2) },
             };
             var found = requestId.HasValue
-                ? Native.gua_poll_event_v2_for_request(_handle, requestId.Value, &nativeEvent)
-                : Native.gua_poll_event_v2(_handle, &nativeEvent);
+                ? Native.gua_poll_event_v3_for_request(_handle, requestId.Value, &nativeEvent)
+                : Native.gua_poll_event_v3(_handle, &nativeEvent);
             if (found == 0)
             {
                 e = default;
                 return false;
             }
             e = new GuaActionEvent(
-                nativeEvent.RequestId,
-                (GuaActionType)nativeEvent.Action,
-                nativeEvent.Status == 1,
-                (GuaActionError)nativeEvent.ErrorCode,
-                Marshal.PtrToStringUTF8((nint)nativeEvent.NodeId) ?? string.Empty,
-                Marshal.PtrToStringUTF8((nint)nativeEvent.Value) ?? string.Empty,
-                nativeEvent.Sensitive != 0);
+                nativeEvent.Base.RequestId,
+                (GuaActionType)nativeEvent.Base.Action,
+                nativeEvent.Base.Status == 1,
+                (GuaActionError)nativeEvent.Base.ErrorCode,
+                Marshal.PtrToStringUTF8((nint)nativeEvent.Base.NodeId) ?? string.Empty,
+                Marshal.PtrToStringUTF8((nint)nativeEvent.Base.Value) ?? string.Empty,
+                nativeEvent.Base.Sensitive != 0,
+                nativeEvent.SessionEpoch, nativeEvent.FrameSequence, nativeEvent.Revision);
             return true;
         }
     }

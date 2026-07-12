@@ -42,4 +42,7 @@ public readonly record struct GuaActionEvent(
     GuaActionError Error,
     string NodeId,
     string Value,
-    bool Sensitive);
+    bool Sensitive,
+    ulong? SessionEpoch = null,
+    ulong? FrameSequence = null,
+    ulong? Revision = null);

@@ -122,6 +122,8 @@ public static partial class GuaAssertions
             bool? OptionalBoolean(string name) => hasState && state.TryGetProperty(name, out var value)
                 ? value.GetBoolean()
                 : null;
+            long? OptionalStateInt64(string name) => hasState && state.TryGetProperty(name, out var value) ? value.GetInt64() : null;
+            double? OptionalStateDouble(string name) => hasState && state.TryGetProperty(name, out var value) ? value.GetDouble() : null;
             string? OptionalString(string name) => node.TryGetProperty(name, out var value)
                 ? value.GetString()
                 : null;
@@ -161,7 +163,10 @@ public static partial class GuaAssertions
                 SchemaVersion: document.RootElement.TryGetProperty("schemaVersion", out var schemaVersion) ? schemaVersion.GetInt32() : null,
                 SessionEpoch: OptionalRootUInt64("sessionEpoch"),
                 FrameSequence: OptionalRootUInt64("frameSequence"),
-                Revision: OptionalRootUInt64("revision"));
+                Revision: OptionalRootUInt64("revision"),
+                CaretPosition: OptionalStateInt64("caretPosition"), SelectionStart: OptionalStateInt64("selectionStart"), SelectionEnd: OptionalStateInt64("selectionEnd"),
+                ScrollX: OptionalStateDouble("scrollX"), ScrollY: OptionalStateDouble("scrollY"), ScrollMaxX: OptionalStateDouble("scrollMaxX"), ScrollMaxY: OptionalStateDouble("scrollMaxY"),
+                RangeValue: OptionalStateDouble("rangeValue"), RangeMin: OptionalStateDouble("rangeMin"), RangeMax: OptionalStateDouble("rangeMax"), SelectedIndex: OptionalStateInt64("selectedIndex"));
         }
 
         return null;

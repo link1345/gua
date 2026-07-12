@@ -209,7 +209,8 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
             return false;
         }
         e = new GuaActionEvent(result.RequestId, (GuaActionType)result.Action, result.Succeeded,
-            (GuaActionError)result.Error, result.NodeId, result.Value, result.Sensitive);
+            (GuaActionError)result.Error, result.NodeId, result.Value, result.Sensitive,
+            result.SessionEpoch, result.FrameSequence, result.Revision);
         return true;
     }
 
@@ -427,7 +428,8 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
 
     private sealed record ActionRequestResult(ulong RequestId);
     private sealed record ActionEventResult(
-        ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive);
+        ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive,
+        ulong SessionEpoch, ulong FrameSequence, ulong Revision);
     private sealed record ContextStatusResult(
         ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount,
         uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount,
