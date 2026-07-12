@@ -28,7 +28,7 @@ recognition or coordinate-based input.
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   A thin MCP server that exposes Gua runtime actions to AI agents through the
   same WebSocket bridge used by the Inspector.
-- **Gua Inspector:** [![Inspector Release](https://img.shields.io/github/actions/workflow/status/link1345/gua/inspector-release.yml?branch=main&label=Inspector%20Release)](https://github.com/link1345/gua/actions/workflows/inspector-release.yml)<br>
+- **Gua Inspector:** [![Gua Release](https://img.shields.io/github/actions/workflow/status/link1345/gua/gua-release.yml?branch=main&label=Gua%20Release)](https://github.com/link1345/gua/actions/workflows/gua-release.yml)<br>
   A browser and Windows desktop UI for inspecting the semantic UI tree, node
   state, screenshots, and logs, and for sending runtime commands.
 
@@ -379,16 +379,10 @@ run_test
 
 ## Release automation
 
-GitHub Actions publishes runtime artifacts from `main` when the relevant protocol
-consumer changes:
-
-- Inspector changes build the Tauri Inspector on Windows and attach the bundle
-  outputs to a GitHub Release tagged as `inspector-<short-sha>`.
-- Godot GDScript addon changes build `gua-godot` on Windows and attach a zipped
-  `addons/gua` plugin, including the built GDExtension DLLs, to a GitHub Release
-  tagged as `godot-plugin-<short-sha>`.
-- MCP changes build and publish `gui-mcp` to npm as
-  `0.0.0-main.<run-number>.<short-sha>` with the `latest` dist-tag.
+GitHub Actions publishes runtime artifacts from `main` when a related protocol
+consumer changes. The Inspector, Godot plugin, and ImGui plugin are built
+together and attached to one versioned `gua-v*` GitHub Release. MCP and .NET
+packages continue to use their independent npm and NuGet publishing workflows.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gui-mcp` package must be configured on npm with this repository, the

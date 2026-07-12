@@ -2,20 +2,27 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TagPrefix,
 
-    [string]$RequestedMajor = ""
+    [string]$RequestedMajor = "",
+
+    [string[]]$LegacyTagPrefixes = @()
 )
 
 $ErrorActionPreference = "Stop"
-$tagPattern = "^$([regex]::Escape($TagPrefix))-v(?<major>\d+)\.(?<minor>\d+)\.0$"
-$versions = git tag --list "$TagPrefix-v*" |
+$prefixes = @($TagPrefix) + $LegacyTagPrefixes | Select-Object -Unique
+$versions = $prefixes |
     ForEach-Object {
-        if ($_ -match $tagPattern) {
-            [pscustomobject]@{
-                Tag = $_
-                Major = [int]$Matches.major
-                Minor = [int]$Matches.minor
+        $prefix = $_
+        $tagPattern = "^$([regex]::Escape($prefix))-v(?<major>\d+)\.(?<minor>\d+)\.0$"
+        git tag --list "$prefix-v*" |
+            ForEach-Object {
+                if ($_ -match $tagPattern) {
+                    [pscustomobject]@{
+                        Tag = $_
+                        Major = [int]$Matches.major
+                        Minor = [int]$Matches.minor
+                    }
+                }
             }
-        }
     } |
     Sort-Object Major, Minor -Descending
 
