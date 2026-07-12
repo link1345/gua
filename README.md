@@ -138,6 +138,13 @@ policy while `GodotSceneTestHost` owns executable/project discovery, automatic
 loopback ports, rendered/headless startup, bridge diagnostics, and reset policy.
 All APIs are additive over the existing C ABI and WebSocket protocol.
 
+Failure diagnostics can be coordinated through the framework-independent
+`GuaDiagnosticsSession`. Assertions and completed actions use the same artifact
+layout, return typed absolute paths/media types/secondary capture errors, and
+can attach through a callback. Godot sessions can include live process metadata,
+stdout/stderr, runtime version, and an opt-in on-demand screenshot; successful
+tests do not create artifacts unless capture is explicitly requested.
+
 Want to try that in GitHub Actions without wiring every setup step by hand?
 [`link1345/gua-tester`](https://github.com/link1345/gua-tester) provides
 reusable Actions for Godot GDScript projects. It downloads Godot on the runner,

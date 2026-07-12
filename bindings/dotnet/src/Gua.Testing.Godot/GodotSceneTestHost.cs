@@ -12,14 +12,16 @@ public sealed class GodotSceneTestHost : IDisposable
     private readonly GodotSceneTestHostOptions _options;
     private readonly Process _process;
     private readonly string _bridgeUrl;
+    private readonly ProcessOutput _processOutput;
     private bool _disposed;
 
-    private GodotSceneTestHost(Process process, GuaRemoteContext context, GodotSceneTestHostOptions options, string bridgeUrl)
+    private GodotSceneTestHost(Process process, GuaRemoteContext context, GodotSceneTestHostOptions options, string bridgeUrl, ProcessOutput processOutput)
     {
         _process = process;
         Context = context;
         _options = options;
         _bridgeUrl = bridgeUrl;
+        _processOutput = processOutput;
     }
 
     public IGuaContext Context { get; }
@@ -43,6 +45,41 @@ public sealed class GodotSceneTestHost : IDisposable
                 ["projectPath"] = _options.ProjectPath ?? string.Empty,
             },
         };
+    }
+
+    public GuaDiagnosticsSession CreateDiagnosticsSession(
+        string testName,
+        string? outputDirectory = null,
+        bool captureScreenshot = false,
+        IReadOnlyDictionary<string, string>? callerMetadata = null,
+        Action<GuaDiagnosticFile>? attachmentSink = null)
+    {
+        ThrowIfDisposed();
+        var basic = CreateDiagnosticOptions(testName, outputDirectory);
+        return new GuaDiagnosticsSession(Context, new GuaDiagnosticOptions
+        {
+            TestName = basic.TestName,
+            OutputDirectory = basic.OutputDirectory,
+            Environment = basic.Environment,
+            CallerMetadata = callerMetadata ?? new Dictionary<string, string>(),
+            AttachmentSink = attachmentSink,
+            TextArtifacts = new Dictionary<string, Func<string>>
+            {
+                ["godot-stdout.txt"] = _processOutput.ReadStandardOutput,
+                ["godot-stderr.txt"] = _processOutput.ReadStandardError,
+                ["godot-process.json"] = () => System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    processId = ProcessId,
+                    bridgeUrl = _bridgeUrl,
+                    projectPath = _options.ProjectPath,
+                    headless = _options.Headless,
+                    hasExited = _process.HasExited,
+                }),
+            },
+            ScreenshotCapture = captureScreenshot
+                ? () => CaptureScreenshotAsync().GetAwaiter().GetResult().DecodePng()
+                : null,
+        });
     }
 
     public static GodotSceneTestHost Load(string scenePath, GodotSceneTestHostOptions? options = null)
@@ -74,7 +111,7 @@ public sealed class GodotSceneTestHost : IDisposable
                 if (!clean.IsClean)
                     throw new InvalidOperationException($"Godot startup reset left queued work: pending={clean.PendingRequestCount}, inFlight={clean.InFlightRequestCount}, events={clean.UnconsumedEventCount}.");
             }
-            return new GodotSceneTestHost(process, context, options, bridgeUrl);
+            return new GodotSceneTestHost(process, context, options, bridgeUrl, output);
         }
         catch (Exception error)
         {
@@ -431,7 +468,8 @@ public sealed class GodotSceneTestHost : IDisposable
     private sealed class ProcessOutput
     {
         private readonly Process _process;
-        private readonly StringBuilder _output = new();
+        private readonly StringBuilder _stdout = new();
+        private readonly StringBuilder _stderr = new();
 
         public ProcessOutput(Process process)
         {
@@ -440,27 +478,35 @@ public sealed class GodotSceneTestHost : IDisposable
 
         public void Start()
         {
-            _process.OutputDataReceived += (_, args) => Append(args.Data);
-            _process.ErrorDataReceived += (_, args) => Append(args.Data);
+            _process.OutputDataReceived += (_, args) => Append(_stdout, args.Data);
+            _process.ErrorDataReceived += (_, args) => Append(_stderr, args.Data);
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
         }
 
         public string Read()
         {
-            return _output.ToString();
+            return ReadStandardOutput() + ReadStandardError();
         }
 
-        private void Append(string? line)
+        public string ReadStandardOutput() => Read(_stdout);
+        public string ReadStandardError() => Read(_stderr);
+
+        private static string Read(StringBuilder output)
+        {
+            lock (output) return output.ToString();
+        }
+
+        private static void Append(StringBuilder output, string? line)
         {
             if (line is null)
             {
                 return;
             }
 
-            lock (_output)
+            lock (output)
             {
-                _output.AppendLine(line);
+                output.AppendLine(line);
             }
         }
     }

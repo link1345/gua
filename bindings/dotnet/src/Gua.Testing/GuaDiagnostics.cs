@@ -10,6 +10,89 @@ public sealed class GuaDiagnosticOptions
     public string OutputDirectory { get; init; } = Path.Combine("artifacts", "gua");
     public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>();
     public Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
+    public IReadOnlyDictionary<string, string> CallerMetadata { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyDictionary<string, Func<string>> TextArtifacts { get; init; } = new Dictionary<string, Func<string>>();
+    public Func<byte[]>? ScreenshotCapture { get; init; }
+    public Action<GuaDiagnosticFile>? AttachmentSink { get; init; }
+}
+
+public sealed record GuaDiagnosticFile(string Path, string MediaType);
+public sealed record GuaDiagnosticError(string Stage, string ErrorType, string Message);
+public sealed record GuaDiagnosticsResult(
+    Exception PrimaryException,
+    string? ArtifactPath,
+    IReadOnlyList<GuaDiagnosticFile> Files,
+    IReadOnlyList<GuaDiagnosticError> CaptureErrors)
+{
+    public bool Succeeded => ArtifactPath is not null;
+}
+
+public sealed class GuaDiagnosticsSession
+{
+    private readonly IGuaContext _context;
+    private readonly GuaDiagnosticOptions _options;
+
+    public GuaDiagnosticsSession(IGuaContext context, GuaDiagnosticOptions options)
+    {
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+    }
+
+    public GuaDiagnosticsResult Capture(Exception primaryException, string? initialUiTreeJson = null)
+    {
+        ArgumentNullException.ThrowIfNull(primaryException);
+        var capture = GuaDiagnosticWriter.Capture(_context, primaryException.ToString(), _options, initialUiTreeJson);
+        var errors = new List<GuaDiagnosticError>();
+        if (capture.Error is not null) errors.Add(new("diagnostics", "CaptureError", capture.Error));
+        var files = new List<GuaDiagnosticFile>();
+        if (capture.ArtifactPath is not null)
+        {
+            AddSupplementalArtifacts(capture.ArtifactPath, errors);
+            if (errors.Count > 0)
+                File.WriteAllText(Path.Combine(capture.ArtifactPath, "session-capture-errors.json"), JsonSerializer.Serialize(errors, GuaDiagnosticWriter.JsonOptions), new UTF8Encoding(false));
+            foreach (var path in Directory.EnumerateFiles(capture.ArtifactPath).Order(StringComparer.Ordinal))
+                files.Add(new GuaDiagnosticFile(Path.GetFullPath(path), MediaType(path)));
+            foreach (var file in files)
+            {
+                try { _options.AttachmentSink?.Invoke(file); }
+                catch (Exception error) { errors.Add(new("attachment", error.GetType().Name, error.Message)); }
+            }
+        }
+        return new(primaryException, capture.ArtifactPath, files, errors);
+    }
+
+    private void AddSupplementalArtifacts(string directory, List<GuaDiagnosticError> errors)
+    {
+        WriteJson(directory, "caller-metadata.json", _options.CallerMetadata, errors, "caller-metadata");
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "version.json"), JsonSerializer.Serialize(_context.GetVersion(), GuaDiagnosticWriter.JsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception error) { errors.Add(new("version", error.GetType().Name, error.Message)); }
+        foreach (var (name, read) in _options.TextArtifacts)
+        {
+            try { File.WriteAllText(Path.Combine(directory, SanitizeFileName(name)), read(), new UTF8Encoding(false)); }
+            catch (Exception error) { errors.Add(new($"text:{name}", error.GetType().Name, error.Message)); }
+        }
+        if (_options.ScreenshotCapture is not null)
+        {
+            try { File.WriteAllBytes(Path.Combine(directory, "screenshot-on-failure.png"), _options.ScreenshotCapture()); }
+            catch (Exception error) { errors.Add(new("screenshot", error.GetType().Name, error.Message)); }
+        }
+    }
+
+    private static void WriteJson(string directory, string name, object value, List<GuaDiagnosticError> errors, string stage)
+    {
+        try { File.WriteAllText(Path.Combine(directory, name), JsonSerializer.Serialize(value, GuaDiagnosticWriter.JsonOptions), new UTF8Encoding(false)); }
+        catch (Exception error) { errors.Add(new(stage, error.GetType().Name, error.Message)); }
+    }
+
+    private static string SanitizeFileName(string value) => string.Concat(value.Select(ch =>
+        Path.GetInvalidFileNameChars().Contains(ch) || char.IsControl(ch) ? '_' : ch));
+    private static string MediaType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".json" => "application/json", ".jsonl" => "application/x-ndjson", ".png" => "image/png", _ => "text/plain",
+    };
 }
 
 public sealed record GuaDiagnosticCapture(string? ArtifactPath, string? Error)
@@ -166,5 +249,5 @@ public static class GuaDiagnosticWriter
         stream.Write(bytes);
     }
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    internal static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 }

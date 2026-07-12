@@ -104,3 +104,9 @@ Headless, rendering-disabled, unsupported, timeout, and cancellation outcomes ar
 distinct. Requests arriving together may share one viewport readback. The older
 `GetScreenshot`/`WaitForScreenshotAsync` APIs keep reading the latest published
 image. Rendered secrets are not automatically redacted.
+
+`GodotSceneTestHost.CreateDiagnosticsSession` adds process metadata, separate
+stdout/stderr files, and optional on-demand screenshot capture to the common
+`GuaDiagnosticsSession` layout. Capture runs while the process and bridge are
+still alive. A screenshot or attachment failure is returned as a secondary
+capture error and does not replace the original assertion/action exception.
