@@ -246,6 +246,53 @@ public sealed class GodotVisualIntegrationTests
         });
     }
 
+    [Test]
+    public void StrictGodotTeardownCapturesBeforeProcessExitAndCleansLeakedRequest()
+    {
+        var output = Path.Combine(_root, "teardown-diagnostics", Guid.NewGuid().ToString("N"));
+        var host = GodotSceneTestHost.LoadRendered("res://Main.tscn", new GodotSceneTestHostOptions
+        {
+            GodotExecutablePath = Environment.GetEnvironmentVariable("GODOT_EXECUTABLE"),
+            ProjectPath = Path.Combine(FindRepositoryRoot(), "examples", "godot-gdscript"),
+            UseAvailableBridgePort = true,
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            RequestTimeout = TimeSpan.FromSeconds(10),
+            SceneTimeout = TimeSpan.FromSeconds(15),
+            StartupResetPolicy = GuaResetPolicy.Strict,
+            TeardownResetPolicy = GuaResetPolicy.Strict,
+            CaptureDiagnosticsBeforeTeardown = true,
+            CleanupAfterLeakReport = true,
+            CaptureScreenshotBeforeTeardown = true,
+            DiagnosticsTestName = "strict-godot-teardown",
+            DiagnosticsOutputDirectory = output,
+            EnvironmentVariables = new Dictionary<string, string> { ["GUA_VISUAL_E2E"] = "1", ["GUA_V2_E2E"] = "1" },
+            AdditionalArguments = ["--display-driver", "windows", "--rendering-method", "gl_compatibility", "--resolution", "1280x720"],
+        });
+        try
+        {
+            GuaAssertions.WaitForId(host.Context, "v2-user-name", timeout: TimeSpan.FromSeconds(10));
+            Assert.That(GuaAssertions.GetById(host.Context, "v2-user-name").SetValue("godot-secret-marker", sensitive: true), Is.GreaterThan(0));
+            var error = Assert.Throws<GuaAssertionException>(host.Dispose);
+            Assert.Multiple(() =>
+            {
+                Assert.That(error!.Message, Does.Contain("teardown reset failed").And.Not.Contain("godot-secret-marker"));
+                Assert.That(Directory.EnumerateFiles(output, "godot-process.json", SearchOption.AllDirectories), Is.Not.Empty);
+                Assert.That(Directory.EnumerateFiles(output, "screenshot-on-failure.png", SearchOption.AllDirectories), Is.Not.Empty);
+                Assert.That(JsonDocument.Parse(File.ReadAllText(Directory.EnumerateFiles(output, "godot-process.json", SearchOption.AllDirectories).Single()))
+                    .RootElement.GetProperty("hasExited").GetBoolean(), Is.False);
+                Assert.That(string.Join("\n", Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories)
+                    .Where(path => Path.GetExtension(path) != ".png").Select(File.ReadAllText)), Does.Not.Contain("godot-secret-marker"));
+            });
+            Assert.DoesNotThrow(host.Dispose);
+            Assert.DoesNotThrow(() => host.DisposeAsync().GetAwaiter().GetResult());
+        }
+        finally
+        {
+            try { host.Dispose(); } catch { }
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
     private static async Task<IReadOnlyList<GuaActionEvent>> WaitForActionEventsAsync(
         IGuaContext context, int count, TimeSpan timeout)
     {

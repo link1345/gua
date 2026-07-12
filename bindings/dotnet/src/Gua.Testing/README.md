@@ -85,6 +85,32 @@ session.Reset(); // setup; starts a new session epoch
 session.Reset(new GuaResetOptions(Strict: true)); // teardown; throws if dirty
 ```
 
+For high-level isolation, construct `GuaTestSession` with lifecycle options.
+`GuaTestSessionOptions.Strict` enables strict startup and teardown reset.
+Policies can also be selected independently with `GuaResetPolicy.Disabled`,
+`NonStrict`, or `Strict`; their default targets are nodes, requests, events,
+and retained history. Logs and screenshots remain preserved unless selected.
+
+```csharp
+using var session = new GuaTestSession(context, new GuaTestSessionOptions
+{
+    StartupReset = GuaResetPolicy.Strict,
+    TeardownReset = GuaResetPolicy.Strict,
+    CaptureDiagnosticsBeforeTeardown = true,
+    CleanupAfterLeakReport = true,
+    DiagnosticsSession = diagnostics,
+});
+
+session.Run(() => RunTestBody());
+```
+
+`Run` rethrows the original test-body exception with its type and stack trace.
+A teardown failure is attached as `GuaTeardownFailure`, and a typed diagnostic
+result as `GuaDiagnosticsResult`. Leak inspection reports epoch, counts,
+request ID, action/event type, and node ID without action payload values.
+Cleanup runs only after diagnostics were attempted and only when enabled.
+Clean completion creates no artifact, and `Dispose` is idempotent.
+
 `ResetAsync` provides the same contract for remote contexts and honors
 `CancellationToken`. Remote reset always includes the inspected session epoch,
 so a stale client cannot reset a newer shared runtime session.

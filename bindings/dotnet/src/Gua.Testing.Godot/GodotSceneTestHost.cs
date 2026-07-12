@@ -4,10 +4,11 @@ using System.Net;
 using System.Net.Sockets;
 using Gua.Core;
 using Gua.Testing;
+using System.Runtime.ExceptionServices;
 
 namespace Gua.Testing.Godot;
 
-public sealed class GodotSceneTestHost : IDisposable
+public sealed class GodotSceneTestHost : IDisposable, IAsyncDisposable
 {
     private readonly GodotSceneTestHostOptions _options;
     private readonly Process _process;
@@ -110,6 +111,10 @@ public sealed class GodotSceneTestHost : IDisposable
                 var clean = context.GetContextStatus();
                 if (!clean.IsClean)
                     throw new InvalidOperationException($"Godot startup reset left queued work: pending={clean.PendingRequestCount}, inFlight={clean.InFlightRequestCount}, events={clean.UnconsumedEventCount}.");
+            }
+            else if (options.StartupResetPolicy.Mode != GuaResetMode.Disabled)
+            {
+                using var startupSession = new GuaTestSession(context, new GuaTestSessionOptions { StartupReset = options.StartupResetPolicy });
             }
             return new GodotSceneTestHost(process, context, options, bridgeUrl, output);
         }
@@ -232,7 +237,21 @@ public sealed class GodotSceneTestHost : IDisposable
         Exception? teardownError = null;
         try
         {
-            if (_options.TeardownReset is { } resetOptions)
+            if (_options.TeardownResetPolicy.Mode != GuaResetMode.Disabled)
+            {
+                var diagnostics = CreateDiagnosticsSession(
+                    _options.DiagnosticsTestName,
+                    _options.DiagnosticsOutputDirectory,
+                    _options.CaptureScreenshotBeforeTeardown);
+                using var session = new GuaTestSession(Context, new GuaTestSessionOptions
+                {
+                    TeardownReset = _options.TeardownResetPolicy,
+                    CaptureDiagnosticsBeforeTeardown = _options.CaptureDiagnosticsBeforeTeardown,
+                    CleanupAfterLeakReport = _options.CleanupAfterLeakReport,
+                    DiagnosticsSession = diagnostics,
+                });
+            }
+            else if (_options.TeardownReset is { } resetOptions)
             {
                 var report = ResetContext(resetOptions);
                 if (report.Result != GuaResetResult.Succeeded)
@@ -250,6 +269,27 @@ public sealed class GodotSceneTestHost : IDisposable
             KillProcess(_process);
         }
         if (teardownError is not null) throw teardownError;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    public void Run(Action<GodotSceneTestHost> body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        Exception? primary = null;
+        try { body(this); }
+        catch (Exception error) { primary = error; }
+        try { Dispose(); }
+        catch (Exception teardown)
+        {
+            if (primary is null) throw;
+            primary.Data["GuaTeardownFailure"] = teardown;
+        }
+        if (primary is not null) ExceptionDispatchInfo.Capture(primary).Throw();
     }
 
     private void ThrowIfDisposed()
@@ -323,6 +363,13 @@ public sealed class GodotSceneTestHost : IDisposable
         EnvironmentVariables = source.EnvironmentVariables,
         StartupReset = source.StartupReset,
         TeardownReset = source.TeardownReset,
+        StartupResetPolicy = source.StartupResetPolicy,
+        TeardownResetPolicy = source.TeardownResetPolicy,
+        CaptureDiagnosticsBeforeTeardown = source.CaptureDiagnosticsBeforeTeardown,
+        CleanupAfterLeakReport = source.CleanupAfterLeakReport,
+        CaptureScreenshotBeforeTeardown = source.CaptureScreenshotBeforeTeardown,
+        DiagnosticsTestName = source.DiagnosticsTestName,
+        DiagnosticsOutputDirectory = source.DiagnosticsOutputDirectory,
     };
 
     private static string ResolveGodotExecutable(string? configuredPath)

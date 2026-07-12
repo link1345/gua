@@ -1,10 +1,18 @@
 namespace Gua.Testing.Godot;
 
 using Gua.Core;
+using Gua.Testing;
 
 public sealed class GodotSceneTestHostOptions
 {
     public static GodotSceneTestHostOptions Default { get; } = new();
+
+    public static GodotSceneTestHostOptions StrictIsolation { get; } = new()
+    {
+        StartupResetPolicy = GuaResetPolicy.Strict,
+        TeardownResetPolicy = GuaResetPolicy.Strict,
+        CaptureDiagnosticsBeforeTeardown = true,
+    };
 
     public string? GodotExecutablePath { get; init; }
 
@@ -31,4 +39,18 @@ public sealed class GodotSceneTestHostOptions
     public GuaResetOptions? StartupReset { get; init; }
 
     public GuaResetOptions? TeardownReset { get; init; }
+
+    public GuaResetPolicy StartupResetPolicy { get; init; } = GuaResetPolicy.Disabled;
+
+    public GuaResetPolicy TeardownResetPolicy { get; init; } = GuaResetPolicy.Disabled;
+
+    public bool CaptureDiagnosticsBeforeTeardown { get; init; }
+
+    public bool CleanupAfterLeakReport { get; init; }
+
+    public bool CaptureScreenshotBeforeTeardown { get; init; }
+
+    public string DiagnosticsTestName { get; init; } = "godot-scene-teardown";
+
+    public string DiagnosticsOutputDirectory { get; init; } = Path.Combine("artifacts", "gua");
 }

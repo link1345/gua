@@ -72,6 +72,14 @@ epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
 WebSocket connection.
 
+High-level testing clients may compose status, reset, diagnostics, and screenshot
+APIs into independent startup/teardown policies. Teardown capture runs before
+the context, bridge, or engine process is destroyed; optional non-strict cleanup
+runs only after leak diagnostics were attempted. Test-body failures remain
+primary, with teardown/capture failures reported as secondary information. Leak
+reports may include request ID, action or event type, node ID, counts, and session
+epoch, but never action payload values. Clean sessions do not create artifacts.
+
 ## Failure diagnostics and artifact version 1
 
 `diagnostics.schema.json` is the source of truth for a best-effort failure
