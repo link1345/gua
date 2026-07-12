@@ -1,0 +1,138 @@
+name: Gua Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      major:
+        description: New major version (major upgrades only; leave empty for an automatic minor release)
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/gua-release.yml
+      - .github/scripts/next-release-version.ps1
+      - bun.lock
+      - package.json
+      - tsconfig.base.json
+      - CMakeLists.txt
+      - CMakePresets.json
+      - packages/inspector/**
+      - packages/bridge-ws/**
+      - native/gua-core/**
+      - native/gua-runtime/**
+      - native/gua-imgui/**
+      - native/gua-godot/**
+      - native/gua-ws-bridge/**
+      - examples/cpp-imgui/**
+      - examples/godot-gdscript/addons/gua/**
+      - protocol/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gua-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build and publish Gua release assets
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_MAJOR: ${{ inputs.major }}
+        run: .github/scripts/next-release-version.ps1 -TagPrefix gua -LegacyTagPrefixes inspector,godot-plugin,mcp,nuget -RequestedMajor $env:REQUESTED_MAJOR
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web inspector
+        run: bun run --filter @gua/inspector build
+
+      - name: Build Tauri inspector
+        run: bun run --filter @gua/inspector tauri:build
+
+      - name: Configure native build
+        run: cmake --preset windows-msvc-debug "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_GODOT_PLUGIN_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Verify injected release metadata
+        shell: pwsh
+        run: |
+          $cache = Get-Content build/windows-msvc-debug/CMakeCache.txt -Raw
+          if ($cache -notmatch 'GUA_VERSION:STRING=${{ steps.version.outputs.version }}' -or
+              $cache -notmatch 'GUA_GODOT_PLUGIN_VERSION:STRING=${{ steps.version.outputs.version }}' -or
+              $cache -notmatch 'GUA_BUILD_ID:STRING=${{ github.sha }}') {
+            throw 'Configured Gua version/build ID does not match the release tag and commit.'
+          }
+
+      - name: Build Godot GDExtension
+        run: cmake --build --preset windows-msvc-debug --target gua-godot
+
+      - name: Package release assets
+        id: package
+        shell: pwsh
+        run: |
+          $assets = Join-Path $env:RUNNER_TEMP "gua-release-assets"
+          $godotRoot = Join-Path $env:RUNNER_TEMP "gua-godot-plugin"
+          $godotTarget = Join-Path $godotRoot "addons/gua"
+          $imguiRoot = Join-Path $env:RUNNER_TEMP "gua-imgui-plugin"
+          $version = '${{ steps.version.outputs.version }}'
+
+          Remove-Item -Recurse -Force $assets, $godotRoot, $imguiRoot -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $assets, $godotTarget, (Join-Path $godotTarget "bin"), $imguiRoot | Out-Null
+
+          Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension.uid" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/gua_auto_adapter.gd" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.cfg" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/bin/*.dll" (Join-Path $godotTarget "bin")
+
+          $imguiNativeRoot = Join-Path $imguiRoot "native"
+          New-Item -ItemType Directory -Force $imguiNativeRoot | Out-Null
+          Copy-Item "native/gua-imgui" $imguiNativeRoot -Recurse
+          New-Item -ItemType Directory -Force (Join-Path $imguiNativeRoot "gua-core") | Out-Null
+          Copy-Item "native/gua-core/include" (Join-Path $imguiNativeRoot "gua-core") -Recurse
+          Copy-Item "LICENSE" $imguiRoot
+
+          Compress-Archive -Path (Join-Path $godotRoot "addons") -DestinationPath (Join-Path $assets "gua-godot-plugin-windows-debug-v$version.zip") -CompressionLevel Optimal
+          Compress-Archive -Path (Join-Path $imguiRoot "*") -DestinationPath (Join-Path $assets "gua-imgui-plugin-v$version.zip") -CompressionLevel Optimal
+
+          Copy-Item "packages/inspector/src-tauri/target/release/bundle" (Join-Path $assets "inspector") -Recurse
+          "assets=$assets" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-release-v${{ steps.version.outputs.version }}
+          path: ${{ steps.package.outputs.assets }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Gua v${{ steps.version.outputs.version }}
+          body: |
+            Automated Gua release build from `${{ github.sha }}`.
+
+            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, and the ImGui adapter plugin headers.
+          files: ${{ steps.package.outputs.assets }}/**/*
+          fail_on_unmatched_files: true

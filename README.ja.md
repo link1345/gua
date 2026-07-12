@@ -29,7 +29,7 @@
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を
   AIエージェントへ公開する薄いMCPサーバーです。
-- **Gua Inspector:** [![Inspector Release](https://img.shields.io/github/actions/workflow/status/link1345/gua/inspector-release.yml?branch=main&label=Inspector%20Release)](https://github.com/link1345/gua/actions/workflows/inspector-release.yml)<br>
+- **Gua Inspector:** [![Gua Release](https://img.shields.io/github/actions/workflow/status/link1345/gua/gua-release.yml?branch=main&label=Gua%20Release)](https://github.com/link1345/gua/actions/workflows/gua-release.yml)<br>
   Semantic UI Tree、ノード状態、スクリーンショット、ログを確認し、ランタイムへ
   コマンドを送信できるブラウザー・WindowsデスクトップUIです。
 
@@ -224,14 +224,9 @@ var ui := GuaAutoAdapterScript.new()
 ## リリース自動化
 
 関連するプロトコル利用コンポーネントが`main`で変更されると、GitHub Actionsが
-成果物を公開します。
-
-- InspectorはWindowsでTauriバンドルをビルドし、`inspector-<short-sha>`タグの
-  GitHub Releaseへ添付します。
-- Godot GDScriptアドオンは`gua-godot`をビルドし、`godot-plugin-<short-sha>`
-  タグのGitHub Releaseへ`addons/gua`のzipを添付します。
-- MCPは`gui-mcp`をビルドし、npmへ公開します。
-- .NETパッケージはNuGetへ公開します。
+成果物を公開します。Inspector・Godotプラグイン・ImGuiプラグインはまとめて
+ビルドされ、同じバージョンの`gua-v*` GitHub Releaseへ添付されます。MCPと
+.NETパッケージは、従来どおり独立したnpm・NuGet公開ワークフローを使用します。
 
 ## リポジトリ構成
 
