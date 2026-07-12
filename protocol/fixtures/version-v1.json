@@ -5,5 +5,5 @@
   "godotPluginVersion": null,
   "abiVersion": 1,
   "buildId": "development",
-  "capabilities": ["semantic_ui_tree_v2", "semantic_actions_v2", "context_reset_v1", "diagnostics_v1", "version_v1"]
+  "capabilities": ["semantic_ui_tree_v2", "semantic_actions_v2", "context_reset_v1", "diagnostics_v1", "version_v1", "capture_screenshot_v1"]
 }

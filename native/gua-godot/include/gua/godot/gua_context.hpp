@@ -31,6 +31,8 @@ public:
     String get_version_json() const;
     void set_screenshot(const String& data_uri, int width, int height);
     String get_screenshot_json() const;
+    Dictionary consume_screenshot_request();
+    bool complete_screenshot_request(const Dictionary& result);
     bool enqueue_click(const String& node_id);
     bool consume_click_request(const String& node_id);
     bool emit_click(const String& node_id);

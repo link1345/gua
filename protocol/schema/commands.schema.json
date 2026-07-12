@@ -11,6 +11,7 @@
     { "$ref": "#/$defs/selectAction" },
     { "$ref": "#/$defs/scrollAction" },
     { "$ref": "#/$defs/resetContext" },
+    { "$ref": "#/$defs/captureScreenshot" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -105,6 +106,16 @@
         "expectedSessionEpoch": { "type": "integer", "minimum": 1 },
         "flags": { "type": "integer", "minimum": 0, "maximum": 63, "default": 15 },
         "strict": { "type": "boolean", "default": false }
+      }
+    },
+    "captureScreenshot": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "capture_screenshot" },
+        "afterFrameSequence": { "type": ["integer", "null"], "minimum": 0 },
+        "timeoutMs": { "type": "integer", "minimum": 1 }
       }
     },
     "textInput": {

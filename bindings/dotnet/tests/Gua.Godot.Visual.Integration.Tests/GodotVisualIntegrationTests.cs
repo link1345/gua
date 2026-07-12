@@ -180,6 +180,49 @@ public sealed class GodotVisualIntegrationTests
         });
     }
 
+    [Test]
+    public async Task OnDemandCaptureReturnsANewerCorrelatedFrameAndCoalescesConcurrentRequests()
+    {
+        using var host = StartGodotAutoPort();
+        var before = host.GetContextStatus();
+        var captures = await Task.WhenAll(
+            host.CaptureScreenshotAsync(TimeSpan.FromSeconds(15)),
+            host.CaptureScreenshotAsync(TimeSpan.FromSeconds(15)));
+        Assert.Multiple(() =>
+        {
+            Assert.That(captures[0].RequestId, Is.Not.EqualTo(captures[1].RequestId));
+            Assert.That(captures, Has.All.Property(nameof(GuaScreenshot.SessionEpoch)).EqualTo(before.SessionEpoch));
+            Assert.That(captures, Has.All.Property(nameof(GuaScreenshot.FrameSequence)).GreaterThan(before.FrameSequence));
+            Assert.That(captures[0].DataUri, Is.EqualTo(captures[1].DataUri));
+            Assert.That(captures, Has.All.Property(nameof(GuaScreenshot.Width)).GreaterThan(0));
+            Assert.That(captures, Has.All.Property(nameof(GuaScreenshot.Height)).GreaterThan(0));
+        });
+    }
+
+    [Test]
+    public async Task OnDemandCaptureDistinguishesHeadlessAndCancellation()
+    {
+        using var headless = GodotSceneTestHost.Load("res://Main.tscn", new GodotSceneTestHostOptions
+        {
+            GodotExecutablePath = Environment.GetEnvironmentVariable("GODOT_EXECUTABLE"),
+            ProjectPath = Path.Combine(FindRepositoryRoot(), "examples", "godot-gdscript"),
+            UseAvailableBridgePort = true,
+            Headless = true,
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            RequestTimeout = TimeSpan.FromSeconds(10),
+            SceneTimeout = TimeSpan.FromSeconds(15),
+        });
+        var unavailable = Assert.ThrowsAsync<GuaScreenshotException>(() =>
+            headless.CaptureScreenshotAsync(TimeSpan.FromSeconds(5)));
+        Assert.That(unavailable!.Error, Is.EqualTo(GuaScreenshotError.Headless));
+
+        using var rendered = StartGodotAutoPort();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Assert.ThrowsAsync<OperationCanceledException>(() =>
+            rendered.CaptureScreenshotAsync(TimeSpan.FromSeconds(5), cancellation.Token));
+    }
+
     private static async Task<IReadOnlyList<GuaActionEvent>> WaitForActionEventsAsync(
         IGuaContext context, int count, TimeSpan timeout)
     {

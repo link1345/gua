@@ -40,6 +40,8 @@ struct Command {
     int scroll_unit = 0;
     unsigned long long request_id = 0;
     unsigned long long expected_session_epoch = 0;
+    unsigned long long after_frame_sequence = 0;
+    unsigned int timeout_ms = 10000;
     unsigned int reset_flags = 15;
     bool strict = false;
 };
@@ -616,6 +618,8 @@ Command parse_command(std::string_view json)
     command.scroll_unit = json_int_field(json, "scrollUnit").value_or(0);
     command.request_id = json_uint64_field(json, "requestId").value_or(0);
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
+    command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
+    command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
     command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(15));
     command.strict = json_bool_field(json, "strict");
     return command;
@@ -915,6 +919,11 @@ private:
             }
             if (command.type == "get_screenshot") {
                 return ok_response(command.id, handlers_.get_screenshot_json());
+            }
+            if (command.type == "capture_screenshot") {
+                if (!handlers_.capture_screenshot) return error_response(command.id, "capture_screenshot is not supported by this bridge");
+                const auto result = handlers_.capture_screenshot(command.after_frame_sequence, command.timeout_ms);
+                return result.ok ? ok_response(command.id, result.json) : error_response(command.id, result.error);
             }
             if (command.type == "get_diagnostics") {
                 return handlers_.get_diagnostics_json

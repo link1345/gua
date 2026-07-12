@@ -8,6 +8,21 @@ extern "C" {
 
 typedef struct gua_runtime_t gua_runtime_t;
 
+enum {
+    GUA_SCREENSHOT_AVAILABLE = 1,
+    GUA_SCREENSHOT_UNAVAILABLE_HEADLESS = -1,
+    GUA_SCREENSHOT_UNAVAILABLE_RENDERING_DISABLED = -2,
+    GUA_SCREENSHOT_UNAVAILABLE_UNSUPPORTED = -3,
+    GUA_SCREENSHOT_UNAVAILABLE_STALE_SESSION = -4
+};
+
+typedef struct gua_screenshot_request_t {
+    uint32_t struct_size;
+    uint64_t request_id;
+    uint64_t session_epoch;
+    uint64_t after_frame_sequence;
+} gua_screenshot_request_t;
+
 gua_runtime_t* gua_runtime_create(void);
 void gua_runtime_destroy(gua_runtime_t* runtime);
 
@@ -35,6 +50,11 @@ void gua_runtime_set_screenshot(gua_runtime_t* runtime, const char* data_uri, in
 const char* gua_runtime_get_screenshot_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_runtime_copy_screenshot_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_enqueue_screenshot_request(gua_runtime_t* runtime, uint64_t after_frame_sequence, uint64_t* out_request_id);
+int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gua_screenshot_request_t* out_request);
+int gua_runtime_complete_screenshot_request(gua_runtime_t* runtime, uint64_t request_id, int result, const char* data_uri, int width, int height);
+int gua_runtime_poll_screenshot_result_json(gua_runtime_t* runtime, uint64_t request_id, char* out_json, int out_json_size);
+int gua_runtime_cancel_screenshot_request(gua_runtime_t* runtime, uint64_t request_id);
 int gua_runtime_set_diagnostics_history_limit(gua_runtime_t* runtime, uint32_t history_limit);
 int gua_runtime_set_diagnostics_environment_json(gua_runtime_t* runtime, const char* environment_json);
 const char* gua_runtime_get_diagnostics_json(gua_runtime_t* runtime);

@@ -16,6 +16,18 @@
     "height": {
       "type": "integer",
       "minimum": 0
+    },
+    "requestId": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sessionEpoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "frameSequence": {
+      "type": "integer",
+      "minimum": 0
     }
   }
 }

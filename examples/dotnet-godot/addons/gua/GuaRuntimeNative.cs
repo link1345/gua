@@ -14,6 +14,15 @@ internal static class GuaRuntimeNative
         public fixed byte NodeId[NodeIdBufferSize];
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ScreenshotRequest
+    {
+        public uint StructSize;
+        public ulong RequestId;
+        public ulong SessionEpoch;
+        public ulong AfterFrameSequence;
+    }
+
     static GuaRuntimeNative()
     {
         NativeLibrary.SetDllImportResolver(typeof(GuaRuntimeNative).Assembly, ResolveRuntimeLibrary);
@@ -122,6 +131,13 @@ internal static class GuaRuntimeNative
 
     [DllImport("gua_runtime")]
     internal static unsafe extern int gua_runtime_poll_event(nint runtime, NativeEvent* outEvent);
+
+    [DllImport("gua_runtime")]
+    internal static extern int gua_runtime_consume_screenshot_request(nint runtime, ref ScreenshotRequest request);
+
+    [DllImport("gua_runtime")]
+    internal static extern int gua_runtime_complete_screenshot_request(
+        nint runtime, ulong requestId, int result, [MarshalAs(UnmanagedType.LPUTF8Str)] string dataUri, int width, int height);
 
     [DllImport("gua_runtime")]
     internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);

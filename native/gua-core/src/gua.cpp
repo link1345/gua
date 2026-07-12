@@ -31,7 +31,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\"]}";
 }
 
 struct Node {
