@@ -1,0 +1,8 @@
+{
+  "requestId": 42,
+  "sessionEpoch": 3,
+  "frameSequence": 18,
+  "dataUri": "data:image/png;base64,iVBORw0KGgo=",
+  "width": 1280,
+  "height": 720
+}

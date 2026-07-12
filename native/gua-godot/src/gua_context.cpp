@@ -109,6 +109,30 @@ String GuaContext::get_screenshot_json() const
     return copy_runtime_json(runtime_, gua_runtime_copy_screenshot_json);
 }
 
+Dictionary GuaContext::consume_screenshot_request()
+{
+    gua_screenshot_request_t request { sizeof(gua_screenshot_request_t) };
+    if (gua_runtime_consume_screenshot_request(runtime_, &request) == 0) return Dictionary();
+    Dictionary result;
+    result["request_id"] = request.request_id;
+    result["session_epoch"] = request.session_epoch;
+    result["after_frame_sequence"] = request.after_frame_sequence;
+    return result;
+}
+
+bool GuaContext::complete_screenshot_request(const Dictionary& source)
+{
+    const String data_uri = source.get("data_uri", String());
+    const CharString utf8 = data_uri.utf8();
+    int result = GUA_SCREENSHOT_AVAILABLE;
+    const String unavailable = source.get("unavailable", String());
+    if (unavailable == "headless") result = GUA_SCREENSHOT_UNAVAILABLE_HEADLESS;
+    else if (unavailable == "rendering_disabled") result = GUA_SCREENSHOT_UNAVAILABLE_RENDERING_DISABLED;
+    else if (unavailable == "unsupported") result = GUA_SCREENSHOT_UNAVAILABLE_UNSUPPORTED;
+    return gua_runtime_complete_screenshot_request(
+        runtime_, source.get("request_id", 0), result, utf8.get_data(), source.get("width", 0), source.get("height", 0)) != 0;
+}
+
 void GuaContext::register_node(
     const String& id,
     const String& role,
@@ -398,6 +422,8 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
     ClassDB::bind_method(D_METHOD("get_screenshot_json"), &GuaContext::get_screenshot_json);
+    ClassDB::bind_method(D_METHOD("consume_screenshot_request"), &GuaContext::consume_screenshot_request);
+    ClassDB::bind_method(D_METHOD("complete_screenshot_request", "result"), &GuaContext::complete_screenshot_request);
     ClassDB::bind_method(D_METHOD("enqueue_click", "node_id"), &GuaContext::enqueue_click);
     ClassDB::bind_method(D_METHOD("consume_click_request", "node_id"), &GuaContext::consume_click_request);
     ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);

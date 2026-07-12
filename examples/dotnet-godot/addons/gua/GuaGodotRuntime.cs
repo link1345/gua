@@ -10,6 +10,7 @@ public sealed class GuaGodotRuntime : IDisposable
     private readonly Dictionary<string, BaseButton> _buttonsById = new(StringComparer.Ordinal);
     private readonly HashSet<ulong> _connectedButtons = new();
     private readonly HashSet<string> _suppressedButtonSignals = new(StringComparer.Ordinal);
+    private bool _screenshotCaptureRunning;
 
     public GuaGodotRuntime()
     {
@@ -109,6 +110,7 @@ public sealed class GuaGodotRuntime : IDisposable
         CollectControl(_attachedRoot, _attachedRoot);
         EndFrame();
         DispatchClickRequests();
+        ScheduleScreenshotCapture();
     }
 
     public bool EnqueueClick(string id)
@@ -246,6 +248,50 @@ public sealed class GuaGodotRuntime : IDisposable
                 _suppressedButtonSignals.Add(id);
                 button.EmitSignal(BaseButton.SignalName.Pressed);
             }
+        }
+    }
+
+    private void ScheduleScreenshotCapture()
+    {
+        if (_screenshotCaptureRunning || _attachedRoot is null) return;
+        var request = new GuaRuntimeNative.ScreenshotRequest
+        {
+            StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<GuaRuntimeNative.ScreenshotRequest>()
+        };
+        if (GuaRuntimeNative.gua_runtime_consume_screenshot_request(_runtime, ref request) == 0) return;
+        if (DisplayServer.GetName() == "headless")
+        {
+            GuaRuntimeNative.gua_runtime_complete_screenshot_request(_runtime, request.RequestId, -1, string.Empty, 0, 0);
+            return;
+        }
+        _screenshotCaptureRunning = true;
+        CaptureScreenshotAfterDrawAsync(request.RequestId);
+    }
+
+    private async void CaptureScreenshotAfterDrawAsync(ulong requestId)
+    {
+        try
+        {
+            if (DisplayServer.GetName() == "headless")
+            {
+                GuaRuntimeNative.gua_runtime_complete_screenshot_request(_runtime, requestId, -1, string.Empty, 0, 0);
+                return;
+            }
+            await _attachedRoot!.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            using var image = _attachedRoot.GetViewport().GetTexture().GetImage();
+            if (image is null || image.IsEmpty())
+            {
+                GuaRuntimeNative.gua_runtime_complete_screenshot_request(_runtime, requestId, -2, string.Empty, 0, 0);
+                return;
+            }
+            var png = image.SavePngToBuffer();
+            var uri = "data:image/png;base64," + Convert.ToBase64String(png);
+            GuaRuntimeNative.gua_runtime_complete_screenshot_request(_runtime, requestId, 1, uri, image.GetWidth(), image.GetHeight());
+        }
+        finally
+        {
+            _screenshotCaptureRunning = false;
+            ScheduleScreenshotCapture();
         }
     }
 

@@ -6,7 +6,9 @@ This sample uses the Gua Godot GDExtension from GDScript.
 
 `GuaAutoAdapter.capture_viewport_screenshot()` reads the current viewport after a
 rendered frame, encodes it as PNG, and publishes it through the existing Gua
-screenshot payload. It is never called automatically. The headless smoke covers
+screenshot payload. It is never called automatically by polling. An explicit
+`capture_screenshot` bridge request schedules one readback after the next drawn
+frame; concurrent pending requests share that readback. The headless smoke covers
 button, text input, checkbox, and select semantics plus PNG capture; managed
 `Gua.Testing.Visual` tests own baseline compare and recording/replay policy.
 Because Godot's dummy headless renderer has no viewport texture, the smoke injects

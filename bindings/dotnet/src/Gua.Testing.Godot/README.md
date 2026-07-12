@@ -98,3 +98,9 @@ attaching, retaining, and publishing PNG files is the caller's responsibility.
 `SaveScreenshot` creates a collision-resistant absolute path and distinguishes
 unpublished, malformed data-URI, and invalid-PNG payloads. A headless renderer
 without viewport capture is reported as unpublished rather than an empty file.
+`GodotSceneTestHost.CaptureScreenshotAsync` requests a new PNG from the next
+drawable frame and returns its request ID, session epoch, and frame sequence.
+Headless, rendering-disabled, unsupported, timeout, and cancellation outcomes are
+distinct. Requests arriving together may share one viewport readback. The older
+`GetScreenshot`/`WaitForScreenshotAsync` APIs keep reading the latest published
+image. Rendered secrets are not automatically redacted.

@@ -7,6 +7,11 @@ public enum GuaScreenshotError
     NotPublished,
     InvalidDataUri,
     InvalidPng,
+    Headless,
+    RenderingDisabled,
+    Unsupported,
+    Timeout,
+    StaleSession,
 }
 
 public sealed class GuaScreenshotException : Exception
@@ -15,7 +20,7 @@ public sealed class GuaScreenshotException : Exception
     public GuaScreenshotError Error { get; }
 }
 
-public sealed record GuaScreenshot(string DataUri, int Width, int Height)
+public sealed record GuaScreenshot(string DataUri, int Width, int Height, ulong RequestId = 0, ulong SessionEpoch = 0, ulong FrameSequence = 0)
 {
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -26,7 +31,10 @@ public sealed record GuaScreenshot(string DataUri, int Width, int Height)
         return new GuaScreenshot(
             root.GetProperty("dataUri").GetString() ?? string.Empty,
             root.GetProperty("width").GetInt32(),
-            root.GetProperty("height").GetInt32());
+            root.GetProperty("height").GetInt32(),
+            root.TryGetProperty("requestId", out var requestId) ? requestId.GetUInt64() : 0,
+            root.TryGetProperty("sessionEpoch", out var epoch) ? epoch.GetUInt64() : 0,
+            root.TryGetProperty("frameSequence", out var frame) ? frame.GetUInt64() : 0);
     }
 
     public byte[] DecodePng()
