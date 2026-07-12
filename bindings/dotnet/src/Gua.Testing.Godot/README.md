@@ -43,6 +43,27 @@ using var host = GodotSceneTestHost.LoadRendered(scene, new()
 });
 ```
 
+New tests can use lifecycle policies while legacy `StartupReset`,
+`TeardownReset`, and `ResetContext` remain available:
+
+```csharp
+using var host = GodotSceneTestHost.LoadRendered("res://Main.tscn", new GodotSceneTestHostOptions
+{
+    StartupResetPolicy = GuaResetPolicy.Strict,
+    TeardownResetPolicy = GuaResetPolicy.Strict,
+    CaptureDiagnosticsBeforeTeardown = true,
+    CleanupAfterLeakReport = true,
+    CaptureScreenshotBeforeTeardown = true,
+    DiagnosticsTestName = TestContext.CurrentContext.Test.Name,
+});
+```
+
+Teardown diagnostics, optional on-demand screenshot, process metadata, stdout,
+and stderr are captured while the process and bridge are alive. Explicit
+non-strict cleanup may run only afterward. `host.Run(...)` preserves a test-body
+exception as primary and attaches teardown failure as secondary data. Clean
+teardown creates no artifact, and repeated disposal is safe.
+
 Repository-specific factories should retain only game concerns such as locating
 API/database fixtures, choosing repository timeouts, and mapping game-relative
 scene names. Executable discovery, `project.godot` discovery, bridge ports,

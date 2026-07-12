@@ -192,6 +192,109 @@ public sealed class TitleScreenTests
     }
 
     [Test]
+    public void LifecycleSessionPreservesPrimaryFailureReportsLeakAndCleansAfterDiagnostics()
+    {
+        using var ui = new GuaContext();
+        ui.BeginFrame("form");
+        ui.RegisterNode(new GuaNodeDescriptor("password", "textbox", "Password", new GuaBounds(0, 0, 100, 20)));
+        ui.RegisterNode(new GuaNodeDescriptor("submit", "button", "Submit", new GuaBounds(0, 30, 100, 20)));
+        ui.EndFrame();
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-lifecycle", Guid.NewGuid().ToString("N"));
+        var primary = new InvalidOperationException("primary-test-failure");
+        try
+        {
+            var diagnostics = new GuaDiagnosticsSession(ui, new GuaDiagnosticOptions
+            {
+                TestName = "strict-teardown",
+                OutputDirectory = output,
+            });
+            using var session = new GuaTestSession(ui, new GuaTestSessionOptions
+            {
+                TeardownReset = GuaResetPolicy.Strict,
+                CaptureDiagnosticsBeforeTeardown = true,
+                CleanupAfterLeakReport = true,
+                DiagnosticsSession = diagnostics,
+            });
+
+            var thrown = Assert.Throws<InvalidOperationException>(() => session.Run(() =>
+            {
+                Assert.That(GuaAssertions.GetById(ui, "password").SetValue("secret-lifecycle-marker", sensitive: true), Is.GreaterThan(0));
+                Assert.That(ui.EnqueueAction(new GuaActionRequest(GuaActionType.Click, "submit"), out var clickId), Is.EqualTo(GuaActionError.None));
+                Assert.That(ui.TryConsumeAction(GuaActionType.Click, "submit", out _), Is.True);
+                Assert.That(ui.EmitActionResult(new GuaActionEvent(clickId, GuaActionType.Click, true, GuaActionError.None, "submit", "", false)), Is.True);
+                var leak = session.InspectLeaks();
+                Assert.Multiple(() =>
+                {
+                    Assert.That(leak.SessionEpoch, Is.EqualTo(1));
+                    Assert.That(leak.PendingRequestCount, Is.EqualTo(1));
+                    Assert.That(leak.UnconsumedEventCount, Is.EqualTo(1));
+                    Assert.That(leak.Items, Has.Some.Matches<GuaLeakItem>(item => item.RequestId is not null && item.Action == "set_value" && item.NodeId == "password"));
+                    Assert.That(leak.Items, Has.Some.Matches<GuaLeakItem>(item => item.RequestId == clickId && item.Kind == "event" && item.Action == "click" && item.NodeId == "submit"));
+                });
+                throw primary;
+            }));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(thrown, Is.SameAs(primary));
+                Assert.That(thrown!.Data["GuaTeardownFailure"], Is.TypeOf<GuaAssertionException>());
+                Assert.That(thrown.Data["GuaDiagnosticsResult"], Is.TypeOf<GuaDiagnosticsResult>());
+                Assert.That(session.Inspect().IsClean, Is.True);
+                Assert.That(string.Join("\n", Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories)
+                    .Where(path => Path.GetExtension(path) != ".png").Select(File.ReadAllText)),
+                    Does.Not.Contain("secret-lifecycle-marker"));
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
+    public void LifecycleSessionDoesNotCaptureArtifactsOnCleanSuccessAndDisposeIsIdempotent()
+    {
+        using var ui = new GuaContext();
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-lifecycle", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var session = new GuaTestSession(ui, new GuaTestSessionOptions
+            {
+                TeardownReset = GuaResetPolicy.Strict,
+                CaptureDiagnosticsBeforeTeardown = true,
+                DiagnosticsSession = new GuaDiagnosticsSession(ui, new GuaDiagnosticOptions
+                {
+                    TestName = "clean-success",
+                    OutputDirectory = output,
+                }),
+            });
+            session.Run(() => { });
+            Assert.DoesNotThrow(session.Dispose);
+            Assert.DoesNotThrow(() => session.DisposeAsync().GetAwaiter().GetResult());
+            Assert.That(Directory.Exists(output), Is.False);
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
+    public void LifecycleStartupAndTeardownPoliciesAdvanceTheExpectedEpoch()
+    {
+        using var ui = new GuaContext();
+        var session = new GuaTestSession(ui, new GuaTestSessionOptions
+        {
+            StartupReset = GuaResetPolicy.NonStrict,
+            TeardownReset = GuaResetPolicy.NonStrict,
+        });
+        Assert.That(session.Inspect().SessionEpoch, Is.EqualTo(2));
+        session.Run(() => Assert.That(session.Inspect().SessionEpoch, Is.EqualTo(2)));
+        Assert.That(ui.GetContextStatus().SessionEpoch, Is.EqualTo(3));
+        Assert.DoesNotThrow(session.Dispose);
+    }
+
+    [Test]
     public void NonStrictResetStartsNewEpochAndPreservesOptionalStateByDefault()
     {
         using var ui = new GuaContext();
