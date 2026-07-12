@@ -7,4 +7,5 @@ public sealed class GuaAssertionOptions
     public Action<string> Fail { get; init; } = message => throw new GuaAssertionException(message);
 
     public GuaDiagnosticOptions? Diagnostics { get; init; }
+    public GuaDiagnosticsSession? DiagnosticsSession { get; init; }
 }

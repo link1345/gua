@@ -103,6 +103,16 @@ public static class GuaActionCompletion
         string? nodeId, GuaActionError error, string message, Exception? inner = null)
     {
         var suffix = GuaAssertions.DescribeSnapshot(context);
-        return new GuaActionException(kind, requestId, action, nodeId, error, $"{message} {suffix}", inner);
+        var failure = new GuaActionException(kind, requestId, action, nodeId, error, $"{message} {suffix}", inner);
+        var session = GuaAssertions.Options.DiagnosticsSession;
+        if (session is not null)
+        {
+            var result = session.Capture(failure);
+            if (result.ArtifactPath is not null)
+                failure.Data["GuaDiagnosticsPath"] = result.ArtifactPath;
+            if (result.CaptureErrors.Count > 0)
+                failure.Data["GuaDiagnosticsCaptureErrors"] = result.CaptureErrors;
+        }
+        return failure;
     }
 }

@@ -129,6 +129,21 @@ using var scope = GuaAssertionScope.Use(new GuaAssertionOptions
 });
 ```
 
+For one framework-independent failure path across assertions and completed
+actions, create a `GuaDiagnosticsSession` and assign it to
+`GuaAssertionOptions.DiagnosticsSession`. `Capture` preserves the primary
+exception and returns absolute artifact paths, media types, and secondary
+capture errors. Directories use the sanitized test name, timestamp, and a
+unique ID so parallel tests do not collide. Caller metadata, runtime version,
+and optional text/screenshot providers are evaluated only after a failure;
+successful tests produce no artifact unless the caller explicitly captures.
+
+`GuaDiagnosticOptions.AttachmentSink` is framework-neutral. NUnit consumers
+can pass `file => TestContext.AddTestAttachment(file.Path, file.MediaType)`;
+other frameworks can use the same typed callback without adding a framework
+dependency to `Gua.Testing`. Screenshot files can contain rendered secrets and
+remain the consumer repository's storage and upload responsibility.
+
 The directory contains the final UI tree, bounded operation/event history,
 pending requests, logs, environment metadata, and an optional PNG. A wait also
 writes its initial tree and a deterministic node-id diff. Sensitive action

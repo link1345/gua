@@ -329,6 +329,76 @@ public sealed class TitleScreenTests
     }
 
     [Test]
+    public void DiagnosticsSessionUnifiesAssertionAndActionFailuresWithTypedAttachments()
+    {
+        using var ui = new GuaContext();
+        ui.ConfigureDiagnostics(4, "{\"bridge\":\"local\"}");
+        ui.BeginFrame("test");
+        ui.RegisterNode(new GuaNodeDescriptor("disabled", "button", "Disabled", new GuaBounds(0, 0, 1, 1), Enabled: false));
+        ui.RegisterNode(new GuaNodeDescriptor("secret", "textbox", "Secret", new GuaBounds(0, 1, 1, 1), Value: string.Empty));
+        ui.EndFrame();
+        const string sensitiveValue = "session-sensitive-marker";
+        var sensitiveRequestId = GuaAssertions.GetById(ui, "secret").SetValue(sensitiveValue, sensitive: true);
+        Assert.That(ui.TryConsumeAction(GuaActionType.SetValue, "secret", out var sensitiveRequest), Is.True);
+        Assert.That(ui.EmitActionResult(new GuaActionEvent(sensitiveRequestId, GuaActionType.SetValue, true,
+            GuaActionError.None, "secret", sensitiveRequest.Value!, true)), Is.True);
+        Assert.That(ui.TryPollActionEvent(sensitiveRequestId, out _), Is.True);
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-session", Guid.NewGuid().ToString("N"));
+        var attached = new List<GuaDiagnosticFile>();
+        try
+        {
+            var session = new GuaDiagnosticsSession(ui, new GuaDiagnosticOptions
+            {
+                TestName = "same-layout",
+                OutputDirectory = output,
+                CallerMetadata = new Dictionary<string, string> { ["suite"] = "nunit" },
+                AttachmentSink = attached.Add,
+                ScreenshotCapture = () => throw new InvalidOperationException("renderer unavailable"),
+            });
+            using var scope = GuaAssertionScope.Use(new GuaAssertionOptions { DiagnosticsSession = session });
+
+            var assertion = Assert.Throws<GuaAssertionException>(() => GuaAssertions.GetById(ui, "disabled").ToBeEnabled());
+            Assert.That(assertion!.Message, Does.Contain("Gua diagnostics:"));
+
+            var action = Assert.Throws<GuaActionException>(() => GuaActionCompletion.EnqueueAndWait(
+                ui, new GuaActionRequest(GuaActionType.Click, NodeId: "missing")));
+            Assert.That(action!.Data["GuaDiagnosticsPath"], Is.Not.Null);
+            Assert.That(action.Data["GuaDiagnosticsCaptureErrors"], Is.Not.Null);
+            Assert.That(attached, Is.Not.Empty);
+            Assert.That(attached.All(file => Path.IsPathFullyQualified(file.Path)), Is.True);
+            Assert.That(attached.Any(file => file.MediaType == "application/json"), Is.True);
+            Assert.That(Directory.EnumerateFiles(output, "version.json", SearchOption.AllDirectories), Is.Not.Empty);
+            Assert.That(Directory.EnumerateFiles(output, "caller-metadata.json", SearchOption.AllDirectories), Is.Not.Empty);
+            Assert.That(string.Join("\n", Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories)
+                .Where(path => Path.GetExtension(path) != ".png").Select(File.ReadAllText)), Does.Not.Contain(sensitiveValue));
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
+    public void DiagnosticsSessionAllocatesParallelSafeDirectories()
+    {
+        using var ui = new GuaContext();
+        ui.ConfigureDiagnostics(1);
+        var output = Path.Combine(TestContext.CurrentContext.WorkDirectory, "gua-session", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = Enumerable.Range(0, 12).AsParallel().Select(_ =>
+                new GuaDiagnosticsSession(ui, new GuaDiagnosticOptions { TestName = "parallel/test", OutputDirectory = output })
+                    .Capture(new InvalidOperationException("failure")).ArtifactPath).ToArray();
+            Assert.That(paths, Has.All.Not.Null);
+            Assert.That(paths.Distinct(StringComparer.Ordinal).Count(), Is.EqualTo(paths.Length));
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task AsyncWaitsObserveStateTextValueAndRemovalWithoutFixedSleeps()
     {
         using var _ = GuaAssertionScope.UseNUnit(Assert.Fail);

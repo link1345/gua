@@ -86,6 +86,17 @@ public static partial class GuaAssertions
 
     internal static void Fail(IGuaContext context, string message, string? initialUiTreeJson = null)
     {
+        var failure = new GuaAssertionException(message);
+        var session = Options.DiagnosticsSession;
+        if (session is not null)
+        {
+            var result = session.Capture(failure, initialUiTreeJson);
+            var sessionSuffix = result.ArtifactPath is null
+                ? result.CaptureErrors.Count == 0 ? string.Empty : $" Gua diagnostics capture error: {result.CaptureErrors[0].Message}"
+                : $" Gua diagnostics: {result.ArtifactPath}";
+            Options.Fail(message + sessionSuffix);
+            throw new GuaAssertionException(message + sessionSuffix, failure);
+        }
         var diagnostics = Options.Diagnostics;
         var suffix = diagnostics is null
             ? string.Empty

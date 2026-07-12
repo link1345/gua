@@ -223,6 +223,29 @@ public sealed class GodotVisualIntegrationTests
             rendered.CaptureScreenshotAsync(TimeSpan.FromSeconds(5), cancellation.Token));
     }
 
+    [Test]
+    public void GodotDiagnosticsSessionCapturesLiveProcessOutputAndOnDemandScreenshot()
+    {
+        using var host = StartGodotAutoPort();
+        var session = host.CreateDiagnosticsSession(
+            TestContext.CurrentContext.Test.Name,
+            Path.Combine(_root, "diagnostics"),
+            captureScreenshot: true,
+            callerMetadata: new Dictionary<string, string> { ["fixture"] = "real-renderer" });
+        var primary = new InvalidOperationException("intentional Godot integration failure");
+        var result = session.Capture(primary);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.PrimaryException, Is.SameAs(primary));
+            Assert.That(result.CaptureErrors, Is.Empty);
+            Assert.That(result.Files, Has.Some.Property(nameof(GuaDiagnosticFile.Path)).EndsWith("godot-stdout.txt"));
+            Assert.That(result.Files, Has.Some.Property(nameof(GuaDiagnosticFile.Path)).EndsWith("godot-stderr.txt"));
+            Assert.That(result.Files, Has.Some.Property(nameof(GuaDiagnosticFile.Path)).EndsWith("godot-process.json"));
+            Assert.That(result.Files, Has.Some.Property(nameof(GuaDiagnosticFile.MediaType)).EqualTo("image/png"));
+        });
+    }
+
     private static async Task<IReadOnlyList<GuaActionEvent>> WaitForActionEventsAsync(
         IGuaContext context, int count, TimeSpan timeout)
     {

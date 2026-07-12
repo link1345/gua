@@ -15,6 +15,11 @@ public void StartClickShowsLoadingText()
 }
 ```
 
+For typed diagnostic attachments, set `GuaDiagnosticOptions.AttachmentSink` to
+`GuaNUnitAttachments.Add`. The sample helper forwards each absolute path and
+media type to `TestContext.AddTestAttachment` without adding NUnit as a
+dependency of the reusable Gua packages.
+
 This project intentionally references `Gua.Testing` as a NuGet package instead
 of a source `ProjectReference`.
 
