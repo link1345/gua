@@ -148,6 +148,12 @@ func _run() -> void:
 	if not tree_json.contains("\"role\":\"combobox\"") or not tree_json.contains("\"value\":\"Hard\""):
 		_fail("Gua smoke did not publish OptionButton value state: %s" % tree_json)
 		return
+	if not tree_json.contains("\"selectedIndex\":1") or not tree_json.contains("\"rangeMin\":0.000000"):
+		_fail("Gua smoke did not publish detailed selected/range state: %s" % tree_json)
+		return
+	if not tree_json.contains("\"scrollY\":0.000000") or not tree_json.contains("\"scrollMaxY\""):
+		_fail("Gua smoke did not publish detailed scroll state: %s" % tree_json)
+		return
 	if not tree_json.contains("servers$item:0") or not tree_json.contains("tabs$tab:1"):
 		_fail("Gua smoke did not publish stable ItemList/TabContainer semantic children: %s" % tree_json)
 		return

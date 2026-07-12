@@ -96,6 +96,14 @@ typedef struct gua_event_v2_t {
     int sensitive;
 } gua_event_v2_t;
 
+typedef struct gua_event_v3_t {
+    uint32_t struct_size;
+    gua_event_v2_t base;
+    uint64_t session_epoch;
+    uint64_t frame_sequence;
+    uint64_t revision;
+} gua_event_v3_t;
+
 enum {
     GUA_RESET_NODES = 1U << 0,
     GUA_RESET_REQUESTS = 1U << 1,
@@ -170,7 +178,15 @@ enum {
     GUA_NODE_KNOWN_HOVERED = 1ULL << 4,
     GUA_NODE_KNOWN_PRESSED = 1ULL << 5,
     GUA_NODE_KNOWN_CHECKED = 1ULL << 6,
-    GUA_NODE_KNOWN_SELECTED = 1ULL << 7
+    GUA_NODE_KNOWN_SELECTED = 1ULL << 7,
+    GUA_NODE_KNOWN_CARET_POSITION = 1ULL << 8,
+    GUA_NODE_KNOWN_SELECTION = 1ULL << 9,
+    GUA_NODE_KNOWN_SCROLL = 1ULL << 10,
+    GUA_NODE_KNOWN_SCROLL_MAX = 1ULL << 11,
+    GUA_NODE_KNOWN_RANGE_VALUE = 1ULL << 12,
+    GUA_NODE_KNOWN_RANGE_MIN = 1ULL << 13,
+    GUA_NODE_KNOWN_RANGE_MAX = 1ULL << 14,
+    GUA_NODE_KNOWN_SELECTED_INDEX = 1ULL << 15
 };
 
 typedef struct gua_node_descriptor_v2_t {
@@ -206,6 +222,24 @@ typedef struct gua_node_state_v2_t {
     char text[256];
     char value[256];
 } gua_node_state_v2_t;
+
+typedef struct gua_node_descriptor_v3_t {
+    uint32_t struct_size;
+    gua_node_descriptor_v2_t base;
+    int64_t caret_position, selection_start, selection_end;
+    double scroll_x, scroll_y, scroll_max_x, scroll_max_y;
+    double range_value, range_min, range_max;
+    int64_t selected_index;
+} gua_node_descriptor_v3_t;
+
+typedef struct gua_node_state_v3_t {
+    uint32_t struct_size;
+    gua_node_state_v2_t base;
+    int64_t caret_position, selection_start, selection_end;
+    double scroll_x, scroll_y, scroll_max_x, scroll_max_y;
+    double range_value, range_min, range_max;
+    int64_t selected_index;
+} gua_node_state_v3_t;
 
 enum {
     GUA_MATCH_EXACT = 0,
@@ -265,6 +299,7 @@ void gua_register_node(
     int enabled
 );
 int gua_register_node_v2(gua_context_t* ctx, const gua_node_descriptor_v2_t* descriptor);
+int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor);
 
 const char* gua_get_ui_tree_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -289,6 +324,7 @@ int gua_copy_version_json(char* out_json, int out_json_size);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
 /* Returns 0 rather than a partial state when a v2 string does not fit its fixed output buffer. */
 int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);
+int gua_get_node_state_v3(gua_context_t* ctx, const char* node_id, gua_node_state_v3_t* out_state);
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);
@@ -303,6 +339,8 @@ int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_
 int gua_emit_action_result(gua_context_t* ctx, const gua_action_result_t* result);
 int gua_poll_event_v2(gua_context_t* ctx, gua_event_v2_t* out_event);
 int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v2_t* out_event);
+int gua_poll_event_v3(gua_context_t* ctx, gua_event_v3_t* out_event);
+int gua_poll_event_v3_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v3_t* out_event);
 int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status);
 int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report);
 

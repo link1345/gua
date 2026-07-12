@@ -12,6 +12,14 @@ public enum GuaNodeKnownState : ulong
     Pressed = 1UL << 5,
     Checked = 1UL << 6,
     Selected = 1UL << 7,
+    CaretPosition = 1UL << 8,
+    Selection = 1UL << 9,
+    Scroll = 1UL << 10,
+    ScrollMax = 1UL << 11,
+    RangeValue = 1UL << 12,
+    RangeMin = 1UL << 13,
+    RangeMax = 1UL << 14,
+    SelectedIndex = 1UL << 15,
 }
 
 public sealed record GuaNodeDescriptor(
@@ -28,7 +36,10 @@ public sealed record GuaNodeDescriptor(
     bool? Hovered = null,
     bool? Pressed = null,
     bool? Checked = null,
-    bool? Selected = null);
+    bool? Selected = null,
+    long? CaretPosition = null, long? SelectionStart = null, long? SelectionEnd = null,
+    double? ScrollX = null, double? ScrollY = null, double? ScrollMaxX = null, double? ScrollMaxY = null,
+    double? RangeValue = null, double? RangeMin = null, double? RangeMax = null, long? SelectedIndex = null);
 
 public sealed record GuaNodeStateV2(
     GuaNodeKnownState KnownState,

@@ -80,8 +80,11 @@ The sample attaches `GuaAutoAdapter` to the root Godot `Control`; the adapter
 collects standard controls into the semantic UI tree and dispatches semantic
 actions through the real controls. The v1 matrix covers focus, `LineEdit` /
 `TextEdit` / slider values, checkbox state, `OptionButton` / `ItemList` /
-`TabContainer` selection, `ScrollContainer`, and key input. Every requested host
-operation emits an observed result carrying the same `requestId`.
+`TabContainer` selection, `ScrollContainer`, and key input. Controls also reflect
+detailed state where Godot exposes it: caret/selection, scroll offset/max, numeric
+range value/min/max, and selected index. Unsupported fields are omitted and observed
+zero is retained. Every requested host operation emits an observed result carrying
+the same `requestId`.
 
 `GuaAutoAdapter.reset_context()` resets the shared runtime context and its
 temporary control/request-dispatch caches as one operation. Strict reset first

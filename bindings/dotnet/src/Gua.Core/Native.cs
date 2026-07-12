@@ -146,6 +146,27 @@ internal static partial class Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct GuaNativeEventV3
+    {
+        public uint StructSize;
+        public GuaNativeEventV2 Base;
+        public ulong SessionEpoch;
+        public ulong FrameSequence;
+        public ulong Revision;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeNodeDescriptorV3
+    {
+        public uint StructSize;
+        public GuaNativeNodeDescriptorV2 Base;
+        public long CaretPosition, SelectionStart, SelectionEnd;
+        public double ScrollX, ScrollY, ScrollMaxX, ScrollMaxY;
+        public double RangeValue, RangeMin, RangeMax;
+        public long SelectedIndex;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct GuaNativeNodeStateV2
     {
         public uint StructSize;
@@ -292,6 +313,9 @@ internal static partial class Native
     internal static partial int gua_register_node_v2(nint context, in GuaNativeNodeDescriptorV2 descriptor);
 
     [LibraryImport("gua")]
+    internal static partial int gua_register_node_v3(nint context, in GuaNativeNodeDescriptorV3 descriptor);
+
+    [LibraryImport("gua")]
     internal static partial nint gua_get_ui_tree_json(nint context);
 
     [LibraryImport("gua")]
@@ -365,6 +389,12 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_poll_event_v2_for_request(nint context, ulong requestId, GuaNativeEventV2* outEvent);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_poll_event_v3(nint context, GuaNativeEventV3* outEvent);
+
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_poll_event_v3_for_request(nint context, ulong requestId, GuaNativeEventV3* outEvent);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static unsafe partial int gua_consume_action_request(nint context, int action, string? nodeId, GuaNativeActionRequest* outRequest);

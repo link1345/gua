@@ -59,6 +59,14 @@ public static partial class GuaAssertions
         WaitForNodeAsync(context, id, node => node?.Checked == expected,
             $"have checked={expected}", timeout, pollInterval, cancellationToken);
 
+    public static Task<GuaNodeExpectation> WaitForStateAsync(
+        IGuaContext context, string id, Func<GuaNodeSnapshot, bool> predicate, string description = "match semantic state",
+        TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return WaitForNodeAsync(context, id, node => node is not null && predicate(node), description, timeout, pollInterval, cancellationToken);
+    }
+
     public static GuaNodeExpectation WaitForVisible(IGuaContext context, string id, TimeSpan? timeout = null, TimeSpan? pollInterval = null) =>
         WaitForVisibleAsync(context, id, timeout, pollInterval).GetAwaiter().GetResult();
 
@@ -207,6 +215,8 @@ public static partial class GuaAssertions
             : [];
         var hasState = node.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object;
         bool? StateBoolean(string name) => hasState && state.TryGetProperty(name, out var value) ? value.GetBoolean() : null;
+        long? StateInt64(string name) => hasState && state.TryGetProperty(name, out var value) ? value.GetInt64() : null;
+        double? StateDouble(string name) => hasState && state.TryGetProperty(name, out var value) ? value.GetDouble() : null;
         string? NodeString(string name) => node.TryGetProperty(name, out var value) ? value.GetString() : null;
         return new GuaNodeSnapshot(
             node.GetProperty("id").GetString() ?? string.Empty,
@@ -217,7 +227,10 @@ public static partial class GuaAssertions
             NodeString("parentId"), NodeString("text"), NodeString("value"), StateBoolean("focused"), StateBoolean("hovered"),
             StateBoolean("pressed"), StateBoolean("checked"), StateBoolean("selected"),
             root.TryGetProperty("schemaVersion", out var schemaVersion) ? schemaVersion.GetInt32() : null,
-            RootUInt64(root, "sessionEpoch"), RootUInt64(root, "frameSequence"), RootUInt64(root, "revision"));
+            RootUInt64(root, "sessionEpoch"), RootUInt64(root, "frameSequence"), RootUInt64(root, "revision"),
+            StateInt64("caretPosition"), StateInt64("selectionStart"), StateInt64("selectionEnd"),
+            StateDouble("scrollX"), StateDouble("scrollY"), StateDouble("scrollMaxX"), StateDouble("scrollMaxY"),
+            StateDouble("rangeValue"), StateDouble("rangeMin"), StateDouble("rangeMax"), StateInt64("selectedIndex"));
     }
 
     private static ulong? RootUInt64(JsonElement root, string name) => root.TryGetProperty(name, out var value) ? value.GetUInt64() : null;

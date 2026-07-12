@@ -190,6 +190,14 @@ bool GuaContext::register_node_v2(const Dictionary& source)
     if (source.has("pressed")) known_mask |= GUA_NODE_KNOWN_PRESSED;
     if (source.has("checked")) known_mask |= GUA_NODE_KNOWN_CHECKED;
     if (source.has("selected")) known_mask |= GUA_NODE_KNOWN_SELECTED;
+    if (source.has("caret_position")) known_mask |= GUA_NODE_KNOWN_CARET_POSITION;
+    if (source.has("selection_start") && source.has("selection_end")) known_mask |= GUA_NODE_KNOWN_SELECTION;
+    if (source.has("scroll_x") && source.has("scroll_y")) known_mask |= GUA_NODE_KNOWN_SCROLL;
+    if (source.has("scroll_max_x") && source.has("scroll_max_y")) known_mask |= GUA_NODE_KNOWN_SCROLL_MAX;
+    if (source.has("range_value")) known_mask |= GUA_NODE_KNOWN_RANGE_VALUE;
+    if (source.has("range_min")) known_mask |= GUA_NODE_KNOWN_RANGE_MIN;
+    if (source.has("range_max")) known_mask |= GUA_NODE_KNOWN_RANGE_MAX;
+    if (source.has("selected_index")) known_mask |= GUA_NODE_KNOWN_SELECTED_INDEX;
 
     const gua_node_descriptor_v2_t descriptor {
         sizeof(gua_node_descriptor_v2_t),
@@ -212,7 +220,13 @@ bool GuaContext::register_node_v2(const Dictionary& source)
         source.get("checked", false) ? 1 : 0,
         source.get("selected", false) ? 1 : 0,
     };
-    return gua_runtime_register_node_v2(runtime_, &descriptor) != 0;
+    const gua_node_descriptor_v3_t detailed {
+        sizeof(gua_node_descriptor_v3_t), descriptor,
+        source.get("caret_position", 0), source.get("selection_start", 0), source.get("selection_end", 0),
+        source.get("scroll_x", 0.0), source.get("scroll_y", 0.0), source.get("scroll_max_x", 0.0), source.get("scroll_max_y", 0.0),
+        source.get("range_value", 0.0), source.get("range_min", 0.0), source.get("range_max", 0.0), source.get("selected_index", -1)
+    };
+    return gua_runtime_register_node_v3(runtime_, &detailed) != 0;
 }
 
 String GuaContext::get_ui_tree_json() const

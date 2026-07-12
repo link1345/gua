@@ -210,13 +210,7 @@ public sealed class GuaGodotRuntime : IDisposable
         var role = GetControlRole(control);
         var label = GetControlLabel(control);
         var enabled = IsControlEnabled(control);
-        RegisterNode(
-            id,
-            role,
-            label,
-            new Rect2(control.GlobalPosition, control.Size),
-            control.IsVisibleInTree(),
-            enabled);
+        RegisterReflectedNode(id, role, label, control, enabled);
 
         if (control is BaseButton button)
         {
@@ -231,6 +225,60 @@ public sealed class GuaGodotRuntime : IDisposable
                 CollectControl(root, childControl);
             }
         }
+    }
+
+    private void RegisterReflectedNode(string id, string role, string label, Control control, bool enabled)
+    {
+        const ulong focused = 1UL << 3, caret = 1UL << 8, selection = 1UL << 9, scroll = 1UL << 10,
+            scrollMax = 1UL << 11, rangeValue = 1UL << 12, rangeMin = 1UL << 13, rangeMax = 1UL << 14, selectedIndex = 1UL << 15;
+        var mask = focused;
+        long caretPosition = 0, selectionStart = 0, selectionEnd = 0, selected = -1;
+        double x = 0, y = 0, maxX = 0, maxY = 0, value = 0, min = 0, max = 0;
+        if (control is LineEdit line)
+        {
+            mask |= caret | selection; caretPosition = line.CaretColumn;
+            selectionStart = line.HasSelection() ? line.GetSelectionFromColumn() : caretPosition;
+            selectionEnd = line.HasSelection() ? line.GetSelectionToColumn() : caretPosition;
+        }
+        else if (control is TextEdit edit)
+        {
+            mask |= caret | selection; caretPosition = edit.GetCaretColumn();
+            selectionStart = edit.HasSelection() ? edit.GetSelectionFromColumn() : caretPosition;
+            selectionEnd = edit.HasSelection() ? edit.GetSelectionToColumn() : caretPosition;
+        }
+        if (control is ScrollContainer sc)
+        {
+            mask |= scroll | scrollMax; x = sc.ScrollHorizontal; y = sc.ScrollVertical;
+            maxX = sc.GetHScrollBar().MaxValue; maxY = sc.GetVScrollBar().MaxValue;
+        }
+        if (control is global::Godot.Range rangeControl)
+        {
+            mask |= rangeValue | rangeMin | rangeMax; value = rangeControl.Value; min = rangeControl.MinValue; max = rangeControl.MaxValue;
+        }
+        if (control is OptionButton option) { mask |= selectedIndex; selected = option.Selected; }
+        else if (control is ItemList list) { mask |= selectedIndex; var items = list.GetSelectedItems(); selected = items.Length == 0 ? -1 : items[0]; }
+        else if (control is TabContainer tabs) { mask |= selectedIndex; selected = tabs.CurrentTab; }
+
+        var values = new[] { id, role, label };
+        var pointers = values.Select(System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8).ToArray();
+        try
+        {
+            var baseNode = new GuaRuntimeNative.NativeNodeV2
+            {
+                StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<GuaRuntimeNative.NativeNodeV2>(), KnownMask = mask,
+                Id = pointers[0], Role = pointers[1], Label = pointers[2], Bounds = new GuaBounds(control.GlobalPosition.X, control.GlobalPosition.Y, control.Size.X, control.Size.Y),
+                Visible = control.IsVisibleInTree() ? 1 : 0, Enabled = enabled ? 1 : 0, Focused = control.HasFocus() ? 1 : 0,
+            };
+            var node = new GuaRuntimeNative.NativeNodeV3
+            {
+                StructSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<GuaRuntimeNative.NativeNodeV3>(), Base = baseNode,
+                CaretPosition = caretPosition, SelectionStart = selectionStart, SelectionEnd = selectionEnd,
+                ScrollX = x, ScrollY = y, ScrollMaxX = maxX, ScrollMaxY = maxY,
+                RangeValue = value, RangeMin = min, RangeMax = max, SelectedIndex = selected,
+            };
+            if (GuaRuntimeNative.gua_runtime_register_node_v3(_runtime, in node) == 0) throw new InvalidOperationException($"Failed to reflect Gua node: {id}");
+        }
+        finally { foreach (var pointer in pointers) System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pointer); }
     }
 
     private void DispatchClickRequests()

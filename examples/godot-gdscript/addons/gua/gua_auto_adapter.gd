@@ -267,6 +267,34 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		descriptor["value"] = value
 	if control is CheckBox:
 		descriptor["checked"] = (control as CheckBox).button_pressed
+	if control is LineEdit:
+		var line := control as LineEdit
+		descriptor["caret_position"] = line.caret_column
+		descriptor["selection_start"] = line.get_selection_from_column() if line.has_selection() else line.caret_column
+		descriptor["selection_end"] = line.get_selection_to_column() if line.has_selection() else line.caret_column
+	elif control is TextEdit:
+		var edit := control as TextEdit
+		descriptor["caret_position"] = edit.get_caret_column()
+		descriptor["selection_start"] = edit.get_selection_from_column() if edit.has_selection() else edit.get_caret_column()
+		descriptor["selection_end"] = edit.get_selection_to_column() if edit.has_selection() else edit.get_caret_column()
+	if control is ScrollContainer:
+		var scroll := control as ScrollContainer
+		descriptor["scroll_x"] = scroll.scroll_horizontal
+		descriptor["scroll_y"] = scroll.scroll_vertical
+		descriptor["scroll_max_x"] = scroll.get_h_scroll_bar().max_value
+		descriptor["scroll_max_y"] = scroll.get_v_scroll_bar().max_value
+	if control is Range:
+		var range := control as Range
+		descriptor["range_value"] = range.value
+		descriptor["range_min"] = range.min_value
+		descriptor["range_max"] = range.max_value
+	if control is OptionButton:
+		descriptor["selected_index"] = (control as OptionButton).selected
+	elif control is ItemList:
+		var selected := (control as ItemList).get_selected_items()
+		descriptor["selected_index"] = selected[0] if not selected.is_empty() else -1
+	elif control is TabContainer:
+		descriptor["selected_index"] = (control as TabContainer).current_tab
 	context.register_node_v2(descriptor)
 	controls_by_id[id] = control
 
