@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Core\Gua.Core.csproj" AdditionalProperties="TargetFramework=netstandard2.1" />
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Testing\Gua.Testing.csproj" AdditionalProperties="TargetFramework=netstandard2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Assets\**\*.cs" />
+    <None Include="Assets\**\*.cs" />
+  </ItemGroup>
+</Project>

@@ -203,9 +203,12 @@ internal static partial class Native
 
     static Native()
     {
+#if !NETSTANDARD2_1
         NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, ResolveGuaLibrary);
+#endif
     }
 
+#if !NETSTANDARD2_1
     private static nint ResolveGuaLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (!string.Equals(libraryName, "gua", StringComparison.Ordinal))
@@ -238,12 +241,13 @@ internal static partial class Native
             ? fallbackHandle
             : nint.Zero;
     }
+#endif
 
     internal static string NativeLoadErrorMessage(Exception exception)
     {
-        var fileName = OperatingSystem.IsWindows()
+        var fileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? "gua.dll"
-            : OperatingSystem.IsMacOS()
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
                 ? "libgua.dylib"
                 : "libgua.so";
 
@@ -259,18 +263,26 @@ internal static partial class Native
         }
 
         var searched = string.Join(Environment.NewLine, directories.Select(directory => $"  - {Path.Combine(directory, fileName)}"));
+#if NETSTANDARD2_1
+        return
+            $"Failed to load the native Gua runtime '{fileName}'. Place it in the application output directory or configure it as a Unity native plug-in. The netstandard2.1 target uses the host's normal P/Invoke resolution." +
+            $"{Environment.NewLine}Expected locations:{Environment.NewLine}{searched}{Environment.NewLine}Original error: {exception.Message}";
+#else
         return
             $"Failed to load the native Gua runtime '{fileName}'. Build native/gua-core and make the library discoverable with GUA_NATIVE_DIR, the .NET output directory, or the current directory." +
             $"{Environment.NewLine}Searched:{Environment.NewLine}{searched}{Environment.NewLine}Original error: {exception.Message}";
+#endif
     }
 
     private static IEnumerable<string> CandidateNativeDirectories(Assembly assembly)
     {
+#if !NETSTANDARD2_1
         var configured = Environment.GetEnvironmentVariable("GUA_NATIVE_DIR");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             yield return configured;
         }
+#endif
 
         yield return AppContext.BaseDirectory;
 
@@ -287,6 +299,7 @@ internal static partial class Native
         yield return Environment.CurrentDirectory;
     }
 
+#if !NETSTANDARD2_1
     [LibraryImport("gua")]
     internal static partial nint gua_create_context();
 
@@ -407,4 +420,5 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_reset_context(nint context, in GuaNativeResetOptions options, GuaNativeResetReport* report);
+#endif
 }
