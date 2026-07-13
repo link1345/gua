@@ -1,6 +1,7 @@
 #include "gua/gua.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <deque>
 #include <cstring>
@@ -97,6 +98,8 @@ struct Screenshot {
 
 struct HistoryEntry {
     unsigned long long sequence;
+    unsigned long long elapsed_milliseconds;
+    unsigned long long revision;
     std::string phase;
     unsigned long long request_id;
     int action;
@@ -105,6 +108,12 @@ struct HistoryEntry {
     int error_code;
     std::string value;
     bool sensitive;
+    float delta_x;
+    float delta_y;
+    int bool_value;
+    std::string key;
+    unsigned int modifiers;
+    int scroll_unit;
 };
 
 const char* log_level_name(int level)
@@ -328,6 +337,7 @@ struct gua_context_t {
     std::deque<HistoryEntry> event_history;
     std::size_t diagnostics_history_limit = 100;
     unsigned long long next_history_sequence = 1;
+    std::chrono::steady_clock::time_point diagnostics_history_started_at = std::chrono::steady_clock::now();
     std::string diagnostics_environment_json = "{}";
 };
 
@@ -502,11 +512,16 @@ void trim_history(std::deque<HistoryEntry>& history, std::size_t limit)
 
 void append_history(gua_context_t& ctx, std::deque<HistoryEntry>& history, std::string phase,
     unsigned long long request_id, int action, const std::string& node_id, int status,
-    int error_code, const std::string& value, bool sensitive)
+    int error_code, const std::string& value, bool sensitive, float delta_x = 0, float delta_y = 0,
+    int bool_value = 0, const std::string& key = {}, unsigned int modifiers = 0, int scroll_unit = 0)
 {
     if (ctx.diagnostics_history_limit == 0) return;
-    history.push_back(HistoryEntry { ctx.next_history_sequence++, std::move(phase), request_id, action,
-        node_id, status, error_code, sensitive ? "" : value, sensitive });
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - ctx.diagnostics_history_started_at).count();
+    history.push_back(HistoryEntry { ctx.next_history_sequence++, static_cast<unsigned long long>(elapsed),
+        ctx.revision, std::move(phase), request_id, action, node_id, status, error_code,
+        sensitive ? "" : value, sensitive, delta_x, delta_y, bool_value,
+        sensitive ? "" : key, modifiers, scroll_unit });
     trim_history(history, ctx.diagnostics_history_limit);
     ctx.diagnostics_json_cache.clear();
 }
@@ -525,11 +540,18 @@ std::string build_history_json(const std::deque<HistoryEntry>& history)
     for (std::size_t i = 0; i < history.size(); ++i) {
         if (i > 0) json += ",";
         const auto& entry = history[i];
-        json += "{\"sequence\":" + std::to_string(entry.sequence) + ",\"phase\":\"" + escape_json(entry.phase) +
+        json += "{\"sequence\":" + std::to_string(entry.sequence) +
+            ",\"elapsedMilliseconds\":" + std::to_string(entry.elapsed_milliseconds) +
+            ",\"revision\":" + std::to_string(entry.revision) +
+            ",\"phase\":\"" + escape_json(entry.phase) +
             "\",\"requestId\":" + std::to_string(entry.request_id) + ",\"action\":\"" + action_name(entry.action) +
             "\",\"nodeId\":\"" + escape_json(entry.node_id) + "\",\"status\":" + std::to_string(entry.status) +
             ",\"errorCode\":" + std::to_string(entry.error_code) + ",\"value\":\"" + escape_json(entry.value) +
-            "\",\"sensitive\":" + (entry.sensitive ? "true" : "false") + "}";
+            "\",\"sensitive\":" + (entry.sensitive ? "true" : "false") +
+            ",\"deltaX\":" + std::to_string(entry.delta_x) + ",\"deltaY\":" + std::to_string(entry.delta_y) +
+            ",\"boolValue\":" + (entry.bool_value != 0 ? "true" : "false") +
+            ",\"key\":\"" + escape_json(entry.key) + "\",\"modifiers\":" + std::to_string(entry.modifiers) +
+            ",\"scrollUnit\":" + std::to_string(entry.scroll_unit) + "}";
     }
     return json + "]";
 }
@@ -1062,7 +1084,8 @@ extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_d
         descriptor->bool_value, key, descriptor->modifiers, descriptor->sensitive != 0, descriptor->scroll_unit
     });
     append_history(*ctx, ctx->operation_history, "enqueued", request_id, descriptor->action, node_id,
-        GUA_ACTION_ACCEPTED, 0, value, descriptor->sensitive != 0);
+        GUA_ACTION_ACCEPTED, 0, value, descriptor->sensitive != 0, descriptor->delta_x, descriptor->delta_y,
+        descriptor->bool_value, key, descriptor->modifiers, descriptor->scroll_unit);
     if (out_request_id != nullptr) *out_request_id = request_id;
     return GUA_ACTION_ACCEPTED;
 }
@@ -1080,7 +1103,8 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
     ctx->action_requests.erase(request);
     ctx->consumed_requests.push_back(value);
     append_history(*ctx, ctx->operation_history, "consumed", value.request_id, value.action, value.node_id,
-        GUA_ACTION_ACCEPTED, 0, value.value, value.sensitive);
+        GUA_ACTION_ACCEPTED, 0, value.value, value.sensitive, value.delta_x, value.delta_y,
+        value.bool_value, value.key, value.modifiers, value.scroll_unit);
     out_request->request_id = value.request_id;
     out_request->action = value.action;
     std::snprintf(out_request->node_id, sizeof(out_request->node_id), "%s", value.node_id.c_str());
@@ -1269,6 +1293,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         ctx->operation_history.clear();
         ctx->event_history.clear();
         ctx->next_history_sequence = 1;
+        ctx->diagnostics_history_started_at = std::chrono::steady_clock::now();
         ctx->diagnostics_json_cache.clear();
     }
     if ((options->flags & GUA_RESET_LOGS) != 0U) {

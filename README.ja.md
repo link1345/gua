@@ -23,6 +23,10 @@
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Godotプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
+- **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
+  オプトインのPNGベースライン比較と、機械可読な差分成果物を提供します。
+- **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
+  Semantic UI操作を記録し、ホスト側の完了を相関確認しながら再生します。
 
 ## MCPとInspector
 
@@ -105,6 +109,9 @@ cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target gua
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release
 ```
 
 NUnitサンプルは次のコマンドで実行できます。

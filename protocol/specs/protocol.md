@@ -199,11 +199,16 @@ and are never inferred from OS/GPU state. Masks are removed from both diff outpu
 and the ratio denominator. Dimension mismatch never performs an implicit resize.
 
 `recording.schema.json` is the source of truth for recording version 1. Targets
-prefer stable `id`, then strict role/name/scope selection, with coordinate fallback
-only when explicitly recorded and permitted. Request IDs deduplicate retained
-operation/event history. Replay preserves delays or prefers recorded semantic wait
-conditions. Sensitive steps contain a `secretKey`, never plaintext, and require a
-caller resolver.
+prefer stable `id`, then strict role/name/scope selection, with current focus valid
+only for key input and coordinate fallback only when explicitly recorded and
+permitted. Diagnostics history includes monotonic elapsed milliseconds and the
+revision observed at each entry; enqueued and consumed operation entries also
+include complete action arguments. An enqueued operation can therefore be paired
+with its observed completion without inventing timing or state metadata. Request
+IDs deduplicate retained operation/event history. Replay
+preserves delays or prefers recorded semantic wait conditions and waits for the
+request-ID-correlated host completion of every semantic action. Sensitive steps
+contain a `secretKey`, never plaintext, and require a caller resolver.
 
 ## Commands
 

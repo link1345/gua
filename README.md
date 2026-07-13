@@ -22,6 +22,10 @@ recognition or coordinate-based input.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Starts a Godot process and provides helpers for controlling and verifying a
   running scene through the Gua bridge.
+- **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
+  Adds opt-in PNG baseline comparison and machine-readable visual failure artifacts.
+- **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
+  Records semantic UI operations and replays them with correlated host completion.
 
 ## MCP and Inspector
 
@@ -234,6 +238,9 @@ The .NET packages are published on NuGet and can also be packed locally:
 ```powershell
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release
 ```
 
 The packages are written to `artifacts/packages`. `Gua.Testing` declares a NuGet
@@ -474,6 +481,10 @@ native/gua-godot/     Godot GDExtension adapter for GDScript
 bindings/dotnet/      .NET P/Invoke binding and C# testing helpers
 bindings/dotnet/src/Gua.Testing.Godot/
                       Godot process test helpers over Gua.Testing
+bindings/dotnet/src/Gua.Testing.Visual/
+                      Opt-in PNG baseline comparison helpers
+bindings/dotnet/src/Gua.Testing.Recording/
+                      Semantic operation recording and correlated replay
 packages/mcp/         Published MCP server package
 packages/inspector/   Browser and Tauri desktop Inspector UI
 examples/             Minimal demos and samples, including the Godot C# sample

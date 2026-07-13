@@ -10,7 +10,8 @@ screenshot payload. It is never called automatically by polling. An explicit
 `capture_screenshot` bridge request schedules one readback after the next drawn
 frame; concurrent pending requests share that readback. The headless smoke covers
 button, text input, checkbox, and select semantics plus PNG capture; managed
-`Gua.Testing.Visual` tests own baseline compare and recording/replay policy.
+`Gua.Testing.Visual` tests own baseline comparison policy, while
+`Gua.Testing.Recording` owns semantic recording and correlated replay.
 Because Godot's dummy headless renderer has no viewport texture, the smoke injects
 a deterministic `Image`; normal runtime calls omit that test-only argument and
 capture `Viewport.get_texture().get_image()`.
