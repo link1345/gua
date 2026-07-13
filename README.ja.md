@@ -113,6 +113,21 @@ NUnitサンプルは次のコマンドで実行できます。
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
+### Unity 6 Windows Editor
+
+`Gua.Core`と`Gua.Testing`は`net10.0`と`netstandard2.1`の両方を対象にします。
+既定の**.NET Standard 2.1** API Compatibility Levelを使うUnity 6では、
+native C ABIを変えずにmanaged assemblyを読み込めます。最初の検証対象は
+Windows Editor x64です。managed assemblyとNuGet依存assemblyを
+`Assets/Plugins/Gua/Managed`へ、`gua.dll`を`Assets/Plugins/x86_64`へ配置し、
+UnityのPlugin Import SettingsでWindows EditorとWindows Standalone x86_64を
+有効にします。
+
+最小`MonoBehaviour`、具体的なビルド・配置手順、Unityなしでも同じ
+`netstandard2.1` assemblyとnative呼び出しを検証できるsmoke hostは
+[`examples/unity-smoke`](examples/unity-smoke/README.md)を参照してください。
+IL2CPP/AOTとWindows以外のnative targetは個別検証が必要です。
+
 ## Inspector
 
 InspectorはGuaプロトコルのスナップショットを表示するReactアプリケーションです。MCPには依存せず、`GuaInspectorClient`抽象化を通じてWebSocketブリッジやネイティブランタイムへ接続します。

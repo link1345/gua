@@ -13,8 +13,8 @@ public sealed class GuaTestHost
 
     public void Frame(string screen, Action<GuaTestHost> buildUi)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(screen);
-        ArgumentNullException.ThrowIfNull(buildUi);
+        Guard.NotNullOrWhiteSpace(screen, nameof(screen));
+        Guard.NotNull(buildUi, nameof(buildUi));
 
         _context.BeginFrame(screen);
         buildUi(this);
@@ -64,14 +64,14 @@ public sealed class GuaTestHost
         bool visible = true,
         bool enabled = true)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentException.ThrowIfNullOrWhiteSpace(role);
+        Guard.NotNullOrWhiteSpace(id, nameof(id));
+        Guard.NotNullOrWhiteSpace(role, nameof(role));
         _context.RegisterNode(id, role, label, bounds, visible, enabled);
     }
 
     public bool DrainClickEvents(Action<string> onClick)
     {
-        ArgumentNullException.ThrowIfNull(onClick);
+        Guard.NotNull(onClick, nameof(onClick));
 
         var handled = false;
         while (_context.TryPollEvent(out var e))

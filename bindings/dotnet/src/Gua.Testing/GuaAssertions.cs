@@ -16,29 +16,29 @@ public static partial class GuaAssertions
 
     public static GuaNodeExpectation GetById(IGuaContext context, string id)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNullOrWhiteSpace(id, nameof(id));
         return Query(context).ById(id).Get();
     }
 
     public static GuaNodeExpectation GetByRole(IGuaContext context, string role, string? name = null)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(role);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNullOrWhiteSpace(role, nameof(role));
 
         return Query(context).ByRole(role, name).Get();
     }
 
     public static GuaNodeExpectation GetByText(IGuaContext context, string text)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNullOrWhiteSpace(text, nameof(text));
         return Query(context).ByText(text).Get();
     }
 
     public static GuaLocatorQuery Query(IGuaContext context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         return new GuaLocatorQuery(context);
     }
 
@@ -49,7 +49,7 @@ public static partial class GuaAssertions
 
     public static void WaitFor(GuaNodeExpectation expectation, TimeSpan? timeout = null)
     {
-        ArgumentNullException.ThrowIfNull(expectation);
+        Guard.NotNull(expectation, nameof(expectation));
         expectation.WaitFor(timeout);
     }
 
@@ -265,7 +265,7 @@ public static partial class GuaAssertions
 
         var last = ReadWaitSnapshot(context);
         Fail(context, $"Timed out after {FormatTimeout(timeout)} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node by {description}. Last frameSequence={Format(last.FrameSequence)}, revision={Format(last.Revision)}. {lastException?.Message}", initialUiTreeJson);
-        throw new UnreachableException();
+        throw new InvalidOperationException("Gua assertion failure handler returned unexpectedly.");
     }
 
     private static string FormatTimeout(TimeSpan? timeout)
@@ -365,7 +365,7 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation ToHaveRole(string role)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(role);
+        Guard.NotNullOrWhiteSpace(role, nameof(role));
         var snapshot = GetSnapshotOrFail();
         if (!string.Equals(snapshot.Role, role, StringComparison.Ordinal))
         {
@@ -377,7 +377,7 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation ToHaveLabel(string label)
     {
-        ArgumentNullException.ThrowIfNull(label);
+        Guard.NotNull(label, nameof(label));
         var snapshot = GetSnapshotOrFail();
         if (!string.Equals(snapshot.Label, label, StringComparison.Ordinal))
         {
@@ -389,7 +389,7 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation ToHaveAction(string action)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(action);
+        Guard.NotNullOrWhiteSpace(action, nameof(action));
         var snapshot = GetSnapshotOrFail();
         if (!snapshot.Actions.Contains(action, StringComparer.Ordinal))
         {
@@ -405,7 +405,7 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation ToHaveText(string expected)
     {
-        ArgumentNullException.ThrowIfNull(expected);
+        Guard.NotNull(expected, nameof(expected));
         var actual = GetSnapshotOrFail().Text;
         if (!string.Equals(actual, expected, StringComparison.Ordinal))
             GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have text '{expected}', but it had '{actual ?? "<unknown>"}'.");
@@ -414,7 +414,7 @@ public sealed class GuaNodeExpectation
 
     public GuaNodeExpectation ToHaveValue(string expected)
     {
-        ArgumentNullException.ThrowIfNull(expected);
+        Guard.NotNull(expected, nameof(expected));
         var actual = GetSnapshotOrFail().Value;
         if (!string.Equals(actual, expected, StringComparison.Ordinal))
             GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have value '{expected}', but it had '{actual ?? "<unknown>"}'.");
@@ -585,7 +585,7 @@ public sealed class GuaNodeExpectation
         if (snapshot is null)
         {
             GuaAssertions.Fail(_context, $"Expected Gua node {_description} to exist. {GuaAssertions.DescribeTree(_context)}");
-            throw new UnreachableException();
+            throw new InvalidOperationException("Gua assertion failure handler returned unexpectedly.");
         }
 
         return snapshot;

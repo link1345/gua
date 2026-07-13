@@ -40,7 +40,7 @@ public sealed class GuaDiagnosticsSession
 
     public GuaDiagnosticsResult Capture(Exception primaryException, string? initialUiTreeJson = null)
     {
-        ArgumentNullException.ThrowIfNull(primaryException);
+        Guard.NotNull(primaryException, nameof(primaryException));
         var capture = GuaDiagnosticWriter.Capture(_context, primaryException.ToString(), _options, initialUiTreeJson);
         var errors = new List<GuaDiagnosticError>();
         if (capture.Error is not null) errors.Add(new("diagnostics", "CaptureError", capture.Error));
@@ -50,7 +50,7 @@ public sealed class GuaDiagnosticsSession
             AddSupplementalArtifacts(capture.ArtifactPath, errors);
             if (errors.Count > 0)
                 File.WriteAllText(Path.Combine(capture.ArtifactPath, "session-capture-errors.json"), JsonSerializer.Serialize(errors, GuaDiagnosticWriter.JsonOptions), new UTF8Encoding(false));
-            foreach (var path in Directory.EnumerateFiles(capture.ArtifactPath).Order(StringComparer.Ordinal))
+            foreach (var path in Directory.EnumerateFiles(capture.ArtifactPath).OrderBy(path => path, StringComparer.Ordinal))
                 files.Add(new GuaDiagnosticFile(Path.GetFullPath(path), MediaType(path)));
             foreach (var file in files)
             {
@@ -107,8 +107,8 @@ public static class GuaDiagnosticWriter
     public static GuaDiagnosticCapture Capture(
         IGuaContext context, string failureMessage, GuaDiagnosticOptions options, string? initialUiTreeJson = null)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(options);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(options, nameof(options));
         var errors = new List<string>();
         string diagnosticsJson;
         try
@@ -129,7 +129,7 @@ public static class GuaDiagnosticWriter
             var environment = new Dictionary<string, object?>
             {
                 ["testName"] = options.TestName,
-                ["processId"] = Environment.ProcessId,
+                ["processId"] = CurrentProcessId(),
                 ["framework"] = ".NET",
                 ["runtime"] = Environment.Version.ToString(),
                 ["capturedAt"] = options.Clock().ToString("O"),
@@ -195,6 +195,12 @@ public static class GuaDiagnosticWriter
         return string.IsNullOrWhiteSpace(sanitized) ? "unnamed-test" : sanitized;
     }
 
+    private static int CurrentProcessId()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        return process.Id;
+    }
+
     private static void WriteNew(string path, string contents)
     {
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
@@ -223,11 +229,11 @@ public static class GuaDiagnosticWriter
         using var after = JsonDocument.Parse(afterJson);
         var oldNodes = NodesById(before.RootElement);
         var newNodes = NodesById(after.RootElement);
-        var added = newNodes.Keys.Except(oldNodes.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        var removed = oldNodes.Keys.Except(newNodes.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        var added = newNodes.Keys.Except(oldNodes.Keys, StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+        var removed = oldNodes.Keys.Except(newNodes.Keys, StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
         var changed = oldNodes.Keys.Intersect(newNodes.Keys, StringComparer.Ordinal)
             .Where(id => !string.Equals(oldNodes[id], newNodes[id], StringComparison.Ordinal))
-            .Order(StringComparer.Ordinal).ToArray();
+            .OrderBy(id => id, StringComparer.Ordinal).ToArray();
         return JsonSerializer.Serialize(new { schemaVersion = 1, added, removed, changed }, JsonOptions);
     }
 

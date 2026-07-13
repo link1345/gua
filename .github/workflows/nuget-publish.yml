@@ -68,9 +68,18 @@ jobs:
         run: cmake --build --preset windows-msvc-release --target gua --config Release
 
       - name: Restore
-        run: dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
+        run: |
+          dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
+          dotnet restore bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj
 
-      - name: Build
+      - name: Build Gua.Core and Gua.Testing target frameworks
+        run: |
+          dotnet build bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Build existing consumers
         run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Gua.Core

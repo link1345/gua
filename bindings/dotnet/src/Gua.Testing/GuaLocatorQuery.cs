@@ -104,7 +104,7 @@ public sealed record GuaLocatorQuery
         Func<int, bool> condition, string expected, TimeSpan? timeout, TimeSpan? pollInterval,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(condition);
+        Guard.NotNull(condition, nameof(condition));
         var limit = timeout ?? TimeSpan.FromSeconds(1);
         var interval = pollInterval ?? TimeSpan.FromMilliseconds(10);
         if (limit < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
@@ -122,7 +122,7 @@ public sealed record GuaLocatorQuery
 
         GuaAssertions.Fail(_context,
             $"Timed out after {limit:g} waiting for selector {Describe()} to match {expected}; last count={lastCount}. {GuaAssertions.DescribeSnapshot(_context)}");
-        throw new UnreachableException();
+        throw new InvalidOperationException("Gua assertion failure handler returned unexpectedly.");
     }
 
     private GuaQueryResult Execute()
