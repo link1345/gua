@@ -122,7 +122,8 @@ dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 
 ### Unity 6 Windows Editor
 
-`Gua.Core`と`Gua.Testing`は`net10.0`と`netstandard2.1`の両方を対象にします。
+`Gua.Core`、`Gua.Testing`、`Gua.Testing.Visual`、`Gua.Testing.Recording`は
+`net10.0`と`netstandard2.1`の両方を対象にします。
 既定の**.NET Standard 2.1** API Compatibility Levelを使うUnity 6では、
 native C ABIを変えずにmanaged assemblyを読み込めます。最初の検証対象は
 Windows Editor x64です。managed assemblyとNuGet依存assemblyを

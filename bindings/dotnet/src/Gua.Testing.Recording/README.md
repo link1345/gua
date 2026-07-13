@@ -1,7 +1,8 @@
 # Gua.Testing.Recording
 
 `Gua.Testing.Recording` records semantic Gua actions and replays them through the
-normal request-ID-correlated action lifecycle. It depends on `Gua.Testing` but has
+normal request-ID-correlated action lifecycle. The package targets both `net10.0`
+and `netstandard2.1`. It depends on `Gua.Testing` but has
 no PNG codec dependency.
 
 ## Record actions

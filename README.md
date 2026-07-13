@@ -279,7 +279,8 @@ dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 
 ### Unity 6 Windows Editor
 
-`Gua.Core` and `Gua.Testing` target both `net10.0` and `netstandard2.1`.
+`Gua.Core`, `Gua.Testing`, `Gua.Testing.Visual`, and
+`Gua.Testing.Recording` target both `net10.0` and `netstandard2.1`.
 Unity 6 projects using the default **.NET Standard 2.1** API Compatibility
 Level can load the managed assemblies without changing the native C ABI.
 The first verified native configuration is Windows Editor x64: place the

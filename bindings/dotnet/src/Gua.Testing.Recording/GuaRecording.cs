@@ -6,7 +6,7 @@ using Gua.Testing;
 
 namespace Gua.Testing.Recording;
 
-[JsonConverter(typeof(JsonStringEnumConverter<GuaRecordedAction>))]
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum GuaRecordedAction { click, focus, set_value, set_checked, select, scroll, press_key }
 
 public sealed record GuaRecordingTarget(
@@ -48,7 +48,7 @@ public static class GuaRecordingFile
 {
     public static void Save(string path, GuaRecording recording)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Recording path is required.", nameof(path));
         Validate(recording);
         var fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
@@ -57,7 +57,7 @@ public static class GuaRecordingFile
 
     public static GuaRecording Load(string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Recording path is required.", nameof(path));
         var value = JsonSerializer.Deserialize<GuaRecording>(File.ReadAllText(path), JsonOptions)
             ?? throw new InvalidDataException("Recording is empty.");
         Validate(value);
@@ -68,7 +68,7 @@ public static class GuaRecordingFile
 
     public static GuaDiagnosticsRecordingImport ImportDiagnostics(string json)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+        if (string.IsNullOrWhiteSpace(json)) throw new ArgumentException("Diagnostics JSON is required.", nameof(json));
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var rootRevision = UInt64(root, "revision");
@@ -130,7 +130,7 @@ public static class GuaRecordingFile
 
     public static void Validate(GuaRecording recording)
     {
-        ArgumentNullException.ThrowIfNull(recording);
+        if (recording is null) throw new ArgumentNullException(nameof(recording));
         if (recording.SchemaVersion != 1)
             throw new InvalidDataException($"Unsupported Gua recording schemaVersion: {recording.SchemaVersion}.");
         long previous = -1;
@@ -157,9 +157,9 @@ public static class GuaRecordingFile
                 throw new InvalidDataException($"Recording step {index} requires a non-empty value.");
             if (step.Action == GuaRecordedAction.set_checked && !bool.TryParse(step.Value, out _))
                 throw new InvalidDataException($"set_checked recording step {index} requires a boolean value.");
-            if (step.CoordinateFallback is { } coordinate && (!float.IsFinite(coordinate.X) || !float.IsFinite(coordinate.Y)))
+            if (step.CoordinateFallback is { } coordinate && (!IsFinite(coordinate.X) || !IsFinite(coordinate.Y)))
                 throw new InvalidDataException($"Recording step {index} has a non-finite coordinate fallback.");
-            if (!float.IsFinite(step.DeltaX) || !float.IsFinite(step.DeltaY))
+            if (!IsFinite(step.DeltaX) || !IsFinite(step.DeltaY))
                 throw new InvalidDataException($"Recording step {index} has a non-finite scroll delta.");
             if (step.ScrollUnit is < 0 or > 1)
                 throw new InvalidDataException($"Recording step {index} has an invalid scrollUnit.");
@@ -236,6 +236,7 @@ public static class GuaRecordingFile
         element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : 0;
     private static float Float(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.TryGetSingle(out var result) ? result : 0;
+    private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
     private sealed record HistoryItem(ulong Sequence, string Phase, ulong RequestId, string Action, string NodeId,
         string Value, bool Sensitive, long? ElapsedMilliseconds, ulong? Revision, float DeltaX, float DeltaY,

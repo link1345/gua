@@ -1,6 +1,7 @@
 # Gua.Testing.Visual
 
 `Gua.Testing.Visual` adds opt-in PNG baseline comparison to ordinary .NET tests.
+The package targets both `net10.0` and `netstandard2.1`.
 Semantic assertions should remain the primary test path; visual comparison covers
 rendering regressions such as clipping, misplaced controls, incorrect assets, and
 unexpected overlays. PNG codec dependencies stay out of `Gua.Testing` and

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Gua.Core;
 using Gua.Testing;
 
@@ -25,7 +24,7 @@ public static class GuaReplayer
     public static async Task<GuaReplayResult> ReplayAsync(IGuaContext context, GuaRecording recording,
         GuaReplayOptions? options = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        if (context is null) throw new ArgumentNullException(nameof(context));
         GuaRecordingFile.Validate(recording);
         options ??= new();
         long previous = 0;
@@ -111,6 +110,6 @@ internal static class GuaRecordingRuntime
         GuaRecordedAction.scroll => new(GuaActionType.Scroll, nodeId, DeltaX: step.DeltaX, DeltaY: step.DeltaY,
             ScrollUnit: step.ScrollUnit),
         GuaRecordedAction.press_key => new(GuaActionType.PressKey, nodeId, Key: value, Modifiers: step.Modifiers),
-        _ => throw new UnreachableException(),
+        _ => throw new InvalidOperationException($"Unsupported recorded action: {step.Action}."),
     };
 }
