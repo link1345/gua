@@ -1,6 +1,14 @@
 # Gua Godot Sample
 
-This is the v0.5 C# runtime sample for Godot 4.7.
+This is an experimental v0.5 C# runtime sample for Godot 4.7. It demonstrates
+basic semantic tree reflection, screenshots, and button clicks; it is not
+feature-equivalent to the GDScript adapter.
+
+For new integrations, including .NET-enabled Godot projects, use the
+`examples/godot-gdscript/addons/gua` addon as the recommended runtime adapter.
+Godot projects can use that GDScript addon alongside C# game scripts. Keep this
+sample when evaluating an all-C# integration or the lower-level managed runtime
+bridge, but do not treat it as the complete Godot adapter.
 
 It uses the C# addon in `addons/gua`, which wraps the shared native
 `gua_runtime` bridge. The same native bridge owns the Gua core context and the

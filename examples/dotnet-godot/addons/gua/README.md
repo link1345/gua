@@ -1,5 +1,10 @@
 # Gua C# Godot Addon
 
+> **Experimental — basic functionality only.** This wrapper supports basic tree
+> reflection, screenshots, and button clicks. It is not feature-equivalent to
+> the recommended GDScript addon in `examples/godot-gdscript/addons/gua`, which
+> can also be used by .NET-enabled Godot projects.
+
 This addon exposes a small Godot-friendly C# runtime wrapper over the shared
 native `gua_runtime` bridge.
 
