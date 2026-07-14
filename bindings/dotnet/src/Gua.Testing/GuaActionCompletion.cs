@@ -55,7 +55,7 @@ public static class GuaActionCompletion
         TimeSpan? pollInterval = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         var limit = timeout ?? DefaultTimeout;
         var interval = pollInterval ?? DefaultPollInterval;
         if (limit < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));

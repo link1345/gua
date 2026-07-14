@@ -124,7 +124,7 @@ public sealed class GuaTestSession : IDisposable, IAsyncDisposable
 
     public void Run(Action body)
     {
-        ArgumentNullException.ThrowIfNull(body);
+        Guard.NotNull(body, nameof(body));
         Exception? primary = null;
         try { body(); }
         catch (Exception error) { primary = error; }
@@ -150,7 +150,7 @@ public sealed class GuaTestSession : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         Dispose();
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     private Exception? Teardown(Exception? primary)

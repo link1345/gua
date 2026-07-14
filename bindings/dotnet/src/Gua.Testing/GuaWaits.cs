@@ -63,7 +63,7 @@ public static partial class GuaAssertions
         IGuaContext context, string id, Func<GuaNodeSnapshot, bool> predicate, string description = "match semantic state",
         TimeSpan? timeout = null, TimeSpan? pollInterval = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(predicate);
+        Guard.NotNull(predicate, nameof(predicate));
         return WaitForNodeAsync(context, id, node => node is not null && predicate(node), description, timeout, pollInterval, cancellationToken);
     }
 
@@ -98,8 +98,8 @@ public static partial class GuaAssertions
         Func<bool> condition, string description, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(condition);
-        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        Guard.NotNull(condition, nameof(condition));
+        Guard.NotNullOrWhiteSpace(description, nameof(description));
         var (limit, interval) = ValidateWait(timeout, pollInterval);
         var stopwatch = Stopwatch.StartNew();
         do
@@ -118,7 +118,7 @@ public static partial class GuaAssertions
         IGuaContext context, int stableFrames = 3, TimeSpan? timeout = null, TimeSpan? pollInterval = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         if (stableFrames <= 0) throw new ArgumentOutOfRangeException(nameof(stableFrames));
         var (limit, interval) = ValidateWait(timeout, pollInterval);
         var stopwatch = Stopwatch.StartNew();
@@ -164,8 +164,8 @@ public static partial class GuaAssertions
         IGuaContext context, string id, Func<GuaNodeSnapshot?, bool> condition, string description,
         TimeSpan? timeout, TimeSpan? pollInterval, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNullOrWhiteSpace(id, nameof(id));
         var (limit, interval) = ValidateWait(timeout, pollInterval);
         var stopwatch = Stopwatch.StartNew();
         var initialUiTreeJson = context.GetUiTreeJson();
@@ -183,7 +183,7 @@ public static partial class GuaAssertions
         while (true);
 
         Fail(context, $"Timed out after {limit:g} (elapsed {stopwatch.Elapsed:g}) waiting for Gua node id '{id}' to {description}. Last state: {DescribeNode(node)}; frameSequence={Format(last?.FrameSequence)}, revision={Format(last?.Revision)}.", initialUiTreeJson);
-        throw new UnreachableException();
+        throw new InvalidOperationException("Gua assertion failure handler returned unexpectedly.");
     }
 
     private static (TimeSpan Timeout, TimeSpan PollInterval) ValidateWait(TimeSpan? timeout, TimeSpan? pollInterval)

@@ -2,6 +2,12 @@
 
 `Gua.Core` is the .NET binding for the native Gua C ABI.
 
+The package includes `net10.0` and `netstandard2.1` managed assemblies. The
+`net10.0` target keeps Gua's development-time native resolver and
+`GUA_NATIVE_DIR` override. The `netstandard2.1` target uses ordinary UTF-8
+`DllImport` declarations so Unity owns native discovery through its Plugin
+Import Settings.
+
 The NuGet package includes the Windows x64 native runtime at:
 
 ```text
@@ -11,6 +17,10 @@ runtimes/win-x64/native/gua.dll
 .NET copies that native asset to the consuming app or test output as part of
 normal package restore/build. `GUA_NATIVE_DIR` remains available when you want to
 override the packaged runtime with a locally built one.
+
+For Unity 6 Windows Editor x64 setup, including managed dependencies and native
+plugin placement, see the
+[Unity smoke guide](https://github.com/link1345/gua/tree/main/examples/unity-smoke).
 
 Semantic operations use `EnqueueAction` and return a `requestId`. The host adapter
 consumes the request, performs the real UI operation, then calls

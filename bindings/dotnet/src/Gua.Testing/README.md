@@ -3,6 +3,11 @@
 `Gua.Testing` adds locator, assertion, wait, and test-host helpers on top of
 `Gua.Core`.
 
+The package targets both `net10.0` and `netstandard2.1`. The latter is intended
+for Unity 6's .NET Standard 2.1 API Compatibility Level; the initial verified
+native configuration is the Windows x64 Editor described in the
+[Unity smoke guide](https://github.com/link1345/gua/tree/main/examples/unity-smoke).
+
 ```csharp
 using var ui = new GuaContext();
 var host = new GuaTestHost(ui);

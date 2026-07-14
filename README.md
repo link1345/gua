@@ -270,6 +270,22 @@ dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration R
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
+### Unity 6 Windows Editor
+
+`Gua.Core` and `Gua.Testing` target both `net10.0` and `netstandard2.1`.
+Unity 6 projects using the default **.NET Standard 2.1** API Compatibility
+Level can load the managed assemblies without changing the native C ABI.
+The first verified native configuration is Windows Editor x64: place the
+managed assemblies and their NuGet dependency closure under
+`Assets/Plugins/Gua/Managed`, and place `gua.dll` under
+`Assets/Plugins/x86_64`. Unity's Plugin Import Settings must enable the DLL for
+the Windows Editor and Windows Standalone x86_64 targets.
+
+See [`examples/unity-smoke`](examples/unity-smoke/README.md) for the minimal
+`MonoBehaviour`, exact build and placement steps, and the command-line smoke
+host. IL2CPP/AOT and non-Windows native targets remain separately verified
+platform work.
+
 ## Inspector
 
 The Inspector is a React application that consumes Gua protocol snapshots. It is

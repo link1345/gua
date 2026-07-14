@@ -21,7 +21,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
             throw new InvalidOperationException(Native.NativeLoadErrorMessage(ex), ex);
         }
 
-        if (_handle == nint.Zero)
+        if (_handle == 0)
         {
             throw new InvalidOperationException("Failed to create a Gua context.");
         }
@@ -60,7 +60,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
 
     public void RegisterNode(GuaNodeDescriptor descriptor)
     {
-        ArgumentNullException.ThrowIfNull(descriptor);
+        Guard.NotNull(descriptor, nameof(descriptor));
         ThrowIfDisposed();
 
         var known = GuaNodeKnownState.None;
@@ -82,7 +82,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
         if (descriptor.SelectedIndex.HasValue) known |= GuaNodeKnownState.SelectedIndex;
 
         var strings = new[] { descriptor.Id, descriptor.ParentId, descriptor.Role, descriptor.Label, descriptor.Text, descriptor.Value };
-        var pointers = strings.Select(value => value is null ? nint.Zero : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+        var pointers = strings.Select<string?, nint>(value => value is null ? default : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
         try
         {
             var native = new Native.GuaNativeNodeDescriptorV2
@@ -120,7 +120,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
         }
         finally
         {
-            foreach (var pointer in pointers.Where(pointer => pointer != nint.Zero))
+            foreach (var pointer in pointers.Where(pointer => pointer != 0))
             {
                 System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pointer);
             }
@@ -319,10 +319,10 @@ public sealed class GuaContext : IGuaContext, IDisposable
 
     public GuaQueryResult Query(GuaSelector selector)
     {
-        ArgumentNullException.ThrowIfNull(selector);
+        Guard.NotNull(selector, nameof(selector));
         ThrowIfDisposed();
         var values = new[] { selector.Id, selector.Role, selector.Name, selector.Text, selector.ParentId };
-        var pointers = values.Select(value => value is null ? nint.Zero : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+        var pointers = values.Select<string?, nint>(value => value is null ? default : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
         try
         {
             var native = new Native.GuaNativeSelectorV1
@@ -351,7 +351,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
         }
         finally
         {
-            foreach (var pointer in pointers.Where(pointer => pointer != nint.Zero))
+            foreach (var pointer in pointers.Where(pointer => pointer != 0))
                 System.Runtime.InteropServices.Marshal.FreeCoTaskMem(pointer);
         }
     }
@@ -402,7 +402,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
 
     public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
     {
-        ArgumentOutOfRangeException.ThrowIfZero(requestId);
+        Guard.NotZero(requestId, nameof(requestId));
         return TryPollActionEventCore(requestId, out e);
     }
 
@@ -525,18 +525,18 @@ public sealed class GuaContext : IGuaContext, IDisposable
 
     public void Dispose()
     {
-        if (_handle == nint.Zero)
+        if (_handle == 0)
         {
             return;
         }
 
         Native.gua_destroy_context(_handle);
-        _handle = nint.Zero;
+        _handle = 0;
     }
 
     private void ThrowIfDisposed()
     {
-        if (_handle == nint.Zero)
+        if (_handle == 0)
         {
             throw new ObjectDisposedException(nameof(GuaContext));
         }

@@ -12,7 +12,7 @@ public sealed class GuaAssertionScope : IDisposable
 
     public static GuaAssertionScope Use(GuaAssertionOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        Guard.NotNull(options, nameof(options));
         return new GuaAssertionScope(options);
     }
 
@@ -38,7 +38,7 @@ public sealed class GuaAssertionScope : IDisposable
 
     private static GuaAssertionScope UseNamedFramework(string frameworkName, Action<string> fail)
     {
-        ArgumentNullException.ThrowIfNull(fail);
+        Guard.NotNull(fail, nameof(fail));
         return Use(new GuaAssertionOptions
         {
             Fail = message => fail($"Gua assertion failed for {frameworkName}: {message}"),
