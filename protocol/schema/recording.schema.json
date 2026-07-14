@@ -20,9 +20,11 @@
         "id": { "type": "string", "minLength": 1 },
         "role": { "type": "string", "minLength": 1 },
         "name": { "type": "string" },
-        "scope": { "type": "string", "minLength": 1 }
+        "scope": { "type": "string", "minLength": 1 },
+        "currentFocus": { "const": true }
       },
-      "anyOf": [{ "required": ["id"] }, { "required": ["role"] }]
+      "oneOf": [{ "required": ["id"] }, { "required": ["role"] }, { "required": ["currentFocus"] }],
+      "dependentRequired": { "name": ["role"], "scope": ["role"] }
     },
     "coordinate": {
       "type": "object",
@@ -46,11 +48,45 @@
         "waitCondition": { "type": "string", "minLength": 1 },
         "value": { "type": "string" },
         "secretKey": { "type": "string", "minLength": 1 },
-        "sensitive": { "type": "boolean" }
+        "sensitive": { "type": "boolean" },
+        "deltaX": { "type": "number" },
+        "deltaY": { "type": "number" },
+        "scrollUnit": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 }
       },
       "allOf": [
-        { "anyOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] },
-        { "if": { "properties": { "sensitive": { "const": true } }, "required": ["sensitive"] }, "then": { "required": ["secretKey"], "not": { "required": ["value"] } } }
+        { "oneOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] },
+        {
+          "if": { "properties": { "sensitive": { "const": true } }, "required": ["sensitive"] },
+          "then": {
+            "properties": { "action": { "const": "set_value" } },
+            "required": ["secretKey"],
+            "not": { "required": ["value"] }
+          }
+        },
+        {
+          "if": { "properties": { "target": { "required": ["currentFocus"] } }, "required": ["target"] },
+          "then": { "properties": { "action": { "const": "press_key" } } }
+        },
+        {
+          "if": { "properties": { "action": { "enum": ["select", "press_key"] } }, "required": ["action"] },
+          "then": { "properties": { "value": { "minLength": 1 } }, "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "action": { "const": "set_checked" } }, "required": ["action"] },
+          "then": { "properties": { "value": { "enum": ["true", "false"] } }, "required": ["value"] }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "set_value" }, "sensitive": { "const": false } },
+            "required": ["action", "sensitive"]
+          },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "sensitive": { "const": false } }, "required": ["sensitive"] },
+          "then": { "not": { "required": ["secretKey"] } }
+        }
       ]
     }
   }

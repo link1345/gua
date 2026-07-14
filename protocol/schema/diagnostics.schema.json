@@ -26,6 +26,29 @@
   "$defs": {
     "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] },
     "request": { "type": "object", "required": ["requestId", "action", "nodeId", "value", "sensitive"], "properties": { "requestId": { "type": "integer", "minimum": 1 }, "action": { "$ref": "#/$defs/action" }, "nodeId": { "type": "string" }, "value": { "type": "string" }, "sensitive": { "type": "boolean" } }, "additionalProperties": false },
-    "history": { "type": "object", "required": ["sequence", "phase", "requestId", "action", "nodeId", "status", "errorCode", "value", "sensitive"], "properties": { "sequence": { "type": "integer", "minimum": 1 }, "phase": { "enum": ["enqueued", "consumed", "observed"] }, "requestId": { "type": "integer", "minimum": 0 }, "action": { "$ref": "#/$defs/action" }, "nodeId": { "type": "string" }, "status": { "type": "integer" }, "errorCode": { "type": "integer" }, "value": { "type": "string" }, "sensitive": { "type": "boolean" } }, "additionalProperties": false }
+    "history": {
+      "type": "object",
+      "required": ["sequence", "phase", "requestId", "action", "nodeId", "status", "errorCode", "value", "sensitive"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "elapsedMilliseconds": { "type": "integer", "minimum": 0 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "phase": { "enum": ["enqueued", "consumed", "observed"] },
+        "requestId": { "type": "integer", "minimum": 0 },
+        "action": { "$ref": "#/$defs/action" },
+        "nodeId": { "type": "string" },
+        "status": { "type": "integer" },
+        "errorCode": { "type": "integer" },
+        "value": { "type": "string" },
+        "sensitive": { "type": "boolean" },
+        "deltaX": { "type": "number" },
+        "deltaY": { "type": "number" },
+        "boolValue": { "type": "boolean" },
+        "key": { "type": "string" },
+        "modifiers": { "type": "integer", "minimum": 0 },
+        "scrollUnit": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
   }
 }

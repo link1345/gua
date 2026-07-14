@@ -3,6 +3,7 @@ build/
 out/
 dist/
 artifacts/
+.gua/
 bin/
 obj/
 target/

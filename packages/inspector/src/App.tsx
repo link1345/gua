@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   type GuaInspectorClient,
@@ -13,6 +13,15 @@ import {
   selectNode,
   updateInspectorState,
 } from "./core";
+import {
+  InspectorRecorder,
+  type BrowserVisualResult,
+  type GuaRecording,
+  type SemanticActionInput,
+  compareImages,
+  replayRecording,
+  validateRecording,
+} from "./automation";
 
 export interface GuaInspectorAppProps {
   client?: GuaInspectorClient;
@@ -28,6 +37,12 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [status, setStatus] = useState<"idle" | "refreshing" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const recorder = useRef(new InspectorRecorder());
+  const [recording, setRecording] = useState(false);
+  const [lastRecording, setLastRecording] = useState<GuaRecording | null>(null);
+  const [baselineDataUri, setBaselineDataUri] = useState<string | null>(null);
+  const [visualResult, setVisualResult] = useState<BrowserVisualResult | null>(null);
+  const [secretsJson, setSecretsJson] = useState("{}");
 
   useEffect(() => {
     if (client !== undefined) {
@@ -100,13 +115,21 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
 
   const selectedNode = getSelectedNode(state);
 
+  const performAction = async (action: SemanticActionInput) => {
+    const before = await inspectorClient.getUiTree();
+    const outcome = await inspectorClient.performAction(action);
+    const after = await inspectorClient.getUiTree();
+    recorder.current.record(action, outcome, before.revision, outcome.completion?.revision ?? after.revision);
+    await refresh();
+    return outcome;
+  };
+
   const clickSelected = async () => {
     if (selectedNode === null || !selectedNode.actions.includes("click")) {
       return;
     }
 
-    await inspectorClient.clickNode(selectedNode.id);
-    await refresh();
+    await performAction({ action: "click", nodeId: selectedNode.id });
   };
 
   const focusSelected = async () => {
@@ -114,8 +137,49 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       return;
     }
 
-    await inspectorClient.focusNode(selectedNode.id);
-    await refresh();
+    await performAction({ action: "focus", nodeId: selectedNode.id });
+  };
+
+  const startRecording = () => {
+    try {
+      recorder.current.start();
+      setRecording(true);
+      setError(null);
+    } catch (caught) { setError((caught as Error).message); }
+  };
+
+  const stopRecording = () => {
+    try {
+      setLastRecording(recorder.current.stop());
+      setRecording(false);
+      setError(null);
+    } catch (caught) { setError((caught as Error).message); }
+  };
+
+  const replay = async () => {
+    if (lastRecording === null) return;
+    try {
+      const parsedSecrets = JSON.parse(secretsJson) as unknown;
+      if (typeof parsedSecrets !== "object" || parsedSecrets === null || Array.isArray(parsedSecrets)) {
+        throw new Error("Secrets must be a JSON object.");
+      }
+      await replayRecording(
+        lastRecording,
+        () => inspectorClient.getUiTree(),
+        (action) => inspectorClient.performAction(action),
+        parsedSecrets as Record<string, string>,
+      );
+      await refresh();
+      setError(null);
+    } catch (caught) { setError((caught as Error).message); }
+  };
+
+  const compare = async () => {
+    if (baselineDataUri === null || state.screenshot.dataUri.length === 0) return;
+    try {
+      setVisualResult(await compareImages(baselineDataUri, state.screenshot.dataUri));
+      setError(null);
+    } catch (caught) { setError((caught as Error).message); }
   };
 
   return (
@@ -164,9 +228,39 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
           selectedNodeId={state.selectedNodeId}
           onSelect={(nodeId) => setState((current) => selectNode(current, nodeId))}
         />
-        <NodeDetailPanel node={selectedNode} onClick={() => void clickSelected()} onFocus={() => void focusSelected()} />
+        <NodeDetailPanel
+          node={selectedNode}
+          onClick={() => void clickSelected()}
+          onFocus={() => void focusSelected()}
+          onAction={(action) => void performAction(action)}
+        />
         <ScreenshotPanel screenshot={state.screenshot} selectedNode={selectedNode} />
         <LogPanel logs={state.logs} />
+        <AutomationPanel
+          recording={recording}
+          lastRecording={lastRecording}
+          screenshotDataUri={state.screenshot.dataUri}
+          baselineDataUri={baselineDataUri}
+          visualResult={visualResult}
+          secretsJson={secretsJson}
+          onSecretsJson={setSecretsJson}
+          onStart={startRecording}
+          onStop={stopRecording}
+          onReplay={() => void replay()}
+          onDownloadRecording={() => lastRecording !== null && downloadText("gua-recording.json", JSON.stringify(lastRecording, null, 2), "application/json")}
+          onImportRecording={(text) => {
+            try {
+              const value = JSON.parse(text) as unknown;
+              validateRecording(value);
+              setLastRecording(value);
+              setError(null);
+            }
+            catch (caught) { setError((caught as Error).message); }
+          }}
+          onUseCurrentBaseline={() => { setBaselineDataUri(state.screenshot.dataUri); setVisualResult(null); }}
+          onBaseline={setBaselineDataUri}
+          onCompare={() => void compare()}
+        />
       </main>
     </div>
   );
@@ -215,9 +309,14 @@ interface NodeDetailPanelProps {
   node: GuaNode | null;
   onClick(): void;
   onFocus(): void;
+  onAction(action: SemanticActionInput): void;
 }
 
-function NodeDetailPanel({ node, onClick, onFocus }: NodeDetailPanelProps) {
+function NodeDetailPanel({ node, onClick, onFocus, onAction }: NodeDetailPanelProps) {
+  const [value, setValue] = useState("");
+  const [key, setKey] = useState("Enter");
+  const [sensitive, setSensitive] = useState(false);
+  const [secretKey, setSecretKey] = useState("");
   if (node === null) {
     return (
       <section className="gua-panel">
@@ -237,6 +336,43 @@ function NodeDetailPanel({ node, onClick, onFocus }: NodeDetailPanelProps) {
         <button type="button" onClick={onFocus} disabled={!node.actions.includes("focus")}>
           Focus
         </button>
+      </div>
+      <div className="gua-action-editor">
+        {node.actions.includes("set_value") || node.actions.includes("select") ? (
+          <>
+            <input aria-label="Action value" value={value} onChange={(event) => setValue(event.currentTarget.value)} placeholder="value" />
+            {node.actions.includes("set_value") ? (
+              <button
+                type="button"
+                onClick={() => onAction({ action: "set_value", nodeId: node.id, value, sensitive, secretKey: sensitive ? secretKey : undefined })}
+                disabled={sensitive && secretKey.length === 0}
+              >Set value</button>
+            ) : null}
+            {node.actions.includes("select") ? <button type="button" onClick={() => onAction({ action: "select", nodeId: node.id, value })}>Select</button> : null}
+            {node.actions.includes("set_value") ? (
+              <label><input type="checkbox" checked={sensitive} onChange={(event) => setSensitive(event.currentTarget.checked)} /> Sensitive</label>
+            ) : null}
+            {sensitive ? <input aria-label="Secret key" value={secretKey} onChange={(event) => setSecretKey(event.currentTarget.value)} placeholder="secret key" /> : null}
+          </>
+        ) : null}
+        {node.actions.includes("set_checked") ? (
+          <div className="gua-command-row">
+            <button type="button" onClick={() => onAction({ action: "set_checked", nodeId: node.id, checked: true })}>Check</button>
+            <button type="button" onClick={() => onAction({ action: "set_checked", nodeId: node.id, checked: false })}>Uncheck</button>
+          </div>
+        ) : null}
+        {node.actions.includes("scroll") ? (
+          <div className="gua-command-row">
+            <button type="button" onClick={() => onAction({ action: "scroll", nodeId: node.id, deltaX: 0, deltaY: -1, scrollUnit: 1 })}>Scroll up</button>
+            <button type="button" onClick={() => onAction({ action: "scroll", nodeId: node.id, deltaX: 0, deltaY: 1, scrollUnit: 1 })}>Scroll down</button>
+          </div>
+        ) : null}
+        {node.actions.includes("press_key") ? (
+          <div className="gua-command-row">
+            <input aria-label="Key name" value={key} onChange={(event) => setKey(event.currentTarget.value)} />
+            <button type="button" onClick={() => onAction({ action: "press_key", nodeId: node.id, key })} disabled={key.length === 0}>Press key</button>
+          </div>
+        ) : null}
       </div>
       <table className="gua-detail">
         <tbody>
@@ -317,6 +453,116 @@ function LogPanel({ logs }: { logs: Array<{ sequence: number; level: string; mes
       </div>
     </section>
   );
+}
+
+interface AutomationPanelProps {
+  recording: boolean;
+  lastRecording: GuaRecording | null;
+  screenshotDataUri: string;
+  baselineDataUri: string | null;
+  visualResult: BrowserVisualResult | null;
+  secretsJson: string;
+  onSecretsJson(value: string): void;
+  onStart(): void;
+  onStop(): void;
+  onReplay(): void;
+  onDownloadRecording(): void;
+  onImportRecording(text: string): void;
+  onUseCurrentBaseline(): void;
+  onBaseline(dataUri: string): void;
+  onCompare(): void;
+}
+
+function AutomationPanel(props: AutomationPanelProps) {
+  return (
+    <section className="gua-panel gua-automation-panel">
+      <PanelHeader title="Automation" detail={props.recording ? "recording" : `${props.lastRecording?.steps.length ?? 0} steps`} />
+      <div className="gua-automation-grid">
+        <div>
+          <h3>Recording / Replay</h3>
+          <div className="gua-command-row">
+            <button type="button" onClick={props.onStart} disabled={props.recording}>Start recording</button>
+            <button type="button" onClick={props.onStop} disabled={!props.recording}>Stop</button>
+            <button type="button" onClick={props.onReplay} disabled={props.lastRecording === null || props.recording}>Replay</button>
+            <button type="button" onClick={props.onDownloadRecording} disabled={props.lastRecording === null}>Download JSON</button>
+          </div>
+          <label className="gua-file-field">
+            <span>Import recording JSON</span>
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file !== undefined) void file.text().then(props.onImportRecording);
+              }}
+            />
+          </label>
+          <label className="gua-file-field">
+            <span>Replay secrets (kept in memory only)</span>
+            <textarea value={props.secretsJson} onChange={(event) => props.onSecretsJson(event.currentTarget.value)} rows={3} />
+          </label>
+        </div>
+        <div>
+          <h3>Visual comparison</h3>
+          <div className="gua-command-row">
+            <button type="button" onClick={props.onUseCurrentBaseline} disabled={props.screenshotDataUri.length === 0}>
+              Use current as baseline
+            </button>
+            <button type="button" onClick={props.onCompare} disabled={props.baselineDataUri === null || props.screenshotDataUri.length === 0}>
+              Compare
+            </button>
+          </div>
+          <label className="gua-file-field">
+            <span>Choose baseline image</span>
+            <input
+              type="file"
+              accept="image/png,image/*"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file !== undefined) void readFileAsDataUri(file).then(props.onBaseline);
+              }}
+            />
+          </label>
+          {props.visualResult !== null ? (
+            <div className={props.visualResult.matched ? "gua-visual-result gua-visual-result--matched" : "gua-visual-result gua-visual-result--failed"}>
+              <strong>{props.visualResult.matched ? "Matched" : `Failed: ${props.visualResult.reason}`}</strong>
+              <span>{props.visualResult.differentPixels} / {props.visualResult.comparedPixels} pixels ({(props.visualResult.differentPixelRatio * 100).toFixed(4)}%)</span>
+              <div className="gua-command-row">
+                <button type="button" onClick={() => downloadDataUri("actual.png", props.visualResult?.actualDataUri as string)}>Actual</button>
+                <button type="button" onClick={() => downloadDataUri("expected.png", props.visualResult?.expectedDataUri as string)}>Expected</button>
+                <button type="button" onClick={() => downloadDataUri("diff.png", props.visualResult?.diffDataUri as string)}>Diff</button>
+                <button type="button" onClick={() => downloadText("comparison.json", props.visualResult?.comparisonJson as string, "application/json")}>Manifest</button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function readFileAsDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Image could not be read."));
+    reader.onerror = () => reject(reader.error ?? new Error("Image could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadText(name: string, text: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  clickDownload(name, url);
+  URL.revokeObjectURL(url);
+}
+
+function downloadDataUri(name: string, dataUri: string): void { clickDownload(name, dataUri); }
+
+function clickDownload(name: string, href: string): void {
+  const anchor = document.createElement("a");
+  anchor.download = name;
+  anchor.href = href;
+  anchor.click();
 }
 
 function PanelHeader({ title, detail }: { title: string; detail?: string }) {

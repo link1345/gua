@@ -23,6 +23,10 @@
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Godotプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
+- **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
+  オプトインのPNGベースライン比較と、機械可読な差分成果物を提供します。
+- **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
+  Semantic UI操作を記録し、ホスト側の完了を相関確認しながら再生します。
 
 ## MCPとInspector
 
@@ -106,6 +110,9 @@ cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target gua
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release
 ```
 
 NUnitサンプルは次のコマンドで実行できます。
@@ -116,7 +123,8 @@ dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 
 ### Unity 6 Windows Editor
 
-`Gua.Core`と`Gua.Testing`は`net10.0`と`netstandard2.1`の両方を対象にします。
+`Gua.Core`、`Gua.Testing`、`Gua.Testing.Visual`、`Gua.Testing.Recording`は
+`net10.0`と`netstandard2.1`の両方を対象にします。
 既定の**.NET Standard 2.1** API Compatibility Levelを使うUnity 6では、
 native C ABIを変えずにmanaged assemblyを読み込めます。最初の検証対象は
 Windows Editor x64です。managed assemblyとNuGet依存assemblyを
@@ -150,6 +158,15 @@ Inspectorの接続先は次のとおりです。
 ```text
 ws://127.0.0.1:8765
 ```
+
+InspectorのAutomationパネルでは、画面から実行したSemantic操作の記録、
+`recording.schema.json`の読み込み・ダウンロード、全Semantic操作のReplayを
+行えます。秘密値はメモリ上のJSON mapからだけ解決します。Visual comparisonでは、
+現在のスクリーンショットまたは選択した画像をbaselineにしてブラウザー内で比較し、
+Actual・Expected・Diff画像とmanifestをダウンロードできます。ブラウザー版Inspectorが
+任意のローカルパスへ暗黙に書き込むことはありません。
+座標fallbackを含むRecordingもschema v1として読み込めますが、Inspectorは実行せず、
+Replayは既定でSemantic targetだけを使用します。
 
 静的InspectorのビルドとTauriデスクトップシェルの開発起動には、次のコマンドを使用します。TauriにはRustツールチェーンも必要です。
 
@@ -186,12 +203,28 @@ bunx gui-mcp@latest mcp
 ```text
 get_ui_tree
 click_node
+focus_node
+set_value
+set_checked
+select
+scroll
 press_key
 wait_for_node
 get_screenshot
 get_logs
+start_recording
+stop_recording
+save_recording
+replay_recording
+compare_screenshot
+get_visual_artifacts
 run_test
 ```
+
+Recording、baseline、Visual失敗artifactは既定で`.gua`へ保存します。
+`GUA_ARTIFACT_DIR`で保存rootを変更できますが、MCPツールへ渡した名前からroot外へは
+書き出せません。接続先bridgeが対応している場合、Semantic action toolは
+request IDに対応するhost完了eventまで待機します。
 
 ## Godot 4.7 C#サンプル
 
