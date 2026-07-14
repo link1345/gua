@@ -29,7 +29,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
         ? "null"
         : "\"" + escape_json(godot_plugin_version) + "\"";
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
-        "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin +
+        "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
         "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\"]}";
 }

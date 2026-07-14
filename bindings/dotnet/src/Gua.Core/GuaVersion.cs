@@ -9,7 +9,8 @@ public sealed record GuaVersion(
     string? GodotPluginVersion,
     int AbiVersion,
     string BuildId,
-    IReadOnlyList<string> Capabilities)
+    IReadOnlyList<string> Capabilities,
+    IReadOnlyDictionary<string, string>? AdapterVersions = null)
 {
     public static GuaVersion Parse(string json) =>
         JsonSerializer.Deserialize<GuaVersion>(json, JsonOptions)

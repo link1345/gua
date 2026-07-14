@@ -1,0 +1,7 @@
+{
+  "name": "Gua.Unity.Editor",
+  "rootNamespace": "Gua.Unity.Editor",
+  "references": ["Gua.Unity", "Unity.TextMeshPro"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

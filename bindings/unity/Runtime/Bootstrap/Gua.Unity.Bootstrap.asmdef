@@ -1,0 +1,8 @@
+{
+  "name": "Gua.Unity.Bootstrap",
+  "rootNamespace": "Gua.Unity",
+  "references": [
+    "Gua.Unity"
+  ],
+  "autoReferenced": true
+}

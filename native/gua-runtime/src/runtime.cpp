@@ -9,12 +9,18 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
 
 struct gua_runtime_t {
+    struct ScreenshotBatch {
+        uint64_t session_epoch = 0;
+        std::vector<uint64_t> request_ids;
+    };
+
     gua_context_t* context = nullptr;
     mutable std::mutex context_mutex;
     mutable std::mutex bridge_mutex;
@@ -26,9 +32,10 @@ struct gua_runtime_t {
     std::string screenshot_json;
     std::string diagnostics_json;
     std::string godot_plugin_version;
+    std::map<std::string, std::string> adapter_versions;
     uint64_t next_screenshot_request_id = 1;
     std::deque<gua_screenshot_request_t> screenshot_requests;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> screenshot_batches;
+    std::unordered_map<uint64_t, ScreenshotBatch> screenshot_batches;
     std::unordered_map<uint64_t, std::string> screenshot_results;
 };
 
@@ -87,6 +94,19 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
             json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
         }
     }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
+    }
     return json;
 }
 
@@ -101,6 +121,19 @@ std::string copy_version_json(gua_runtime_t* runtime)
         if (position != std::string::npos) {
             json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
         }
+    }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
     }
     return json;
 }
@@ -346,7 +379,7 @@ extern "C" int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gu
         runtime->screenshot_requests.pop_front();
     }
     first.after_frame_sequence = after;
-    runtime->screenshot_batches[first.request_id] = std::move(batch);
+    runtime->screenshot_batches[first.request_id] = { first.session_epoch, std::move(batch) };
     *out_request = first;
     return 1;
 }
@@ -359,9 +392,14 @@ extern "C" int gua_runtime_complete_screenshot_request(gua_runtime_t* runtime, u
     if (batch == runtime->screenshot_batches.end()) return 0;
     gua_context_status_t status { sizeof(gua_context_status_t) };
     gua_get_context_status(runtime->context, &status);
-    if (result == GUA_SCREENSHOT_AVAILABLE) gua_set_screenshot(runtime->context, data_uri, width, height);
-    for (const auto id : batch->second) {
-        if (result == GUA_SCREENSHOT_AVAILABLE) {
+    const bool stale_session = batch->second.session_epoch != status.session_epoch;
+    if (!stale_session && result == GUA_SCREENSHOT_AVAILABLE) gua_set_screenshot(runtime->context, data_uri, width, height);
+    for (const auto id : batch->second.request_ids) {
+        if (stale_session) {
+            runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
+                ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+                ",\"frameSequence\":" + std::to_string(status.frame_sequence) + ",\"unavailable\":\"stale_session\"}";
+        } else if (result == GUA_SCREENSHOT_AVAILABLE) {
             runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
                 ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
                 ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
@@ -402,9 +440,9 @@ extern "C" int gua_runtime_cancel_screenshot_request(gua_runtime_t* runtime, uin
     removed = removed || before != runtime->screenshot_requests.size();
     for (auto& [leader, batch] : runtime->screenshot_batches) {
         (void)leader;
-        const auto batch_before = batch.size();
-        batch.erase(std::remove(batch.begin(), batch.end(), request_id), batch.end());
-        removed = removed || batch_before != batch.size();
+        const auto batch_before = batch.request_ids.size();
+        batch.request_ids.erase(std::remove(batch.request_ids.begin(), batch.request_ids.end(), request_id), batch.request_ids.end());
+        removed = removed || batch_before != batch.request_ids.size();
     }
     return removed ? 1 : 0;
 }
@@ -447,6 +485,16 @@ extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, con
     if (!valid_runtime(runtime)) return;
     const std::lock_guard lock(runtime->context_mutex);
     runtime->godot_plugin_version = version == nullptr ? "" : version;
+    if (runtime->godot_plugin_version.empty()) runtime->adapter_versions.erase("godot");
+    else runtime->adapter_versions["godot"] = runtime->godot_plugin_version;
+}
+
+extern "C" void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version)
+{
+    if (!valid_runtime(runtime) || adapter == nullptr || adapter[0] == '\0') return;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (version == nullptr || version[0] == '\0') runtime->adapter_versions.erase(adapter);
+    else runtime->adapter_versions[adapter] = version;
 }
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)

@@ -17,6 +17,10 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
 
+All adapters report bounds in physical viewport pixels using the same coordinate
+space as screenshots: the origin is the top-left corner, X increases rightward,
+and Y increases downward. Adapters must not publish NaN or infinite coordinates.
+
 Version 2 adds `parentId`, `text`, `value`, and optional boolean state. An
 omitted property means that the adapter cannot observe that state. A present
 property whose value is `false` means that the adapter observed the state and
@@ -288,7 +292,7 @@ Initial MCP tools:
 - `get_screenshot`: returns the latest screenshot payload
 - `get_logs`: returns ordered runtime logs
 - `get_diagnostics`: returns the versioned best-effort diagnostics snapshot
-- `get_version`: returns `version.schema.json` for the components actually loaded. `godotPluginVersion` is `null` outside Godot. Capability IDs are stable public identifiers; new IDs are additive.
+- `get_version`: returns `version.schema.json` for the components actually loaded. `godotPluginVersion` is retained for compatibility and is `null` outside Godot. Engine integrations publish their versions in the additive `adapterVersions` map (for example, `{"unity":"0.5.0"}`). Capability IDs are stable public identifiers; new IDs are additive.
 - `run_test`: executes a small list of `wait_for_node` and `click_node` steps
 
 The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua

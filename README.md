@@ -22,6 +22,10 @@ recognition or coordinate-based input.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Starts a Godot process and provides helpers for controlling and verifying a
   running scene through the Gua bridge.
+- **Gua.Runtime:** shared managed wrapper over the `gua_runtime` C ABI for
+  engine adapters. Targets `net10.0` and `netstandard2.1`.
+- **Gua.Testing.Unity:** builds and starts Unity Editor Play Mode or Mono
+  Windows players and exposes the shared remote Gua context.
 
 ## MCP and Inspector
 
@@ -236,6 +240,8 @@ The .NET packages are published on NuGet and can also be packed locally:
 ```powershell
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release
 ```
 
 The packages are written to `artifacts/packages`. `Gua.Testing` declares a NuGet
@@ -272,21 +278,29 @@ dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration R
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
-### Unity 6 Windows Editor
+### Unity 6 Windows x64
 
-`Gua.Core` and `Gua.Testing` target both `net10.0` and `netstandard2.1`.
-Unity 6 projects using the default **.NET Standard 2.1** API Compatibility
-Level can load the managed assemblies without changing the native C ABI.
-The first verified native configuration is Windows Editor x64: place the
-managed assemblies and their NuGet dependency closure under
-`Assets/Plugins/Gua/Managed`, and place `gua.dll` under
-`Assets/Plugins/x86_64`. Unity's Plugin Import Settings must enable the DLL for
-the Windows Editor and Windows Standalone x86_64 targets.
+Build the precompiled Unity Package Manager artifact and `.tgz` archive with:
 
-See [`examples/unity-smoke`](examples/unity-smoke/README.md) for the minimal
-`MonoBehaviour`, exact build and placement steps, and the command-line smoke
-host. IL2CPP/AOT and non-Windows native targets remain separately verified
-platform work.
+```powershell
+.\scripts\build-unity-package.ps1
+```
+
+Each automated Gua GitHub Release also attaches
+`com.link1345.gua-<version>.tgz`. Download that file and install it from
+Unity Package Manager with **Add package from tarball**. Release builds require
+the `UNITY_LICENSE`, `UNITY_EMAIL`, and `UNITY_PASSWORD` secrets in the GitHub
+`release` environment so the precompiled Unity assemblies are produced by the
+same release workflow as the Windows native plugins.
+
+The package starts automatically and reflects UI Toolkit, uGUI, and
+TextMeshPro runtime UI. `GuaId` and `GuaScreen` are optional overrides; game
+code does not register semantic nodes manually. `Gua.Testing.Unity` provides
+Editor Play Mode and Mono Windows Player hosts. See
+[`examples/unity-smoke`](examples/unity-smoke/README.md) for the verified Unity
+6000.5.3f1 fixture. Windows x64, Unity 6000.0+, and Mono are supported in this
+initial release; IL2CPP, other operating systems, IMGUI, and EditorWindow UI
+automation are not.
 
 ## Inspector
 

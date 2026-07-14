@@ -1,0 +1,8 @@
+{
+  "name": "Gua.Unity.TMP",
+  "rootNamespace": "Gua.Unity",
+  "references": ["Gua.Unity", "Unity.TextMeshPro"],
+  "precompiledReferences": ["Gua.Core.dll"],
+  "autoReferenced": true,
+  "allowUnsafeCode": false
+}

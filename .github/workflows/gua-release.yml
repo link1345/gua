@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/gua-release.yml
       - .github/scripts/next-release-version.ps1
+      - Directory.Build.props
       - bun.lock
       - package.json
       - tsconfig.base.json
@@ -25,6 +26,14 @@ on:
       - native/gua-imgui/**
       - native/gua-godot/**
       - native/gua-ws-bridge/**
+      - bindings/dotnet/src/Gua.Core/**
+      - bindings/dotnet/src/Gua.Runtime/**
+      - bindings/unity/**
+      - examples/unity-smoke/**
+      - scripts/build-unity-package.ps1
+      - scripts/prepare-unity-package-ci.ps1
+      - scripts/package-unity-upm-ci.ps1
+      - scripts/unity-meta/**
       - examples/cpp-imgui/**
       - examples/godot-gdscript/addons/gua/**
       - protocol/**
@@ -37,9 +46,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-release:
-    name: Build and publish Gua release assets
+  windows-assets:
+    name: Build Windows release assets
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -84,6 +96,12 @@ jobs:
       - name: Build Godot GDExtension
         run: cmake --build --preset windows-msvc-debug --target gua-godot
 
+      - name: Configure Unity native plugins
+        run: cmake --preset windows-msvc-release "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Build Unity native plugins
+        run: cmake --build --preset windows-msvc-release --target gua gua-runtime --config Release
+
       - name: Package release assets
         id: package
         shell: pwsh
@@ -125,14 +143,103 @@ jobs:
           path: ${{ steps.package.outputs.assets }}
           if-no-files-found: error
 
+      - name: Upload Unity native plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-unity-native-v${{ steps.version.outputs.version }}
+          path: |
+            build/windows-msvc-release/native/gua-core/Release/gua.dll
+            build/windows-msvc-release/native/gua-runtime/Release/gua_runtime.dll
+          if-no-files-found: error
+
+  unity-package:
+    name: Build Unity UPM package
+    needs: windows-assets
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Unity native plugins
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-native
+
+      - name: Prepare Unity project package dependencies
+        shell: pwsh
+        run: scripts/prepare-unity-package-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -NativeDirectory artifacts/unity-native
+
+      - name: Verify Unity CI credentials
+        shell: pwsh
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          $missing = @('UNITY_LICENSE', 'UNITY_EMAIL', 'UNITY_PASSWORD') | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+          if ($missing.Count -gt 0) {
+            throw "Unity UPM release requires these release-environment secrets: $($missing -join ', ')."
+          }
+
+      - name: Compile Unity package assemblies
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.5.3f1
+          projectPath: examples/unity-smoke
+          targetPlatform: StandaloneWindows64
+          buildMethod: Gua.Unity.Editor.GuaUnityEditorCommands.BuildPlayer
+          customParameters: -guaScene Assets/Scenes/GuaUnityFixture.unity -guaOutput /github/workspace/artifacts/unity-ci-player/GuaUnitySmoke.exe
+          allowDirtyBuild: true
+
+      - name: Package Unity UPM archive
+        shell: pwsh
+        run: scripts/package-unity-upm-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -OutputDirectory artifacts/unity-release
+
+      - name: Upload Unity UPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-release/com.link1345.gua-${{ needs.windows-assets.outputs.version }}.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish Gua release
+    needs:
+      - windows-assets
+      - unity-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-release-v${{ needs.windows-assets.outputs.version }}
+          path: release-assets
+
+      - name: Download Unity UPM package
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
+          path: release-assets/unity
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Gua v${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.windows-assets.outputs.tag }}
+          name: Gua v${{ needs.windows-assets.outputs.version }}
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, and the ImGui adapter plugin headers.
-          files: ${{ steps.package.outputs.assets }}/**/*
+            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, the ImGui adapter plugin headers, and the Unity Package Manager archive for Unity 6000.0+ Windows x64 Mono projects.
+          files: release-assets/**/*
           fail_on_unmatched_files: true

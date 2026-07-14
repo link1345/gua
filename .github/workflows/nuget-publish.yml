@@ -19,7 +19,10 @@ on:
       - bindings/dotnet/src/Gua.Core/**
       - bindings/dotnet/src/Gua.Testing/**
       - bindings/dotnet/src/Gua.Testing.Godot/**
+      - bindings/dotnet/src/Gua.Runtime/**
+      - bindings/dotnet/src/Gua.Testing.Unity/**
       - native/gua-core/**
+      - native/gua-runtime/**
       - protocol/**
 
 permissions:
@@ -71,6 +74,8 @@ jobs:
         run: |
           dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
           dotnet restore bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj
+          dotnet restore bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj
+          dotnet restore bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj
 
       - name: Build Gua.Core and Gua.Testing target frameworks
         run: |
@@ -78,6 +83,10 @@ jobs:
           dotnet build bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Build existing consumers
         run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
@@ -90,6 +99,11 @@ jobs:
 
       - name: Pack Gua.Testing.Godot
         run: dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Pack Unity runtime and testing host
+        run: |
+          dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+          dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

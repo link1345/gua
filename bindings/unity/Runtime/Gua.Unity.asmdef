@@ -1,0 +1,8 @@
+{
+  "name": "Gua.Unity",
+  "rootNamespace": "Gua.Unity",
+  "references": ["Unity.ugui"],
+  "precompiledReferences": ["Gua.Core.dll", "Gua.Runtime.dll"],
+  "autoReferenced": true,
+  "allowUnsafeCode": false
+}
