@@ -202,8 +202,10 @@ The first implementation focuses on a small, stable core:
 - .NET P/Invoke binding over the C ABI
 - Inspector for tree, node detail, screenshot, logs, and runtime commands
 - MCP server for AI-agent access to the runtime bridge
-- Godot 4.7 C# sample using the shared native runtime bridge
-- Godot 4.7 GDScript sample using the same runtime bridge through GDExtension
+- Experimental Godot 4.7 C# sample for basic tree reflection and button clicks
+  over the shared native runtime bridge
+- Recommended Godot 4.7 GDScript addon using the same runtime bridge through
+  GDExtension, including the full standard-Control adapter
 
 Engine-specific integrations such as Unity, Unreal Engine, Godot, and MonoGame
 are expected to be adapters built on top of the protocol, not the center of the
@@ -406,6 +408,12 @@ The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 
 ## Godot 4.7 C# Sample
 
+> **Experimental — basic functionality only.** This sample demonstrates the
+> shared runtime bridge, basic semantic tree reflection, screenshots, and button
+> clicks. It is not feature-equivalent to the GDScript adapter. For new Godot
+> integrations, including .NET-enabled projects, use the GDScript addon below;
+> Godot projects can use it alongside C# game scripts.
+
 The v0.5 C# runtime sample lives in `examples/dotnet-godot`. It is a minimal
 Godot 4.7 project using `Godot.NET.Sdk/4.7.0`, `net10.0`, project references to
 `Gua.Core` and `Gua.Testing`, and a runtime addon in `addons/gua`. The addon
@@ -425,6 +433,10 @@ external click requests through normal Godot button signals.
 `examples/dotnet-monogame` is still present as a future placeholder.
 
 ## Godot 4.7 GDScript Addon
+
+This is the recommended Godot integration for both GDScript projects and
+.NET-enabled projects. Its standard-Control adapter implements the complete
+Godot feature set currently documented by Gua.
 
 The GDScript-facing adapter lives in `native/gua-godot` and builds a thin
 GDExtension wrapper over `native/gua-runtime`. It exposes `GuaContext` to
