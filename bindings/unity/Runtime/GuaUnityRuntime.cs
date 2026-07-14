@@ -28,6 +28,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private readonly Dictionary<UnityEngine.UIElements.Button, Action> visualClickHandlers = new();
     private readonly HashSet<object> suppressedClicks = new();
     private GuaRuntime? runtime;
+    private object? frameFocusTarget;
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
 
@@ -69,6 +70,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             targets.Clear();
             ids.Clear();
             clickTargetIds.Clear();
+            frameFocusTarget = ResolveFocusTarget();
             runtime.BeginFrame(CurrentScreen());
             CollectUiToolkit();
             CollectUGui();
@@ -126,7 +128,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var enabled = element.enabledInHierarchy;
         var registered = Register(resolved, role, label, VisualBounds(element), visible, enabled, parentId,
             text: role is "text" or "textbox" ? label : null,
-            value: VisualValue(element), focused: element.panel?.focusController?.focusedElement == element,
+            value: VisualValue(element), focused: ReferenceEquals(frameFocusTarget, element),
             checkedValue: element is UnityEngine.UIElements.Toggle toggle ? toggle.value : null,
             selectedValue: null, range: VisualRange(element), target: new Target(element, role));
         if (registered && element is UnityEngine.UIElements.Button button) ObserveClick(button, resolved);
@@ -150,7 +152,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             var visible = parentVisible && itemElement != null && itemElement.resolvedStyle.display != DisplayStyle.None && itemElement.resolvedStyle.visibility == Visibility.Visible;
             var bounds = itemElement == null ? default : VisualBounds(itemElement);
             Register(FitNodeId($"{parentId}/item[{index}]"), "listitem", label, bounds, visible, parentEnabled, parentId,
-                text: label, value: label, focused: itemElement?.panel?.focusController?.focusedElement == itemElement,
+                text: label, value: label, focused: ReferenceEquals(frameFocusTarget, itemElement),
                 checkedValue: null, selectedValue: selectedIndices.Contains(index), range: default,
                 target: new Target(new ListItemTarget(listView, index), "listitem"));
         }
@@ -166,7 +168,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
     }
 
-    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorButtonLabel, bool parentVisible)
+    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorSelectableLabel, bool parentVisible)
     {
         if (!visited.Add(transform)) return;
         var localCanvas = transform.GetComponent<Canvas>() ?? canvas;
@@ -186,17 +188,17 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         { actionTarget = tmpTarget; role = tmpRole; label = tmpLabel; value = tmpValue; }
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
-        var suppressAsButtonLabel = selectable == null && role == "text" && ancestorButtonLabel != null &&
-            string.Equals(label, ancestorButtonLabel, StringComparison.Ordinal);
-        var registered = !suppressAsButtonLabel && Register(id, role, label, bounds, visible, enabled, parentId,
+        var suppressAsSelectableLabel = selectable == null && role == "text" && ancestorSelectableLabel != null &&
+            string.Equals(label, ancestorSelectableLabel, StringComparison.Ordinal);
+        var registered = !suppressAsSelectableLabel && Register(id, role, label, bounds, visible, enabled, parentId,
             text: role is "text" or "textbox" ? label : null, value: value,
-            focused: EventSystem.current?.currentSelectedGameObject == transform.gameObject,
+            focused: ReferenceEquals(frameFocusTarget, transform.gameObject),
             checkedValue: checkedValue, selectedValue: null, range: range, target: new Target(actionTarget, role, visible, enabled));
         if (registered && actionTarget is Button button) ObserveClick(button, id);
-        var childParentId = suppressAsButtonLabel ? parentId : id;
-        var childButtonLabel = role == "button" ? label : selectable != null ? null : ancestorButtonLabel;
+        var childParentId = suppressAsSelectableLabel ? parentId : id;
+        var childSelectableLabel = selectable != null ? label : ancestorSelectableLabel;
         for (var i = 0; i < transform.childCount; i++)
-            CollectTransform(transform.GetChild(i), childParentId, localCanvas, visited, childButtonLabel, visible);
+            CollectTransform(transform.GetChild(i), childParentId, localCanvas, visited, childSelectableLabel, visible);
     }
 
     private bool Register(string id, string role, string label, GuaBounds bounds, bool visible, bool enabled, string? parentId,
@@ -248,7 +250,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         while (runtime!.TryConsumeAction(GuaActionType.PressKey, null, out var global))
         {
-            var focused = targets.Values.FirstOrDefault(target => IsFocused(target.Value));
+            var focused = targets.Values.FirstOrDefault(target => IsFrameFocused(target.Value));
             string? value = null;
             var failure = GuaActionError.Unsupported;
             if (focused != null && !focused.Visible) failure = GuaActionError.Hidden;
@@ -309,14 +311,14 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (role == "textbox") yield return GuaActionType.PressKey;
     }
 
-    private static bool Apply(object target, GuaActionRequest request, out string? value, out GuaActionError failure)
+    private bool Apply(object target, GuaActionRequest request, out string? value, out GuaActionError failure)
     {
         value = null;
         failure = GuaActionError.Unsupported;
         if (request.Action == GuaActionType.Focus)
         {
-            if (target is VisualElement visual) { visual.Focus(); return true; }
-            if (target is Component component && EventSystem.current != null) { EventSystem.current.SetSelectedGameObject(component.gameObject); return true; }
+            if (target is VisualElement visual) { EventSystem.current?.SetSelectedGameObject(null); visual.Focus(); return true; }
+            if (target is Component component && EventSystem.current != null) { ClearUiToolkitFocus(); EventSystem.current.SetSelectedGameObject(component.gameObject); return true; }
             return false;
         }
         if (target is UnityEngine.UIElements.Button visualButton && request.Action == GuaActionType.Click)
@@ -489,7 +491,30 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         _ => transform.name,
     };
     private static string? UGuiValue(Selectable? selectable) => selectable switch { InputField i => i.text, Toggle t => t.isOn.ToString(), UnityEngine.UI.Slider s => s.value.ToString(CultureInfo.InvariantCulture), Dropdown d => d.value >= 0 && d.value < d.options.Count ? d.options[d.value].text : "", _ => null };
-    private static bool IsFocused(object target) => target switch { VisualElement v => v.panel?.focusController?.focusedElement == v, Component c => EventSystem.current?.currentSelectedGameObject == c.gameObject, _ => false };
+    private object? ResolveFocusTarget()
+    {
+        foreach (var document in FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            if (!document.isActiveAndEnabled) continue;
+            var focused = document.rootVisualElement?.panel?.focusController?.focusedElement;
+            if (focused != null) return focused;
+        }
+        var selected = EventSystem.current?.currentSelectedGameObject;
+        return selected != null && selected.activeInHierarchy ? selected : null;
+    }
+
+    private static void ClearUiToolkitFocus()
+    {
+        foreach (var document in FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            document.rootVisualElement?.panel?.focusController?.focusedElement?.Blur();
+    }
+
+    private bool IsFrameFocused(object target) => target switch
+    {
+        VisualElement visual => ReferenceEquals(frameFocusTarget, visual),
+        Component component => ReferenceEquals(frameFocusTarget, component.gameObject),
+        _ => false,
+    };
     private sealed class ListItemTarget
     {
         internal ListItemTarget(ListView list, int index) { List = list; Index = index; }

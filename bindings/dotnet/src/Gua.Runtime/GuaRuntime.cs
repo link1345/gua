@@ -178,6 +178,29 @@ public sealed class GuaRuntime : IDisposable
     private void ThrowIfDisposed() { if (_handle == 0) throw new ObjectDisposedException(nameof(GuaRuntime)); }
     private static string ReadUtf8(nint pointer) => Marshal.PtrToStringUTF8(pointer) ?? string.Empty;
     private static unsafe string Utf8(byte* pointer, int capacity) { var length = 0; while (length < capacity && pointer[length] != 0) length++; return Encoding.UTF8.GetString(pointer, length); }
-    private static unsafe string CopyUiTree(nint handle) { var size = Native.gua_runtime_copy_ui_tree_json(handle, null, 0); var bytes = new byte[Math.Max(size, 1)]; fixed (byte* p = bytes) Native.gua_runtime_copy_ui_tree_json(handle, p, bytes.Length); return Encoding.UTF8.GetString(bytes, 0, Math.Max(0, size - 1)); }
-    private static unsafe string CopyVersion(nint handle) { var size = Native.gua_runtime_copy_version_json(handle, null, 0); var bytes = new byte[Math.Max(size, 1)]; fixed (byte* p = bytes) Native.gua_runtime_copy_version_json(handle, p, bytes.Length); return Encoding.UTF8.GetString(bytes, 0, Math.Max(0, size - 1)); }
+    private static unsafe string CopyUiTree(nint handle) => CopyJson(handle, JsonSource.UiTree);
+    private static unsafe string CopyVersion(nint handle) => CopyJson(handle, JsonSource.Version);
+    private static unsafe string CopyJson(nint handle, JsonSource source)
+    {
+        var requiredSize = CopyJson(source, handle, null, 0);
+        if (requiredSize <= 0) throw new InvalidOperationException("Native Gua returned an invalid JSON size.");
+        while (true)
+        {
+            var bytes = new byte[requiredSize];
+            fixed (byte* pointer = bytes)
+            {
+                var actualSize = CopyJson(source, handle, pointer, bytes.Length);
+                if (actualSize <= 0) throw new InvalidOperationException("Native Gua returned an invalid JSON size.");
+                if (actualSize <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actualSize - 1);
+                requiredSize = actualSize;
+            }
+        }
+    }
+    private static unsafe int CopyJson(JsonSource source, nint handle, byte* buffer, int bufferSize) => source switch
+    {
+        JsonSource.UiTree => Native.gua_runtime_copy_ui_tree_json(handle, buffer, bufferSize),
+        JsonSource.Version => Native.gua_runtime_copy_version_json(handle, buffer, bufferSize),
+        _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
+    };
+    private enum JsonSource { UiTree, Version }
 }

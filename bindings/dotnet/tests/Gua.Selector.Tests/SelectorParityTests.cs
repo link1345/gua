@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Diagnostics;
 using Gua.Core;
+using Gua.Runtime;
 using Gua.Testing;
 using Gua.Testing.Godot;
 using NUnit.Framework;
@@ -13,6 +14,40 @@ namespace Gua.Selector.Tests;
 [TestFixture]
 public sealed class SelectorParityTests
 {
+    [Test]
+    public void RemoteTreeDeserializesProtocolBoundsAndNestedState()
+    {
+        const string json = """
+            {"screen":"fixture","revision":4,"nodes":[{"id":"remember","role":"checkbox","label":"Remember","visible":true,"enabled":true,"bounds":{"x":10,"y":20,"w":30,"h":40},"state":{"focused":false,"checked":true,"selected":false},"actions":["click"]}]}
+            """;
+        var tree = JsonSerializer.Deserialize<GuaRemoteTree>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var node = tree!.Nodes.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(node.Bounds.X, Is.EqualTo(10));
+            Assert.That(node.Bounds.Y, Is.EqualTo(20));
+            Assert.That(node.Bounds.Width, Is.EqualTo(30));
+            Assert.That(node.Bounds.Height, Is.EqualTo(40));
+            Assert.That(node.Focused, Is.False);
+            Assert.That(node.Checked, Is.True);
+            Assert.That(node.Selected, Is.False);
+        });
+    }
+
+    [Test]
+    public void RuntimeJsonCopiesRemainValidWhileVersionSizeChanges()
+    {
+        using var runtime = new GuaRuntime();
+        var writer = Task.Run(() =>
+        {
+            for (var index = 0; index < 10_000; index++)
+                runtime.SetAdapterVersion("unity", index % 2 == 0 ? "1" : new string('2', 1000));
+        });
+        for (var index = 0; index < 10_000; index++)
+            using (JsonDocument.Parse(runtime.GetVersionJson())) { }
+        writer.GetAwaiter().GetResult();
+    }
+
     [Test]
     public void VersionModelReportsCapabilitiesAndCompatibilityFailures()
     {

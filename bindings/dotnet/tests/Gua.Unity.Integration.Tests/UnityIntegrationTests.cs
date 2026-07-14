@@ -63,6 +63,10 @@ public sealed class UnityIntegrationTests
             "A button label must not be duplicated as an independent text node.");
         Assert.That(initialTree.Nodes.Count(node => node.Label == "TMP Launch" || node.Text == "TMP Launch"), Is.EqualTo(1),
             "A TMP button label must not be duplicated as an independent text node.");
+        Assert.That(initialTree.Nodes.Count(node => node.Label == "pilot" || node.Text == "pilot"), Is.EqualTo(1),
+            "A uGUI InputField value must not be duplicated as an independent child text node.");
+        Assert.That(initialTree.Nodes.Count(node => node.Label == "bravo" || node.Text == "bravo"), Is.EqualTo(1),
+            "A TMP input value must not be duplicated as an independent child text node.");
         var repeatedToolkitNames = initialTree.Nodes.Where(node => node.Label is "Duplicate A" or "Duplicate B").ToArray();
         Assert.That(repeatedToolkitNames.Select(node => node.Id), Is.Unique);
         Assert.That(repeatedToolkitNames.Select(node => node.Label), Is.EquivalentTo(new[] { "Duplicate A", "Duplicate B" }));
@@ -76,6 +80,18 @@ public sealed class UnityIntegrationTests
         Assert.That(integerSliderResult.Succeeded, Is.True, $"UI Toolkit SliderInt set_value failed: {integerSliderResult.Error}");
         Assert.That(integerSliderResult.Value, Is.EqualTo("7"));
         Assert.That(WaitForValue(host, integerSlider.Id, value => value == "7"), Is.True);
+
+        var uGuiFocusError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, "sample-input"), out var uGuiFocusRequestId);
+        Assert.That(uGuiFocusError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForAction(host, uGuiFocusRequestId), Is.True);
+        Assert.That(WaitForSingleFocusedNode(host, "sample-input"), Is.True,
+            "uGUI focus must be the only published Unity focus source.");
+
+        var toolkitFocusError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, integerSlider.Id), out var toolkitFocusRequestId);
+        Assert.That(toolkitFocusError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForAction(host, toolkitFocusRequestId), Is.True);
+        Assert.That(WaitForSingleFocusedNode(host, integerSlider.Id), Is.True,
+            "UI Toolkit focus must clear the stale uGUI EventSystem selection.");
 
         var firstTab = initialTree.Nodes.Single(node => node.Role == "tab" && node.Label == "first-tab");
         var tabClickError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Click, firstTab.Id), out var tabClickRequestId);
@@ -124,6 +140,9 @@ public sealed class UnityIntegrationTests
         Assert.That(scaledBounds.Y, Is.EqualTo(120).Within(1));
         Assert.That(scaledBounds.Width, Is.EqualTo(400).Within(1));
         Assert.That(scaledBounds.Height, Is.EqualTo(80).Within(1));
+        var remoteScaledBounds = host.RemoteContext.GetRemoteTree().Nodes.Single(node => node.Label == "scaled-box").Bounds;
+        Assert.That(remoteScaledBounds.Width, Is.EqualTo(400).Within(1));
+        Assert.That(remoteScaledBounds.Height, Is.EqualTo(80).Within(1));
 
         var settings = host.Context.FindNodeByRole("button", "Settings");
         var settingsError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Click, settings), out var settingsRequestId);
@@ -227,6 +246,18 @@ public sealed class UnityIntegrationTests
             Thread.Sleep(20);
         }
         bounds = default;
+        return false;
+    }
+
+    private static bool WaitForSingleFocusedNode(UnitySceneTestHost host, string expectedId)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var focused = host.RemoteContext.GetRemoteTree().Nodes.Where(node => node.Focused == true).Select(node => node.Id).ToArray();
+            if (focused.Length == 1 && focused[0] == expectedId) return true;
+            Thread.Sleep(20);
+        }
         return false;
     }
 
