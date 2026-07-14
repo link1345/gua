@@ -31,6 +31,7 @@ on:
       - bindings/unity/**
       - examples/unity-smoke/**
       - scripts/build-unity-package.ps1
+      - scripts/copy-unity-managed-closure.ps1
       - scripts/prepare-unity-package-ci.ps1
       - scripts/package-unity-upm-ci.ps1
       - scripts/unity-meta/**

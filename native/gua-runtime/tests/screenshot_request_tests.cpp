@@ -141,6 +141,41 @@ int main()
     request = { sizeof(gua_screenshot_request_t) };
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 0);
 
+    uint64_t cancelled_in_flight = 0;
+    assert(gua_runtime_enqueue_screenshot_request(runtime, 0, &cancelled_in_flight) == 1);
+    gua_runtime_begin_frame(runtime, "title");
+    gua_runtime_end_frame(runtime);
+    request = { sizeof(gua_screenshot_request_t) };
+    assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
+    assert(request.request_id == cancelled_in_flight);
+    assert(gua_runtime_cancel_screenshot_request(runtime, cancelled_in_flight) == 1);
+    assert(gua_runtime_complete_screenshot_request(
+        runtime, cancelled_in_flight, GUA_SCREENSHOT_AVAILABLE, "data:image/png;base64,bGF0ZQ==", 1, 1) == 0);
+
+    const gua_node_descriptor_v3_t concurrent_node {
+        sizeof(gua_node_descriptor_v3_t),
+        { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_RANGE_VALUE,
+            "concurrent", nullptr, "slider", "Concurrent", nullptr, nullptr,
+            { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 },
+        0, 0, 0, 0, 0, 0, 0, 1, 0, 10, 0
+    };
+    std::thread node_writer([runtime, &concurrent_node] {
+        for (int index = 0; index < 20'000; ++index) {
+            gua_runtime_begin_frame(runtime, "concurrent");
+            gua_runtime_register_node_v3(runtime, &concurrent_node);
+            gua_runtime_end_frame(runtime);
+        }
+    });
+    std::thread context_resetter([runtime] {
+        for (int index = 0; index < 2'000; ++index) {
+            const gua_reset_options_t options { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
+            gua_reset_report_t report { sizeof(gua_reset_report_t) };
+            assert(gua_runtime_reset_context(runtime, &options, &report) == GUA_RESET_SUCCEEDED);
+        }
+    });
+    node_writer.join();
+    context_resetter.join();
+
     gua_runtime_destroy(runtime);
     return 0;
 }

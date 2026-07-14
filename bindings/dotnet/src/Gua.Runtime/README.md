@@ -6,3 +6,7 @@ complete screenshot requests, expose adapter versions, and run the Inspector
 WebSocket bridge without duplicating P/Invoke declarations.
 
 The native `gua_runtime` library must be deployed for the current platform.
+
+Screenshot adapters should use `TryCompleteScreenshot`. It returns `false`
+when a timeout, cancellation, or context reset has already invalidated the
+request; such a late completion is benign and must not be retried.

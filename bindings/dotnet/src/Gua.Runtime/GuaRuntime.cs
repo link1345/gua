@@ -159,9 +159,14 @@ public sealed class GuaRuntime : IDisposable
 
     public void CompleteScreenshot(GuaScreenshotRequest request, GuaScreenshotAvailability availability, string? dataUri = null, int width = 0, int height = 0)
     {
+        TryCompleteScreenshot(request, availability, dataUri, width, height);
+    }
+
+    public bool TryCompleteScreenshot(GuaScreenshotRequest request, GuaScreenshotAvailability availability, string? dataUri = null, int width = 0, int height = 0)
+    {
         ThrowIfDisposed();
-        if (Native.gua_runtime_complete_screenshot_request(_handle, request.RequestId, (int)availability, dataUri ?? string.Empty, width, height) == 0)
-            throw new InvalidOperationException($"Failed to complete Gua screenshot request {request.RequestId}.");
+        return Native.gua_runtime_complete_screenshot_request(
+            _handle, request.RequestId, (int)availability, dataUri ?? string.Empty, width, height) != 0;
     }
 
     public void AddLog(int level, string message) { ThrowIfDisposed(); Native.gua_runtime_add_log(_handle, level, message); }

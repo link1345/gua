@@ -300,6 +300,37 @@ public sealed class SelectorParityTests
         }
     }
 
+    [Test]
+    public async Task CompletingCanceledRuntimeScreenshotIsBenign()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.BeginFrame("fixture");
+        runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var capture = Task.Run(() => remote.CaptureScreenshot(TimeSpan.FromSeconds(1), afterFrameSequence: 0));
+
+            GuaScreenshotRequest request = default;
+            Assert.That(SpinWait.SpinUntil(() => runtime.TryConsumeScreenshotRequest(out request), TimeSpan.FromSeconds(2)), Is.True);
+            var error = Assert.ThrowsAsync<GuaScreenshotException>(async () => await capture);
+            Assert.That(error!.Error, Is.EqualTo(GuaScreenshotError.Timeout));
+            Assert.Multiple(() =>
+            {
+                Assert.That(runtime.TryCompleteScreenshot(request, GuaScreenshotAvailability.Available,
+                    "data:image/png;base64,aGVsbG8=", 1, 1), Is.False);
+                Assert.DoesNotThrow(() => runtime.CompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled));
+            });
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
     private static int ReservePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

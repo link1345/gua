@@ -409,7 +409,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     {
         if (screenshotRunning || !runtime!.TryConsumeScreenshotRequest(out var request)) return;
         if (Application.isBatchMode || SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
-        { runtime.CompleteScreenshot(request, GuaScreenshotAvailability.Headless); return; }
+        { runtime.TryCompleteScreenshot(request, GuaScreenshotAvailability.Headless); return; }
         screenshotRunning = true;
         StartCoroutine(Capture(request));
     }
@@ -420,15 +420,15 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         try
         {
             var texture = ScreenCapture.CaptureScreenshotAsTexture();
-            if (texture == null) runtime!.CompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled);
+            if (texture == null) runtime!.TryCompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled);
             else
             {
                 var png = texture.EncodeToPNG();
-                runtime!.CompleteScreenshot(request, GuaScreenshotAvailability.Available, "data:image/png;base64," + Convert.ToBase64String(png), texture.width, texture.height);
+                runtime!.TryCompleteScreenshot(request, GuaScreenshotAvailability.Available, "data:image/png;base64," + Convert.ToBase64String(png), texture.width, texture.height);
                 Destroy(texture);
             }
         }
-        catch (Exception error) { runtime!.AddLog(3, "Unity screenshot failed: " + error.Message); runtime.CompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled); }
+        catch (Exception error) { runtime!.AddLog(3, "Unity screenshot failed: " + error.Message); runtime.TryCompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled); }
         finally { screenshotRunning = false; ScheduleScreenshot(); }
     }
 

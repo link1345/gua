@@ -10,8 +10,9 @@ $unityVersion = (Get-Content -LiteralPath (Join-Path $root "bindings\unity\packa
 if ($managedVersion -ne $unityVersion) { throw "Unity package version '$unityVersion' does not match Gua package version '$managedVersion'." }
 $core = Join-Path $root "bindings\dotnet\src\Gua.Core\Gua.Core.csproj"
 $runtime = Join-Path $root "bindings\dotnet\src\Gua.Runtime\Gua.Runtime.csproj"
-dotnet build $core -c $Configuration -f netstandard2.1
-dotnet build $runtime -c $Configuration -f netstandard2.1
+dotnet restore $runtime -p:RestoreEnablePackagePruning=false --force-evaluate
+dotnet build $core -c $Configuration -f netstandard2.1 --no-restore -p:RestoreEnablePackagePruning=false
+dotnet build $runtime -c $Configuration -f netstandard2.1 --no-restore -p:RestoreEnablePackagePruning=false
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --config Release --target gua gua-runtime
 
@@ -19,17 +20,10 @@ $plugins = Join-Path $root "examples\unity-smoke\Assets\Plugins\Gua"
 New-Item -ItemType Directory -Force (Join-Path $plugins "Managed"), (Join-Path $plugins "x86_64") | Out-Null
 Copy-Item (Join-Path $root "bindings\dotnet\src\Gua.Core\bin\$Configuration\netstandard2.1\Gua.Core.dll") (Join-Path $plugins "Managed") -Force
 Copy-Item (Join-Path $root "bindings\dotnet\src\Gua.Runtime\bin\$Configuration\netstandard2.1\Gua.Runtime.dll") (Join-Path $plugins "Managed") -Force
-$dependencies = @(
-    "$env:USERPROFILE\.nuget\packages\microsoft.bcl.asyncinterfaces\10.0.0\lib\netstandard2.1\Microsoft.Bcl.AsyncInterfaces.dll",
-    "$env:USERPROFILE\.nuget\packages\system.io.pipelines\10.0.0\lib\netstandard2.0\System.IO.Pipelines.dll",
-    "$env:USERPROFILE\.nuget\packages\system.runtime.compilerservices.unsafe\6.1.2\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll",
-    "$env:USERPROFILE\.nuget\packages\system.text.encodings.web\10.0.0\lib\netstandard2.0\System.Text.Encodings.Web.dll",
-    "$env:USERPROFILE\.nuget\packages\system.text.json\10.0.0\lib\netstandard2.0\System.Text.Json.dll"
-)
-foreach ($dependency in $dependencies) {
-    if (-not (Test-Path -LiteralPath $dependency)) { throw "Managed Unity dependency is missing: $dependency" }
-    Copy-Item -LiteralPath $dependency -Destination (Join-Path $plugins "Managed") -Force
-}
+& (Join-Path $PSScriptRoot "copy-unity-managed-closure.ps1") `
+    -AssetsFile (Join-Path $root "bindings/dotnet/src/Gua.Runtime/obj/project.assets.json") `
+    -TargetFramework "netstandard2.1" `
+    -Destination (Join-Path $plugins "Managed")
 Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-core\Release\gua.dll") (Join-Path $plugins "x86_64") -Force
 Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-runtime\Release\gua_runtime.dll") (Join-Path $plugins "x86_64") -Force
 

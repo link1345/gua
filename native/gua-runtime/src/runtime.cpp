@@ -301,7 +301,12 @@ extern "C" int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_no
 
 extern "C" int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descriptor_v3_t* descriptor)
 {
-    return runtime != nullptr ? gua_register_node_v3(runtime->context, descriptor) : 0;
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_register_node_v3(runtime->context, descriptor);
 }
 
 extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
@@ -483,11 +488,13 @@ extern "C" int gua_runtime_cancel_screenshot_request(gua_runtime_t* runtime, uin
             [request_id](const auto& request) { return request.request_id == request_id; }),
         runtime->screenshot_requests.end());
     removed = removed || before != runtime->screenshot_requests.size();
-    for (auto& [leader, batch] : runtime->screenshot_batches) {
-        (void)leader;
+    for (auto batch_entry = runtime->screenshot_batches.begin(); batch_entry != runtime->screenshot_batches.end();) {
+        auto& batch = batch_entry->second;
         const auto batch_before = batch.request_ids.size();
         batch.request_ids.erase(std::remove(batch.request_ids.begin(), batch.request_ids.end(), request_id), batch.request_ids.end());
         removed = removed || batch_before != batch.request_ids.size();
+        if (batch.request_ids.empty()) batch_entry = runtime->screenshot_batches.erase(batch_entry);
+        else ++batch_entry;
     }
     return removed ? 1 : 0;
 }
@@ -707,12 +714,16 @@ extern "C" int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uin
 
 extern "C" int gua_runtime_poll_event_v3(gua_runtime_t* runtime, gua_event_v3_t* out_event)
 {
-    return runtime != nullptr ? gua_poll_event_v3(runtime->context, out_event) : 0;
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v3(runtime->context, out_event);
 }
 
 extern "C" int gua_runtime_poll_event_v3_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v3_t* out_event)
 {
-    return runtime != nullptr ? gua_poll_event_v3_for_request(runtime->context, request_id, out_event) : 0;
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v3_for_request(runtime->context, request_id, out_event);
 }
 
 extern "C" int gua_runtime_get_context_status(gua_runtime_t* runtime, gua_context_status_t* out_status)

@@ -14,27 +14,19 @@ $plugins = Join-Path $root "examples/unity-smoke/Assets/Plugins/Gua"
 $managed = Join-Path $plugins "Managed"
 $native = Join-Path $plugins "x86_64"
 
-dotnet restore (Join-Path $root "bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj")
-dotnet build (Join-Path $root "bindings/dotnet/src/Gua.Core/Gua.Core.csproj") -c $Configuration -f netstandard2.1 --no-restore -p:Version=$Version
-dotnet build (Join-Path $root "bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj") -c $Configuration -f netstandard2.1 --no-restore -p:Version=$Version
+dotnet restore (Join-Path $root "bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj") -p:RestoreEnablePackagePruning=false --force-evaluate
+dotnet build (Join-Path $root "bindings/dotnet/src/Gua.Core/Gua.Core.csproj") -c $Configuration -f netstandard2.1 --no-restore -p:Version=$Version -p:RestoreEnablePackagePruning=false
+dotnet build (Join-Path $root "bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj") -c $Configuration -f netstandard2.1 --no-restore -p:Version=$Version -p:RestoreEnablePackagePruning=false
 if ($LASTEXITCODE -ne 0) { throw "Failed to build the managed Unity package closure." }
 
 New-Item -ItemType Directory -Force $managed, $native | Out-Null
 Copy-Item (Join-Path $root "bindings/dotnet/src/Gua.Core/bin/$Configuration/netstandard2.1/Gua.Core.dll") $managed -Force
 Copy-Item (Join-Path $root "bindings/dotnet/src/Gua.Runtime/bin/$Configuration/netstandard2.1/Gua.Runtime.dll") $managed -Force
 
-$dependencies = @(
-    "microsoft.bcl.asyncinterfaces/10.0.0/lib/netstandard2.1/Microsoft.Bcl.AsyncInterfaces.dll",
-    "system.io.pipelines/10.0.0/lib/netstandard2.0/System.IO.Pipelines.dll",
-    "system.runtime.compilerservices.unsafe/6.1.2/lib/netstandard2.0/System.Runtime.CompilerServices.Unsafe.dll",
-    "system.text.encodings.web/10.0.0/lib/netstandard2.0/System.Text.Encodings.Web.dll",
-    "system.text.json/10.0.0/lib/netstandard2.0/System.Text.Json.dll"
-)
-foreach ($relative in $dependencies) {
-    $dependency = Join-Path $HOME ".nuget/packages/$relative"
-    if (-not (Test-Path -LiteralPath $dependency)) { throw "Managed Unity dependency is missing: $dependency" }
-    Copy-Item -LiteralPath $dependency -Destination $managed -Force
-}
+& (Join-Path $PSScriptRoot "copy-unity-managed-closure.ps1") `
+    -AssetsFile (Join-Path $root "bindings/dotnet/src/Gua.Runtime/obj/project.assets.json") `
+    -TargetFramework "netstandard2.1" `
+    -Destination $managed
 
 foreach ($file in "gua.dll", "gua_runtime.dll") {
     $matches = @(Get-ChildItem -LiteralPath $NativeDirectory -Recurse -File -Filter $file)
