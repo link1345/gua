@@ -23,6 +23,10 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 {
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
+    private readonly Dictionary<object, string> clickTargetIds = new();
+    private readonly Dictionary<Button, UnityEngine.Events.UnityAction> uGuiClickHandlers = new();
+    private readonly Dictionary<UnityEngine.UIElements.Button, Action> visualClickHandlers = new();
+    private readonly HashSet<object> suppressedClicks = new();
     private GuaRuntime? runtime;
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
@@ -64,9 +68,11 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         {
             targets.Clear();
             ids.Clear();
+            clickTargetIds.Clear();
             runtime.BeginFrame(CurrentScreen());
             CollectUiToolkit();
             CollectUGui();
+            PruneClickObservers();
             runtime.EndFrame();
             DispatchActions();
             ScheduleScreenshot();
@@ -77,6 +83,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private void OnDestroy()
     {
         if (activeRuntime == this) activeRuntime = null;
+        foreach (var pair in uGuiClickHandlers)
+            if (pair.Key != null) pair.Key.onClick.RemoveListener(pair.Value);
+        foreach (var pair in visualClickHandlers) pair.Key.clicked -= pair.Value;
+        uGuiClickHandlers.Clear();
+        visualClickHandlers.Clear();
+        clickTargetIds.Clear();
+        suppressedClicks.Clear();
         runtime?.Dispose();
         runtime = null;
     }
@@ -105,16 +118,17 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var explicitId = !string.IsNullOrWhiteSpace(element.viewDataKey) ? element.viewDataKey : element.name;
         var resolved = FitNodeId(string.IsNullOrWhiteSpace(explicitId)
             ? $"{id}/{element.GetType().Name}[{index}]"
-            : EscapeId(explicitId));
+            : $"{id}/{EscapeId(explicitId)}");
         var role = VisualRole(element);
         var label = VisualLabel(element);
         var visible = hostVisible && element.resolvedStyle.display != DisplayStyle.None && element.resolvedStyle.visibility == Visibility.Visible;
         var enabled = element.enabledInHierarchy;
-        Register(resolved, role, label, VisualBounds(element), visible, enabled, parentId,
+        var registered = Register(resolved, role, label, VisualBounds(element), visible, enabled, parentId,
             text: role is "text" or "textbox" ? label : null,
             value: VisualValue(element), focused: element.panel?.focusController?.focusedElement == element,
             checkedValue: element is UnityEngine.UIElements.Toggle toggle ? toggle.value : null,
             selectedValue: null, range: VisualRange(element), target: new Target(element, role));
+        if (registered && element is UnityEngine.UIElements.Button button) ObserveClick(button, resolved);
         if (element is ListView listView)
         {
             CollectListViewItems(listView, resolved, visible, enabled);
@@ -145,10 +159,10 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     {
         var visited = new HashSet<Transform>();
         foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-            CollectTransform(canvas.transform, null, canvas, visited);
+            CollectTransform(canvas.transform, null, canvas, visited, null);
     }
 
-    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited)
+    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorButtonLabel)
     {
         if (!visited.Add(transform)) return;
         var id = FitNodeId(ExplicitOrObjectId(transform.gameObject, transform.GetSiblingIndex().ToString(CultureInfo.InvariantCulture)));
@@ -167,22 +181,29 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         { actionTarget = tmpTarget; role = tmpRole; label = tmpLabel; value = tmpValue; }
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
-        Register(id, role, label, bounds, visible, enabled, parentId,
+        var suppressAsButtonLabel = selectable == null && role == "text" && ancestorButtonLabel != null &&
+            string.Equals(label, ancestorButtonLabel, StringComparison.Ordinal);
+        var registered = !suppressAsButtonLabel && Register(id, role, label, bounds, visible, enabled, parentId,
             text: role is "text" or "textbox" ? label : null, value: value,
             focused: EventSystem.current?.currentSelectedGameObject == transform.gameObject,
-            checkedValue: checkedValue, selectedValue: null, range: range, target: new Target(actionTarget, role));
-        for (var i = 0; i < transform.childCount; i++) CollectTransform(transform.GetChild(i), id, canvas, visited);
+            checkedValue: checkedValue, selectedValue: null, range: range, target: new Target(actionTarget, role, visible, enabled));
+        if (registered && actionTarget is Button button) ObserveClick(button, id);
+        var childParentId = suppressAsButtonLabel ? parentId : id;
+        var childButtonLabel = role == "button" ? label : selectable != null ? null : ancestorButtonLabel;
+        for (var i = 0; i < transform.childCount; i++)
+            CollectTransform(transform.GetChild(i), childParentId, canvas, visited, childButtonLabel);
     }
 
-    private void Register(string id, string role, string label, GuaBounds bounds, bool visible, bool enabled, string? parentId,
+    private bool Register(string id, string role, string label, GuaBounds bounds, bool visible, bool enabled, string? parentId,
         string? text, string? value, bool? focused, bool? checkedValue, bool? selectedValue,
         (double? value, double? min, double? max) range, Target target)
     {
-        if (!ids.Add(id)) { runtime!.AddLog(3, $"Duplicate Unity Gua id ignored: {id}"); return; }
+        if (!ids.Add(id)) { runtime!.AddLog(3, $"Duplicate Unity Gua id ignored: {id}"); return false; }
         runtime!.RegisterNode(new GuaNodeDescriptor(id, role, label, bounds, visible, enabled, parentId, text, value,
             Focused: focused, Checked: checkedValue, Selected: selectedValue,
             RangeValue: range.value, RangeMin: range.min, RangeMax: range.max));
-        targets[id] = target;
+        targets[id] = new Target(target.Value, target.Role, visible, enabled);
+        return true;
     }
 
     private void DispatchActions()
@@ -191,6 +212,18 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         foreach (var action in SupportedActions(pair.Value.Role))
         while (runtime!.TryConsumeAction(action, pair.Key, out var request))
         {
+            if (!pair.Value.Visible)
+            {
+                runtime.EmitActionResult(request, false, GuaActionError.Hidden);
+                continue;
+            }
+            if (!pair.Value.Enabled)
+            {
+                runtime.EmitActionResult(request, false, GuaActionError.Disabled);
+                continue;
+            }
+            var suppressObservedClick = request.Action == GuaActionType.Click && clickTargetIds.ContainsKey(pair.Value.Value);
+            if (suppressObservedClick) suppressedClicks.Add(pair.Value.Value);
             try
             {
                 var success = Apply(pair.Value.Value, request, out var resultValue, out var failure);
@@ -203,14 +236,60 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 Debug.LogError(message);
                 runtime.EmitActionResult(request, false, GuaActionError.InvalidValue);
             }
+            finally
+            {
+                if (suppressObservedClick) suppressedClicks.Remove(pair.Value.Value);
+            }
         }
         while (runtime!.TryConsumeAction(GuaActionType.PressKey, null, out var global))
         {
             var focused = targets.Values.FirstOrDefault(target => IsFocused(target.Value));
             string? value = null;
             var failure = GuaActionError.Unsupported;
-            var ok = focused != null && Apply(focused.Value, global, out value, out failure);
+            if (focused != null && !focused.Visible) failure = GuaActionError.Hidden;
+            else if (focused != null && !focused.Enabled) failure = GuaActionError.Disabled;
+            var ok = focused != null && focused.Visible && focused.Enabled && Apply(focused.Value, global, out value, out failure);
             runtime.EmitActionResult(global, ok, ok ? GuaActionError.None : failure, value);
+        }
+    }
+
+    private void ObserveClick(object target, string id)
+    {
+        clickTargetIds[target] = id;
+        if (target is Button uGuiButton && !uGuiClickHandlers.ContainsKey(uGuiButton))
+        {
+            UnityEngine.Events.UnityAction handler = () => EmitObservedClick(uGuiButton);
+            uGuiClickHandlers.Add(uGuiButton, handler);
+            uGuiButton.onClick.AddListener(handler);
+        }
+        else if (target is UnityEngine.UIElements.Button visualButton && !visualClickHandlers.ContainsKey(visualButton))
+        {
+            Action handler = () => EmitObservedClick(visualButton);
+            visualClickHandlers.Add(visualButton, handler);
+            visualButton.clicked += handler;
+        }
+    }
+
+    private void EmitObservedClick(object target)
+    {
+        if (suppressedClicks.Remove(target)) return;
+        if (runtime == null || !clickTargetIds.TryGetValue(target, out var id)) return;
+        if (!runtime.EmitClick(id)) runtime.AddLog(3, $"Failed to emit observed Unity click: {id}");
+    }
+
+    private void PruneClickObservers()
+    {
+        foreach (var pair in uGuiClickHandlers.Where(pair => !clickTargetIds.ContainsKey(pair.Key)).ToArray())
+        {
+            if (pair.Key != null) pair.Key.onClick.RemoveListener(pair.Value);
+            uGuiClickHandlers.Remove(pair.Key);
+            suppressedClicks.Remove(pair.Key);
+        }
+        foreach (var pair in visualClickHandlers.Where(pair => !clickTargetIds.ContainsKey(pair.Key)).ToArray())
+        {
+            pair.Key.clicked -= pair.Value;
+            visualClickHandlers.Remove(pair.Key);
+            suppressedClicks.Remove(pair.Key);
         }
     }
 
@@ -409,9 +488,11 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     }
     private sealed class Target
     {
-        internal Target(object value, string role) { Value = value; Role = role; }
+        internal Target(object value, string role, bool visible = true, bool enabled = true) { Value = value; Role = role; Visible = visible; Enabled = enabled; }
         internal object Value { get; }
         internal string Role { get; }
+        internal bool Visible { get; }
+        internal bool Enabled { get; }
     }
 }
 }

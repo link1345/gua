@@ -112,6 +112,7 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
 
 std::string copy_version_json(gua_runtime_t* runtime)
 {
+    const std::lock_guard lock(runtime->context_mutex);
     char buffer[2048] {};
     gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
     std::string json = buffer;
@@ -371,8 +372,14 @@ extern "C" int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gu
     }
     if (runtime->screenshot_requests.empty()) return 0;
     auto first = runtime->screenshot_requests.front();
-    std::vector<uint64_t> batch;
     uint64_t after = first.after_frame_sequence;
+    for (const auto& pending : runtime->screenshot_requests) {
+        if (pending.session_epoch != first.session_epoch) break;
+        after = std::max(after, pending.after_frame_sequence);
+    }
+    if (status.frame_sequence <= after) return 0;
+
+    std::vector<uint64_t> batch;
     while (!runtime->screenshot_requests.empty() && runtime->screenshot_requests.front().session_epoch == first.session_epoch) {
         batch.push_back(runtime->screenshot_requests.front().request_id);
         after = std::max(after, runtime->screenshot_requests.front().after_frame_sequence);

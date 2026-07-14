@@ -1,6 +1,7 @@
 #include "gua/runtime.h"
 
 #include <cassert>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,16 @@ int main()
     const std::string version_json = version(runtime);
     assert(version_json.find("\"adapterVersions\":{\"godot\":\"0.4.0\",\"unity\":\"0.5.0-preview.3\"}") != std::string::npos);
     assert(version_json.find("\"godotPluginVersion\":\"0.4.0\"") != std::string::npos);
+    std::thread version_writer([runtime] {
+        for (int index = 0; index < 1000; ++index)
+            gua_runtime_set_adapter_version(runtime, "unity", index % 2 == 0 ? "0.5.0-preview.3" : "0.5.0-preview.4");
+    });
+    std::thread version_reader([runtime] {
+        for (int index = 0; index < 1000; ++index)
+            assert(version(runtime).find("\"adapterVersions\":{") != std::string::npos);
+    });
+    version_writer.join();
+    version_reader.join();
     gua_runtime_begin_frame(runtime, "title");
     gua_runtime_end_frame(runtime);
 
@@ -45,33 +56,42 @@ int main()
     assert(poll(runtime, first).empty());
 
     gua_screenshot_request_t request { sizeof(gua_screenshot_request_t) };
+    assert(gua_runtime_consume_screenshot_request(runtime, &request) == 0);
+    for (int frame = 0; frame < 3; ++frame) {
+        gua_runtime_begin_frame(runtime, "title");
+        gua_runtime_end_frame(runtime);
+    }
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
     assert(request.request_id == first);
     assert(request.session_epoch == 1);
     assert(request.after_frame_sequence == 3);
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 0);
 
-    gua_runtime_begin_frame(runtime, "title");
-    gua_runtime_end_frame(runtime);
     assert(gua_runtime_complete_screenshot_request(
         runtime, first, GUA_SCREENSHOT_AVAILABLE, "data:image/png;base64,iVBORw0KGgo=", 2, 3) == 1);
     const std::string first_json = poll(runtime, first);
     const std::string second_json = poll(runtime, second);
     assert(first_json.find("\"requestId\":" + std::to_string(first)) != std::string::npos);
     assert(second_json.find("\"requestId\":" + std::to_string(second)) != std::string::npos);
-    assert(first_json.find("\"frameSequence\":2") != std::string::npos);
+    assert(first_json.find("\"frameSequence\":4") != std::string::npos);
     assert(first_json.find("\"width\":2,\"height\":3") != std::string::npos);
 
     uint64_t unavailable = 0;
-    assert(gua_runtime_enqueue_screenshot_request(runtime, 2, &unavailable) == 1);
+    assert(gua_runtime_enqueue_screenshot_request(runtime, 4, &unavailable) == 1);
     request = { sizeof(gua_screenshot_request_t) };
+    assert(gua_runtime_consume_screenshot_request(runtime, &request) == 0);
+    gua_runtime_begin_frame(runtime, "title");
+    gua_runtime_end_frame(runtime);
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
     assert(gua_runtime_complete_screenshot_request(runtime, request.request_id, GUA_SCREENSHOT_UNAVAILABLE_HEADLESS, nullptr, 0, 0) == 1);
     assert(poll(runtime, unavailable).find("\"unavailable\":\"headless\"") != std::string::npos);
 
     uint64_t stale_after_consume = 0;
-    assert(gua_runtime_enqueue_screenshot_request(runtime, 2, &stale_after_consume) == 1);
+    assert(gua_runtime_enqueue_screenshot_request(runtime, 5, &stale_after_consume) == 1);
     request = { sizeof(gua_screenshot_request_t) };
+    assert(gua_runtime_consume_screenshot_request(runtime, &request) == 0);
+    gua_runtime_begin_frame(runtime, "title");
+    gua_runtime_end_frame(runtime);
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
     assert(request.session_epoch == 1);
     gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 1 };

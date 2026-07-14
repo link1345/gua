@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Gua.Unity;
 using TMPro;
@@ -71,6 +72,8 @@ public static class GuaUnityFixture
             loadingScreen.gameObject.SetActive(true);
         });
         settings.onClick.AddListener(() => { });
+        if (string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_HOST_CLICK"), "1", StringComparison.Ordinal))
+            settings.gameObject.AddComponent<GuaUnityHostClickDriver>().Button = settings;
 
         BuildInactiveCoverageControls(canvasObject.transform);
     }
@@ -145,6 +148,13 @@ public static class GuaUnityFixture
         list.style.height = 80;
         root.Add(list);
 
+        var firstBranch = new VisualElement { name = "first-branch" };
+        firstBranch.Add(new UnityEngine.UIElements.Button { name = "duplicate-button", text = "Duplicate A" });
+        root.Add(firstBranch);
+        var secondBranch = new VisualElement { name = "second-branch" };
+        secondBranch.Add(new UnityEngine.UIElements.Button { name = "duplicate-button", text = "Duplicate B" });
+        root.Add(secondBranch);
+
         coverage.SetActive(string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_COVERAGE"), "1", StringComparison.Ordinal));
     }
 
@@ -207,5 +217,18 @@ public static class GuaUnityFixture
         rect.anchorMax = Vector2.one;
         rect.offsetMin = Vector2.zero;
         rect.offsetMax = Vector2.zero;
+    }
+}
+
+public sealed class GuaUnityHostClickDriver : MonoBehaviour
+{
+    public UnityEngine.UI.Button Button { get; set; }
+
+    private IEnumerator Start()
+    {
+        yield return null;
+        yield return null;
+        Button.onClick.Invoke();
+        Destroy(this);
     }
 }

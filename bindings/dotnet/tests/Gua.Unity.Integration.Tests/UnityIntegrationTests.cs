@@ -47,7 +47,7 @@ public sealed class UnityIntegrationTests
         {
             ConnectTimeout = TimeSpan.FromSeconds(30),
             SceneTimeout = TimeSpan.FromSeconds(15),
-            EnvironmentVariables = new Dictionary<string, string> { ["GUA_UNITY_COVERAGE"] = "1" },
+            EnvironmentVariables = new Dictionary<string, string> { ["GUA_UNITY_COVERAGE"] = "1", ["GUA_UNITY_HOST_CLICK"] = "1" },
         });
 
         var version = host.RemoteContext.GetVersion();
@@ -57,6 +57,20 @@ public sealed class UnityIntegrationTests
         Assert.That(WaitForScreen(host, "title"), Is.True);
         Assert.That(host.RemoteContext.GetRemoteTree().Nodes.All(node => Encoding.UTF8.GetByteCount(node.Id) <= 127), Is.True,
             "Unity must keep node IDs round-trippable through the fixed-size C ABI action request.");
+
+        var initialTree = host.RemoteContext.GetRemoteTree();
+        Assert.That(initialTree.Nodes.Count(node => node.Label == "Start Game" || node.Text == "Start Game"), Is.EqualTo(1),
+            "A button label must not be duplicated as an independent text node.");
+        Assert.That(initialTree.Nodes.Count(node => node.Label == "TMP Launch" || node.Text == "TMP Launch"), Is.EqualTo(1),
+            "A TMP button label must not be duplicated as an independent text node.");
+        var repeatedToolkitNames = initialTree.Nodes.Where(node => node.Label is "Duplicate A" or "Duplicate B").ToArray();
+        Assert.That(repeatedToolkitNames.Select(node => node.Id), Is.Unique);
+        Assert.That(repeatedToolkitNames.Select(node => node.Label), Is.EquivalentTo(new[] { "Duplicate A", "Duplicate B" }));
+        Assert.That(WaitForObservedClick(host, "settings", out var observedClick), Is.True,
+            "Host-driven Unity clicks must be published as uncorrelated Gua events.");
+        Assert.That(observedClick.RequestId, Is.Zero);
+        Assert.That(observedClick.Action, Is.EqualTo(GuaActionType.Click));
+        Assert.That(observedClick.NodeId, Is.EqualTo("settings"));
 
         Assert.That(host.Context.FindNodeByRole("button", "TMP Launch"), Is.EqualTo("tmp-button"));
         var listId = host.Context.FindNodeByRole("list", "fixture-list");
@@ -104,6 +118,8 @@ public sealed class UnityIntegrationTests
         var error = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Click, button), out var requestId);
         Assert.That(error, Is.EqualTo(GuaActionError.None));
         Assert.That(WaitForAction(host, requestId), Is.True, "Unity did not emit the request-correlated action completion event.");
+        Assert.That(host.Context.TryPollActionEvent(out var unexpectedClick) && unexpectedClick.RequestId == 0 && unexpectedClick.NodeId == button, Is.False,
+            "Automation clicks must not be reported a second time as host-driven click events.");
         Assert.That(WaitForText(host, "Loading..."), Is.True, "The Start Game listener did not show the loading screen.");
         Assert.That(WaitForScreen(host, "loading"), Is.True);
 
@@ -124,6 +140,23 @@ public sealed class UnityIntegrationTests
         while (DateTime.UtcNow < deadline)
         {
             if (host.Context.TryPollActionEvent(requestId, out result)) return true;
+            Thread.Sleep(20);
+        }
+        result = default;
+        return false;
+    }
+
+    private static bool WaitForObservedClick(UnitySceneTestHost host, string nodeId, out GuaActionEvent result)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (host.Context.TryPollActionEvent(out var candidate) && candidate.RequestId == 0 &&
+                candidate.Action == GuaActionType.Click && candidate.NodeId == nodeId)
+            {
+                result = candidate;
+                return true;
+            }
             Thread.Sleep(20);
         }
         result = default;
@@ -167,7 +200,9 @@ public sealed class UnityIntegrationTests
             using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
             foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
             {
-                if (!(node.GetProperty("id").GetString() ?? "").EndsWith(idSuffix, StringComparison.Ordinal)) continue;
+                var matchesId = (node.GetProperty("id").GetString() ?? "").EndsWith(idSuffix, StringComparison.Ordinal);
+                var matchesLabel = node.TryGetProperty("label", out var label) && label.GetString() == idSuffix;
+                if (!matchesId && !matchesLabel) continue;
                 var value = node.GetProperty("bounds");
                 bounds = new GuaBounds(value.GetProperty("x").GetSingle(), value.GetProperty("y").GetSingle(), value.GetProperty("w").GetSingle(), value.GetProperty("h").GetSingle());
                 if (bounds.Width > 0 && bounds.Height > 0) return true;
@@ -196,7 +231,8 @@ public sealed class UnityIntegrationTests
         {
             using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
             if (tree.RootElement.GetProperty("nodes").EnumerateArray().Any(node =>
-                node.TryGetProperty("text", out var value) && value.ValueKind == JsonValueKind.String && value.GetString() == text)) return true;
+                (node.TryGetProperty("text", out var value) && value.ValueKind == JsonValueKind.String && value.GetString() == text) ||
+                (node.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String && label.GetString() == text))) return true;
             Thread.Sleep(20);
         }
         return false;
