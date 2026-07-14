@@ -66,6 +66,23 @@ public sealed class UnityIntegrationTests
         var repeatedToolkitNames = initialTree.Nodes.Where(node => node.Label is "Duplicate A" or "Duplicate B").ToArray();
         Assert.That(repeatedToolkitNames.Select(node => node.Id), Is.Unique);
         Assert.That(repeatedToolkitNames.Select(node => node.Label), Is.EquivalentTo(new[] { "Duplicate A", "Duplicate B" }));
+        Assert.That(initialTree.Nodes.Single(node => node.Id == "disabled-canvas-button").Visible, Is.False,
+            "Children of a disabled uGUI Canvas must remain in the tree as hidden nodes.");
+
+        var integerSlider = initialTree.Nodes.Single(node => node.Role == "slider" && node.Label == "integer-slider");
+        var integerSliderError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "7"), out var integerSliderRequestId);
+        Assert.That(integerSliderError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, integerSliderRequestId, out var integerSliderResult), Is.True);
+        Assert.That(integerSliderResult.Succeeded, Is.True, $"UI Toolkit SliderInt set_value failed: {integerSliderResult.Error}");
+        Assert.That(integerSliderResult.Value, Is.EqualTo("7"));
+        Assert.That(WaitForValue(host, integerSlider.Id, value => value == "7"), Is.True);
+
+        var firstTab = initialTree.Nodes.Single(node => node.Role == "tab" && node.Label == "first-tab");
+        var tabClickError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Click, firstTab.Id), out var tabClickRequestId);
+        Assert.That(tabClickError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, tabClickRequestId, out var tabClickResult), Is.True,
+            "UI Toolkit tab click must not remain pending.");
+        Assert.That(tabClickResult.Succeeded, Is.True, $"UI Toolkit tab click failed: {tabClickResult.Error}");
         Assert.That(WaitForObservedClick(host, "settings", out var observedClick), Is.True,
             "Host-driven Unity clicks must be published as uncorrelated Gua events.");
         Assert.That(observedClick.RequestId, Is.Zero);

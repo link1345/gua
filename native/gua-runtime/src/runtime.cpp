@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <chrono>
+#include <algorithm>
 #include <deque>
 #include <thread>
 #include <unordered_map>
@@ -110,6 +111,15 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
     return json;
 }
 
+bool valid_adapter_name(std::string_view adapter)
+{
+    if (adapter.empty()) return false;
+    for (const unsigned char ch : adapter) {
+        if ((ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '_') return false;
+    }
+    return true;
+}
+
 std::string copy_version_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
@@ -159,12 +169,38 @@ std::string status_json(gua_runtime_t* runtime)
         ",\"firstEventNodeId\":\"" + escape_json(status.first_event_node_id) + "\"}";
 }
 
+std::string stale_screenshot_json(uint64_t request_id, const gua_context_status_t& status)
+{
+    return "{\"requestId\":" + std::to_string(request_id) +
+        ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+        ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
+        ",\"unavailable\":\"stale_session\"}";
+}
+
+void invalidate_screenshot_requests(gua_runtime_t* runtime)
+{
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    if (gua_get_context_status(runtime->context, &status) == 0) return;
+    for (const auto& request : runtime->screenshot_requests)
+        runtime->screenshot_results[request.request_id] = stale_screenshot_json(request.request_id, status);
+    runtime->screenshot_requests.clear();
+    for (const auto& [leader, batch] : runtime->screenshot_batches) {
+        (void)leader;
+        for (const auto request_id : batch.request_ids)
+            runtime->screenshot_results[request_id] = stale_screenshot_json(request_id, status);
+    }
+    runtime->screenshot_batches.clear();
+    for (auto& [request_id, result] : runtime->screenshot_results)
+        result = stale_screenshot_json(request_id, status);
+}
+
 std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags, bool strict)
 {
     gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const std::lock_guard lock(runtime->context_mutex);
     const int result = gua_reset_context(runtime->context, &options, &report);
+    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
     return "{\"result\":" + std::to_string(result) +
         ",\"previousSessionEpoch\":" + std::to_string(report.previous_session_epoch) +
         ",\"sessionEpoch\":" + std::to_string(report.session_epoch) +
@@ -370,20 +406,22 @@ extern "C" int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gu
             ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
             ",\"frameSequence\":" + std::to_string(status.frame_sequence) + ",\"unavailable\":\"stale_session\"}";
     }
-    if (runtime->screenshot_requests.empty()) return 0;
-    auto first = runtime->screenshot_requests.front();
+    const auto first_ready = std::find_if(runtime->screenshot_requests.begin(), runtime->screenshot_requests.end(),
+        [&status](const auto& pending) {
+            return pending.session_epoch == status.session_epoch && status.frame_sequence > pending.after_frame_sequence;
+        });
+    if (first_ready == runtime->screenshot_requests.end()) return 0;
+    auto first = *first_ready;
     uint64_t after = first.after_frame_sequence;
-    for (const auto& pending : runtime->screenshot_requests) {
-        if (pending.session_epoch != first.session_epoch) break;
-        after = std::max(after, pending.after_frame_sequence);
-    }
-    if (status.frame_sequence <= after) return 0;
-
     std::vector<uint64_t> batch;
-    while (!runtime->screenshot_requests.empty() && runtime->screenshot_requests.front().session_epoch == first.session_epoch) {
-        batch.push_back(runtime->screenshot_requests.front().request_id);
-        after = std::max(after, runtime->screenshot_requests.front().after_frame_sequence);
-        runtime->screenshot_requests.pop_front();
+    for (auto pending = runtime->screenshot_requests.begin(); pending != runtime->screenshot_requests.end();) {
+        if (pending->session_epoch == first.session_epoch && status.frame_sequence > pending->after_frame_sequence) {
+            batch.push_back(pending->request_id);
+            after = std::max(after, pending->after_frame_sequence);
+            pending = runtime->screenshot_requests.erase(pending);
+        } else {
+            ++pending;
+        }
     }
     first.after_frame_sequence = after;
     runtime->screenshot_batches[first.request_id] = { first.session_epoch, std::move(batch) };
@@ -498,7 +536,7 @@ extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, con
 
 extern "C" void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version)
 {
-    if (!valid_runtime(runtime) || adapter == nullptr || adapter[0] == '\0') return;
+    if (!valid_runtime(runtime) || adapter == nullptr || !valid_adapter_name(adapter)) return;
     const std::lock_guard lock(runtime->context_mutex);
     if (version == nullptr || version[0] == '\0') runtime->adapter_versions.erase(adapter);
     else runtime->adapter_versions[adapter] = version;
@@ -688,7 +726,9 @@ extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset
 {
     if (!valid_runtime(runtime)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(runtime->context_mutex);
-    return gua_reset_context(runtime->context, options, out_report);
+    const int result = gua_reset_context(runtime->context, options, out_report);
+    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
+    return result;
 }
 
 extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port)

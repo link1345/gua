@@ -10,6 +10,7 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     private readonly Uri _bridgeUri;
     private readonly TimeSpan _requestTimeout;
     private ClientWebSocket? _socket;
+    private readonly List<GuaActionEvent> _bufferedActionEvents = new();
     private int _nextId = 1;
     private bool _disposed;
 
@@ -61,7 +62,7 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
                 type = "capture_screenshot",
                 afterFrameSequence,
                 timeoutMs = Math.Max(1, (int)timeout.TotalMilliseconds),
-            }));
+            }, timeout + _requestTimeout));
         }
         catch (InvalidOperationException error) when (error.Message.Contains("headless", StringComparison.Ordinal))
         { throw new GuaScreenshotException(GuaScreenshotError.Headless, "Godot viewport capture is unavailable in headless mode.", error); }
@@ -73,6 +74,8 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         { throw new GuaScreenshotException(GuaScreenshotError.Timeout, $"Godot viewport capture timed out after {timeout:g}.", error); }
         catch (InvalidOperationException error) when (error.Message.Contains("stale_session", StringComparison.Ordinal))
         { throw new GuaScreenshotException(GuaScreenshotError.StaleSession, "The screenshot request belongs to a stale Gua session epoch.", error); }
+        catch (OperationCanceledException error)
+        { throw new GuaScreenshotException(GuaScreenshotError.Timeout, $"Godot viewport capture timed out after {timeout:g}.", error); }
     }
 
     public GuaContextStatus GetContextStatus()
@@ -212,12 +215,25 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
 
     public bool TryPollActionEvent(out GuaActionEvent e)
     {
+        if (_bufferedActionEvents.Count != 0)
+        {
+            e = _bufferedActionEvents[0];
+            _bufferedActionEvents.RemoveAt(0);
+            return true;
+        }
         return TryPollActionEventCore(null, out e);
     }
 
     public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
     {
         ArgumentOutOfRangeException.ThrowIfZero(requestId);
+        var bufferedIndex = _bufferedActionEvents.FindIndex(candidate => candidate.RequestId == requestId);
+        if (bufferedIndex >= 0)
+        {
+            e = _bufferedActionEvents[bufferedIndex];
+            _bufferedActionEvents.RemoveAt(bufferedIndex);
+            return true;
+        }
         return TryPollActionEventCore(requestId, out e);
     }
 
@@ -239,6 +255,15 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
 
     public bool TryPollEvent(out GuaEvent e)
     {
+        while (TryPollActionEventCore(null, out var actionEvent))
+        {
+            if (actionEvent.Succeeded && actionEvent.Action is GuaActionType.Click or GuaActionType.Focus)
+            {
+                e = new GuaEvent(actionEvent.Action == GuaActionType.Click ? GuaEventType.Click : GuaEventType.Focus, actionEvent.NodeId);
+                return true;
+            }
+            _bufferedActionEvents.Add(actionEvent);
+        }
         e = default;
         return false;
     }
@@ -355,7 +380,7 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         }
     }
 
-    private string RequestRawResult(object command)
+    private string RequestRawResult(object command, TimeSpan? responseTimeout = null)
     {
         EnsureConnected();
         var id = _nextId++;
@@ -376,7 +401,7 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         Send(output.ToArray());
         while (true)
         {
-            var responseJson = ReceiveString();
+            var responseJson = ReceiveString(responseTimeout);
             using var response = JsonDocument.Parse(responseJson);
             if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
             {
@@ -422,9 +447,9 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
         socket.SendAsync(payload, WebSocketMessageType.Text, true, cts.Token).GetAwaiter().GetResult();
     }
 
-    private string ReceiveString()
+    private string ReceiveString(TimeSpan? timeout = null)
     {
-        using var cts = new CancellationTokenSource(_requestTimeout);
+        using var cts = new CancellationTokenSource(timeout ?? _requestTimeout);
         var buffer = new byte[65536];
         using var stream = new MemoryStream();
         while (true)

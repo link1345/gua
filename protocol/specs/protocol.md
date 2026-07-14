@@ -74,7 +74,10 @@ many selected items it discarded. Every successful reset increments
 `reset_context` commands must provide `expectedSessionEpoch`. A stale remote
 epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
-WebSocket connection.
+WebSocket connection. Runtime-owned on-demand screenshot requests, in-flight
+batches, and unpolled results from the previous epoch become `stale_session`
+after every successful reset; `GUA_RESET_SCREENSHOT` separately controls whether
+the latest published context screenshot is cleared.
 
 High-level testing clients may compose status, reset, diagnostics, and screenshot
 APIs into independent startup/teardown policies. Teardown capture runs before

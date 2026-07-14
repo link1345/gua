@@ -43,6 +43,8 @@ public sealed class GuaRuntime : IDisposable
     {
         ThrowIfDisposed();
         if (string.IsNullOrWhiteSpace(adapter)) throw new ArgumentException("Adapter name is required.", nameof(adapter));
+        if (adapter.Any(ch => ch is not (>= 'a' and <= 'z') and not (>= '0' and <= '9') and not '_'))
+            throw new ArgumentException("Adapter name must contain only lowercase ASCII letters, digits, and underscores.", nameof(adapter));
         if (string.IsNullOrWhiteSpace(version)) throw new ArgumentException("Adapter version is required.", nameof(version));
         Native.gua_runtime_set_adapter_version(_handle, adapter, version);
     }

@@ -48,15 +48,16 @@ Copy-Item (Join-Path $root "bindings\unity\package.json") $artifact
 Copy-Item (Join-Path $root "bindings\unity\Documentation~\index.md") (Join-Path $artifact "Documentation~")
 Copy-Item (Join-Path $root "bindings\unity\Samples~") $artifact -Recurse
 Copy-Item (Join-Path $root "bindings\unity\Runtime\link.xml") (Join-Path $artifact "Runtime")
-Copy-Item (Join-Path $root "bindings\unity\Runtime\Bootstrap") (Join-Path $artifact "Runtime\Bootstrap") -Recurse
 Copy-Item (Join-Path $plugins "Managed\*.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $plugins "x86_64\*.dll") (Join-Path $artifact "Runtime\Plugins\x86_64")
 Copy-Item (Join-Path $root "scripts\unity-meta\gua.dll.meta") (Join-Path $artifact "Runtime\Plugins\x86_64")
 Copy-Item (Join-Path $root "scripts\unity-meta\gua_runtime.dll.meta") (Join-Path $artifact "Runtime\Plugins\x86_64")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
+Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.Bootstrap.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.TMP.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.Editor.dll") (Join-Path $artifact "Editor")
 Copy-Item (Join-Path $root "scripts\unity-meta\Gua.Unity.dll.meta") (Join-Path $artifact "Runtime\Plugins\Managed")
+Copy-Item (Join-Path $root "scripts\unity-meta\Gua.Unity.Bootstrap.dll.meta") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $root "scripts\unity-meta\Gua.Unity.TMP.dll.meta") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $root "scripts\unity-meta\Gua.Unity.Editor.dll.meta") (Join-Path $artifact "Editor")
 $tgzStaging = Join-Path $root "artifacts\unity\tgz-staging"

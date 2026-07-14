@@ -38,6 +38,10 @@ public static class GuaUnityFixture
         camera.cullingMask = 0;
         camera.depth = -100;
 
+        var inactiveScreen = new GameObject("InactiveScreenMarker", typeof(GuaScreen));
+        inactiveScreen.GetComponent<GuaScreen>().Value = "inactive-screen";
+        inactiveScreen.SetActive(false);
+
         var canvasObject = new GameObject("GuaUnitySample", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster), typeof(GuaScreen));
         canvasObject.GetComponent<GuaScreen>().Value = "title";
         var canvas = canvasObject.GetComponent<Canvas>();
@@ -148,12 +152,25 @@ public static class GuaUnityFixture
         list.style.height = 80;
         root.Add(list);
 
+        var integerSlider = new SliderInt("integer-slider", 0, 10) { name = "integer-slider", value = 3 };
+        root.Add(integerSlider);
+
+        var tabView = new TabView { name = "fixture-tabs" };
+        tabView.Add(new Tab("First") { name = "first-tab" });
+        tabView.Add(new Tab("Second") { name = "second-tab" });
+        root.Add(tabView);
+
         var firstBranch = new VisualElement { name = "first-branch" };
         firstBranch.Add(new UnityEngine.UIElements.Button { name = "duplicate-button", text = "Duplicate A" });
         root.Add(firstBranch);
         var secondBranch = new VisualElement { name = "second-branch" };
         secondBranch.Add(new UnityEngine.UIElements.Button { name = "duplicate-button", text = "Duplicate B" });
         root.Add(secondBranch);
+
+        var disabledCanvasObject = new GameObject("DisabledCanvas", typeof(RectTransform), typeof(Canvas));
+        disabledCanvasObject.transform.SetParent(coverage.transform, false);
+        disabledCanvasObject.GetComponent<Canvas>().enabled = false;
+        Button("DisabledCanvasButton", "disabled-canvas-button", disabledCanvasObject.transform, "Hidden by Canvas", Vector2.zero);
 
         coverage.SetActive(string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_COVERAGE"), "1", StringComparison.Ordinal));
     }

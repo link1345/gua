@@ -25,14 +25,13 @@ $package | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $artif
 Copy-Item (Join-Path $root "bindings/unity/Documentation~/index.md") (Join-Path $artifact "Documentation~")
 Copy-Item (Join-Path $root "bindings/unity/Samples~") $artifact -Recurse
 Copy-Item (Join-Path $root "bindings/unity/Runtime/link.xml") (Join-Path $artifact "Runtime")
-Copy-Item (Join-Path $root "bindings/unity/Runtime/Bootstrap") (Join-Path $artifact "Runtime/Bootstrap") -Recurse
 Copy-Item (Join-Path $plugins "Managed/*.dll") (Join-Path $artifact "Runtime/Plugins/Managed")
 Copy-Item (Join-Path $plugins "x86_64/*.dll") (Join-Path $artifact "Runtime/Plugins/x86_64")
 Copy-Item (Join-Path $root "scripts/unity-meta/gua.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
 Copy-Item (Join-Path $root "scripts/unity-meta/gua_runtime.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
 
 $scriptAssemblies = Join-Path $project "Library/ScriptAssemblies"
-foreach ($assembly in "Gua.Unity.dll", "Gua.Unity.TMP.dll") {
+foreach ($assembly in "Gua.Unity.dll", "Gua.Unity.Bootstrap.dll", "Gua.Unity.TMP.dll") {
     $source = Join-Path $scriptAssemblies $assembly
     if (-not (Test-Path -LiteralPath $source)) { throw "Unity script assembly is missing: $source" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $artifact "Runtime/Plugins/Managed")

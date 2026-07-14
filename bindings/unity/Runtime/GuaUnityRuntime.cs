@@ -96,7 +96,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     private string CurrentScreen()
     {
-        var screen = FindFirstObjectByType<GuaScreen>(FindObjectsInactive.Include);
+        var screen = FindObjectsByType<GuaScreen>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+            .FirstOrDefault(candidate => candidate.isActiveAndEnabled && candidate.gameObject.activeInHierarchy);
         if (screen != null && !string.IsNullOrWhiteSpace(screen.Value)) return screen.Value;
         var scene = SceneManager.GetActiveScene();
         return string.IsNullOrWhiteSpace(scene.path) ? scene.name : scene.path;
@@ -159,12 +160,16 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     {
         var visited = new HashSet<Transform>();
         foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-            CollectTransform(canvas.transform, null, canvas, visited, null);
+        {
+            if (canvas.transform.parent != null && canvas.transform.parent.GetComponentInParent<Canvas>(true) != null) continue;
+            CollectTransform(canvas.transform, null, canvas, visited, null, true);
+        }
     }
 
-    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorButtonLabel)
+    private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorButtonLabel, bool parentVisible)
     {
         if (!visited.Add(transform)) return;
+        var localCanvas = transform.GetComponent<Canvas>() ?? canvas;
         var id = FitNodeId(ExplicitOrObjectId(transform.gameObject, transform.GetSiblingIndex().ToString(CultureInfo.InvariantCulture)));
         var selectable = transform.GetComponent<Selectable>();
         var text = transform.GetComponent<Text>();
@@ -172,8 +177,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var label = UGuiLabel(transform, selectable, text);
         object actionTarget = selectable ?? (object?)transform.GetComponent<ScrollRect>() ?? transform.gameObject;
         var rect = transform as RectTransform;
-        var bounds = rect == null ? default : ScreenBounds(rect, canvas);
-        var visible = transform.gameObject.activeInHierarchy && (selectable == null || selectable.IsActive());
+        var bounds = rect == null ? default : ScreenBounds(rect, localCanvas);
+        var visible = parentVisible && localCanvas.isActiveAndEnabled && transform.gameObject.activeInHierarchy && (selectable == null || selectable.IsActive());
         var enabled = selectable?.IsInteractable() ?? visible;
         bool? checkedValue = selectable is Toggle toggle ? toggle.isOn : null;
         var value = UGuiValue(selectable);
@@ -191,7 +196,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var childParentId = suppressAsButtonLabel ? parentId : id;
         var childButtonLabel = role == "button" ? label : selectable != null ? null : ancestorButtonLabel;
         for (var i = 0; i < transform.childCount; i++)
-            CollectTransform(transform.GetChild(i), childParentId, canvas, visited, childButtonLabel);
+            CollectTransform(transform.GetChild(i), childParentId, localCanvas, visited, childButtonLabel, visible);
     }
 
     private bool Register(string id, string role, string label, GuaBounds bounds, bool visible, bool enabled, string? parentId,
@@ -295,8 +300,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     private static IEnumerable<GuaActionType> SupportedActions(string role)
     {
-        if (role is "button" or "checkbox") yield return GuaActionType.Click;
-        if (role is "button" or "checkbox" or "textbox" or "slider" or "combobox" or "list") yield return GuaActionType.Focus;
+        if (role is "button" or "checkbox" or "tab") yield return GuaActionType.Click;
+        if (role is "button" or "checkbox" or "tab" or "textbox" or "slider" or "combobox" or "list") yield return GuaActionType.Focus;
         if (role is "textbox" or "slider") yield return GuaActionType.SetValue;
         if (role == "checkbox") yield return GuaActionType.SetChecked;
         if (role is "combobox" or "list" or "listitem" or "tablist" or "tab") yield return GuaActionType.Select;
@@ -335,6 +340,11 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             if (!float.TryParse(request.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var visualNumber)) { failure = GuaActionError.InvalidValue; return false; }
             visualSlider.value = visualNumber; value = visualSlider.value.ToString(CultureInfo.InvariantCulture); return true;
         }
+        if (target is SliderInt visualSliderInt && request.Action == GuaActionType.SetValue)
+        {
+            if (!int.TryParse(request.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var visualNumber)) { failure = GuaActionError.InvalidValue; return false; }
+            visualSliderInt.value = visualNumber; value = visualSliderInt.value.ToString(CultureInfo.InvariantCulture); return true;
+        }
         if (target is UnityEngine.UI.Slider slider && request.Action == GuaActionType.SetValue)
         {
             if (!float.TryParse(request.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)) { failure = GuaActionError.InvalidValue; return false; }
@@ -363,7 +373,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             if (!int.TryParse(request.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tabIndex)) { failure = GuaActionError.InvalidValue; return false; }
             tabView.selectedTabIndex = tabIndex; value = tabIndex.ToString(CultureInfo.InvariantCulture); return true;
         }
-        if (target is Tab tab && request.Action == GuaActionType.Select)
+        if (target is Tab tab && request.Action is GuaActionType.Click or GuaActionType.Select)
         { using var click = ClickEvent.GetPooled(); tab.SendEvent(click); value = tab.label; return true; }
         if (target is ListView scrollingList && request.Action == GuaActionType.Scroll)
         {

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Diagnostics;
 using Gua.Core;
 using Gua.Testing;
 using Gua.Testing.Godot;
@@ -167,6 +168,15 @@ public sealed class SelectorParityTests
             });
             Assert.That(remoteVersion.Capabilities, Does.Contain("version_v1"));
 
+            using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(sharedRemote.EnqueueClick("save-a"), Is.True);
+            Assert.That(Native.gua_runtime_consume_click_request(runtime, "save-a"), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_emit_click(runtime, "save-a"), Is.EqualTo(1));
+            Assert.That(sharedRemote.TryPollEvent(out var legacyEvent), Is.True);
+            Assert.That(legacyEvent.Type, Is.EqualTo(GuaEventType.Click));
+            Assert.That(legacyEvent.NodeId, Is.EqualTo("save-a"));
+
             var invalid = new GuaSelector(Text: "[", TextMatch: GuaMatchMode.Regex);
             Assert.Multiple(() =>
             {
@@ -237,6 +247,16 @@ public sealed class SelectorParityTests
             var error = Assert.Throws<GuaScreenshotException>(() =>
                 remote.CaptureScreenshot(TimeSpan.FromMilliseconds(30), afterFrameSequence: 1));
             Assert.That(error!.Error, Is.EqualTo(GuaScreenshotError.Timeout));
+
+            using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromMilliseconds(20));
+            sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var stopwatch = Stopwatch.StartNew();
+            var sharedError = Assert.Throws<GuaRemoteScreenshotException>(() =>
+                sharedRemote.CaptureScreenshot(TimeSpan.FromMilliseconds(100), afterFrameSequence: 1));
+            stopwatch.Stop();
+            Assert.That(sharedError!.Error, Is.EqualTo(GuaRemoteScreenshotError.Timeout));
+            Assert.That(stopwatch.Elapsed, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(70)),
+                "CaptureScreenshot must honor its capture timeout instead of the shorter default request timeout.");
         }
         finally
         {
@@ -268,6 +288,10 @@ public sealed class SelectorParityTests
         internal static extern void gua_runtime_register_node(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string role, [MarshalAs(UnmanagedType.LPUTF8Str)] string label,
             GuaBounds bounds, int visible, int enabled);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_consume_click_request(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_emit_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
