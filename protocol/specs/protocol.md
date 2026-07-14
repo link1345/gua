@@ -199,11 +199,22 @@ and are never inferred from OS/GPU state. Masks are removed from both diff outpu
 and the ratio denominator. Dimension mismatch never performs an implicit resize.
 
 `recording.schema.json` is the source of truth for recording version 1. Targets
-prefer stable `id`, then strict role/name/scope selection, with coordinate fallback
-only when explicitly recorded and permitted. Request IDs deduplicate retained
-operation/event history. Replay preserves delays or prefers recorded semantic wait
-conditions. Sensitive steps contain a `secretKey`, never plaintext, and require a
-caller resolver.
+prefer stable `id`, then strict role/name/scope selection, with current focus valid
+only for key input and coordinate fallback only when explicitly recorded and
+permitted. Diagnostics history includes monotonic elapsed milliseconds and the
+revision observed at each entry; enqueued and consumed operation entries also
+include complete action arguments. An enqueued operation can therefore be paired
+with its observed completion without inventing timing or state metadata. Request
+IDs deduplicate retained operation/event history. Replay
+preserves delays or prefers recorded semantic wait conditions and waits for the
+request-ID-correlated host completion of every semantic action. Sensitive steps
+contain a `secretKey`, never plaintext, and require a caller resolver.
+
+MCP and Inspector implement these features as protocol consumers rather than as
+new C ABI runtime state. MCP artifact names are confined to its configured
+artifact root. The browser Inspector uses explicit JSON/image import and download
+instead of arbitrary local filesystem access. Both consumers must preserve the
+recording v1 redaction rule.
 
 ## Commands
 
@@ -279,20 +290,23 @@ WebSocket bridge at `ws://127.0.0.1:8765`; set `GUA_BRIDGE_URL` to target anothe
 runtime adapter. The npm-ready CLI entrypoint is `gui-mcp mcp`, so a published
 package can be launched with `bunx gui-mcp@latest mcp`.
 
-Initial MCP tools:
+MCP tools:
 
 - `get_ui_tree`: returns the current semantic UI tree
-- `click_node`: sends a click command for a node id
-- `press_key`: sends a key command when the connected bridge supports it
+- `click_node`, `focus_node`, `set_value`, `set_checked`, `select`, `scroll`, `press_key`: invoke protocol v1 semantic actions
 - `wait_for_node`: polls `get_ui_tree` until a node id appears
 - `get_screenshot`: returns the latest screenshot payload
 - `get_logs`: returns ordered runtime logs
-- `get_diagnostics`: returns the versioned best-effort diagnostics snapshot
-- `get_version`: returns `version.schema.json` for the components actually loaded. `godotPluginVersion` is `null` outside Godot. Capability IDs are stable public identifiers; new IDs are additive.
+- `start_recording`, `stop_recording`, `save_recording`: manage a client-local recording session and persist a recording v1 document
+- `replay_recording`: resolves semantic targets and secrets, honors delay/condition timing, and waits for correlated completion
+- `compare_screenshot`: compares an explicit PNG baseline and writes visual artifacts without implicitly changing the baseline
+- `get_visual_artifacts`: lists the latest comparison manifest and artifact paths
 - `run_test`: executes a small list of `wait_for_node` and `click_node` steps
 
 The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua
-request/response WebSocket payloads for the runtime side.
+request/response WebSocket payloads for the runtime side. It may keep recording
+and artifact metadata for its own client session, but does not own or duplicate
+the game runtime's semantic state.
 
 ## Events
 

@@ -45,35 +45,6 @@ public sealed class VisualTests
         Assert.That(Directory.GetFiles(Path.Combine(_root, "artifacts"), "comparison.json", SearchOption.AllDirectories), Is.Not.Empty);
     }
 
-    [Test]
-    public void RecordingRejectsUnknownVersionAndNeverSerializesSensitiveValue()
-    {
-        Assert.Throws<InvalidDataException>(() => GuaRecordingFile.Validate(new(2, [])));
-        var recording = new GuaRecording(1, [new(GuaRecordedAction.set_value, 0, 1, 2, true, 7, 7, new(Id: "password"), SecretKey: "login-password")]);
-        var path = Path.Combine(_root, "recording.json"); GuaRecordingFile.Save(path, recording); var json = File.ReadAllText(path);
-        Assert.Multiple(() => { Assert.That(json, Does.Contain("login-password")); Assert.That(json, Does.Not.Contain("secret-marker")); Assert.That(GuaRecordingFile.Load(path).SchemaVersion, Is.EqualTo(1)); });
-    }
-
-    [Test]
-    public void RecorderDeduplicatesAutomationAndKeepsHostEvents()
-    {
-        const string json = "{\"revision\":9,\"operations\":[{\"requestId\":4,\"action\":\"click\",\"nodeId\":\"start\",\"sensitive\":false}],\"events\":[{\"requestId\":4,\"action\":\"click\",\"nodeId\":\"start\",\"sensitive\":false},{\"requestId\":0,\"action\":\"focus\",\"nodeId\":\"name\",\"sensitive\":false}]}";
-        var recording = GuaRecordingFile.FromDiagnostics(json);
-        Assert.Multiple(() => { Assert.That(recording.Steps, Has.Count.EqualTo(2)); Assert.That(recording.Steps[0].Target!.Id, Is.EqualTo("start")); Assert.That(recording.Steps[1].Target!.Id, Is.EqualTo("name")); });
-    }
-
-    [Test]
-    public async Task ReplayPrefersSemanticIdRefusesCoordinatesAndRequiresSecretResolver()
-    {
-        var context = new FakeContext(Png(1, 1, 0));
-        var semantic = new GuaRecording(1, [new(GuaRecordedAction.set_value, 0, 1, 2, true, Target: new(Id: "password"), SecretKey: "password")]);
-        Assert.ThrowsAsync<InvalidOperationException>(() => GuaReplayer.ReplayAsync(context, semantic));
-        await GuaReplayer.ReplayAsync(context, semantic, new() { SecretResolver = key => key == "password" ? "secret-marker" : null });
-        Assert.Multiple(() => { Assert.That(context.LastRequest.NodeId, Is.EqualTo("password")); Assert.That(context.LastRequest.Sensitive, Is.True); });
-        var coordinate = new GuaRecording(1, [new(GuaRecordedAction.click, 0, 1, 2, false, CoordinateFallback: new(3, 4))]);
-        Assert.ThrowsAsync<InvalidOperationException>(() => GuaReplayer.ReplayAsync(context, coordinate));
-    }
-
     private ScreenshotOptions Options(string variant, bool update = false, float threshold = 0, double ratio = 0, IReadOnlyList<GuaMaskRectangle>? masks = null) => new() { BaselineDirectory = Path.Combine(_root, "baselines"), ArtifactDirectory = Path.Combine(_root, "artifacts"), BaselineVariant = variant, UpdateBaselines = update, PixelThreshold = threshold, MaxDifferentPixelRatio = ratio, Masks = masks ?? [] };
     private static byte[] Png(int width, int height, byte first, byte? second = null) { var pixels = new byte[width * height * 4]; for (var i = 0; i < width * height; i++) { var value = i == 1 && second.HasValue ? second.Value : first; pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = value; pixels[i * 4 + 3] = 255; } using var stream = new MemoryStream(); new ImageWriter().WritePng(pixels, width, height, ColorComponents.RedGreenBlueAlpha, stream); return stream.ToArray(); }
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Gua.Core;
 using Gua.Testing.Godot;
 using Gua.Testing;
+using Gua.Testing.Recording;
 using Gua.Testing.Visual;
 using NUnit.Framework;
 
@@ -75,18 +76,17 @@ public sealed class GodotVisualIntegrationTests
                 new(GuaRecordedAction.set_value, 2, 0, 0, true,
                     Target: new GuaRecordingTarget(Id: "visual-password"), SecretKey: "password"),
             ]);
-            await GuaReplayer.ReplayAsync(normal.Context, recording, new GuaReplayOptions
+            var replay = await GuaReplayer.ReplayAsync(normal.Context, recording, new GuaReplayOptions
             {
                 SecretResolver = key => key == "password" ? Secret : null,
             });
-            var events = await WaitForActionEventsAsync(normal.Context, 3, TimeSpan.FromSeconds(5));
 
             var diagnostics = normal.Context.GetDiagnosticsJson();
             var recorded = JsonSerializer.Serialize(GuaRecordingFile.FromDiagnostics(diagnostics));
             Assert.Multiple(() =>
             {
-                Assert.That(events, Has.All.Property(nameof(GuaActionEvent.Succeeded)).True);
-                Assert.That(events.Select(value => value.NodeId), Is.EquivalentTo(new[] { "visual-checkbox", "visual-select", "visual-password" }));
+                Assert.That(replay.Steps.Select(value => value.Completion), Has.All.Property(nameof(GuaActionEvent.Succeeded)).True);
+                Assert.That(replay.Steps.Select(value => value.Completion!.Value.NodeId), Is.EquivalentTo(new[] { "visual-checkbox", "visual-select", "visual-password" }));
                 Assert.That(diagnostics, Does.Not.Contain(Secret));
                 Assert.That(recorded, Does.Not.Contain(Secret));
                 Assert.That(recorded, Does.Contain("visual-checkbox"));

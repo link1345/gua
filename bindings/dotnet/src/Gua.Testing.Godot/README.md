@@ -8,6 +8,8 @@ Godot visual capture is opt-in. After the adapter publishes a viewport PNG,
 `GodotSceneTestHost.WaitForScreenshotAsync` waits for that existing protocol
 payload. Add `Gua.Testing.Visual` only in visual test projects; the base Godot
 testing package deliberately has no PNG codec dependency.
+Add `Gua.Testing.Recording` separately when semantic operation recording and
+correlated replay are required.
 
 ```csharp
 using Gua.Testing;

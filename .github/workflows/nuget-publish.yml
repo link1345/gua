@@ -19,6 +19,9 @@ on:
       - bindings/dotnet/src/Gua.Core/**
       - bindings/dotnet/src/Gua.Testing/**
       - bindings/dotnet/src/Gua.Testing.Godot/**
+      - bindings/dotnet/src/Gua.Testing.Visual/**
+      - bindings/dotnet/src/Gua.Testing.Recording/**
+      - bindings/dotnet/tests/Gua.Visual.Tests/**
       - native/gua-core/**
       - protocol/**
 
@@ -68,9 +71,11 @@ jobs:
         run: cmake --build --preset windows-msvc-release --target gua --config Release
 
       - name: Restore
+        shell: pwsh
         run: |
           dotnet restore bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj
           dotnet restore bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj
+          dotnet restore bindings/dotnet/tests/Gua.Visual.Tests/Gua.Visual.Tests.csproj
 
       - name: Build Gua.Core and Gua.Testing target frameworks
         run: |
@@ -79,8 +84,18 @@ jobs:
           dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
 
+      - name: Build Visual and Recording target frameworks
+        run: |
+          dotnet build bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
+
       - name: Build existing consumers
         run: dotnet build bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test Visual and Recording packages
+        run: dotnet test bindings/dotnet/tests/Gua.Visual.Tests/Gua.Visual.Tests.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Pack Gua.Core
         run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
@@ -90,6 +105,12 @@ jobs:
 
       - name: Pack Gua.Testing.Godot
         run: dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Pack Gua.Testing.Visual
+        run: dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Pack Gua.Testing.Recording
+        run: dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4

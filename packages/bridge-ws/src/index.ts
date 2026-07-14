@@ -30,6 +30,8 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
         return ok(command.id, runtime.getLogs());
       case "get_screenshot":
         return ok(command.id, runtime.getScreenshot());
+      case "poll_events":
+        return ok(command.id, null);
       case "click_node":
         runtime.clickNode(command.nodeId);
         return ok(command.id, null);
@@ -38,6 +40,18 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
         return ok(command.id, null);
       case "press_key":
         runtime.pressKey(command.key);
+        return ok(command.id, null);
+      case "set_value":
+        runtime.log("info", `set_value(${command.nodeId})`);
+        return ok(command.id, null);
+      case "set_checked":
+        runtime.log("info", `set_checked(${command.nodeId}, ${command.checked})`);
+        return ok(command.id, null);
+      case "select":
+        runtime.log("info", `select(${command.nodeId}, ${command.value})`);
+        return ok(command.id, null);
+      case "scroll":
+        runtime.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
         return ok(command.id, null);
     }
   } catch (error) {

@@ -22,6 +22,10 @@ recognition or coordinate-based input.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Starts a Godot process and provides helpers for controlling and verifying a
   running scene through the Gua bridge.
+- **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
+  Adds opt-in PNG baseline comparison and machine-readable visual failure artifacts.
+- **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
+  Records semantic UI operations and replays them with correlated host completion.
 
 ## MCP and Inspector
 
@@ -236,6 +240,9 @@ The .NET packages are published on NuGet and can also be packed locally:
 ```powershell
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release
 ```
 
 The packages are written to `artifacts/packages`. `Gua.Testing` declares a NuGet
@@ -274,7 +281,8 @@ dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 
 ### Unity 6 Windows Editor
 
-`Gua.Core` and `Gua.Testing` target both `net10.0` and `netstandard2.1`.
+`Gua.Core`, `Gua.Testing`, `Gua.Testing.Visual`, and
+`Gua.Testing.Recording` target both `net10.0` and `netstandard2.1`.
 Unity 6 projects using the default **.NET Standard 2.1** API Compatibility
 Level can load the managed assemblies without changing the native C ABI.
 The first verified native configuration is Windows Editor x64: place the
@@ -333,6 +341,16 @@ The ImGui bridge pushes snapshot notifications while the UI is running, so the
 Inspector updates without polling. The `Poll` toggle in the Inspector remains as
 a fallback for bridges that only implement request/response.
 
+The Inspector Automation panel can record semantic actions issued from the UI,
+download or import a `recording.schema.json` document, replay every semantic
+action, and supply sensitive replay values from an in-memory JSON map. Its Visual
+comparison controls accept the current screenshot or a selected image as a
+baseline, compare in the browser, and download Actual/Expected/Diff images plus a
+machine-readable manifest. Browser Inspector files are explicit downloads; it
+does not silently write arbitrary local paths.
+Coordinate fallback recordings are accepted as schema v1 documents but are not
+executed by the Inspector; replay remains semantic-target-only by default.
+
 The bridge speaks the same JSON command shape used by Gua runtime adapters:
 
 ```json
@@ -388,12 +406,28 @@ The MCP tool surface is:
 ```text
 get_ui_tree
 click_node
+focus_node
+set_value
+set_checked
+select
+scroll
 press_key
 wait_for_node
 get_screenshot
 get_logs
+start_recording
+stop_recording
+save_recording
+replay_recording
+compare_screenshot
+get_visual_artifacts
 run_test
 ```
+
+Recording, baseline, and visual failure files default to `.gua`. Set
+`GUA_ARTIFACT_DIR` to choose a different root. Names supplied to MCP tools cannot
+escape that root. Semantic action tools wait for request-ID-correlated host
+completion when the connected bridge supports it.
 
 ## Release automation
 
@@ -502,6 +536,10 @@ native/gua-godot/     Godot GDExtension adapter for GDScript
 bindings/dotnet/      .NET P/Invoke binding and C# testing helpers
 bindings/dotnet/src/Gua.Testing.Godot/
                       Godot process test helpers over Gua.Testing
+bindings/dotnet/src/Gua.Testing.Visual/
+                      Opt-in PNG baseline comparison helpers
+bindings/dotnet/src/Gua.Testing.Recording/
+                      Semantic operation recording and correlated replay
 packages/mcp/         Published MCP server package
 packages/inspector/   Browser and Tauri desktop Inspector UI
 examples/             Minimal demos and samples, including the Godot C# sample

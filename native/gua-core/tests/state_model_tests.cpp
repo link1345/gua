@@ -229,6 +229,15 @@ int main()
     assert(std::strlen(event.base.value) == 0);
     assert(event.session_epoch == 1 && event.frame_sequence > 0 && event.revision > 0);
 
+    const std::string complete_diagnostics = gua_get_diagnostics_json(context);
+    assert(complete_diagnostics.find("\"elapsedMilliseconds\":") != std::string::npos);
+    assert(complete_diagnostics.find("\"revision\":") != std::string::npos);
+    assert(complete_diagnostics.find("\"deltaX\":2.000000") != std::string::npos);
+    assert(complete_diagnostics.find("\"deltaY\":3.000000") != std::string::npos);
+    assert(complete_diagnostics.find("\"boolValue\":true") != std::string::npos);
+    assert(complete_diagnostics.find("\"key\":\"A\"") != std::string::npos);
+    assert(complete_diagnostics.find("secret-marker") == std::string::npos);
+
     assert(gua_set_diagnostics_history_limit(context, 2) == 1);
     assert(gua_set_diagnostics_environment_json(context, "{\"testName\":\"native-state\"}") == 1);
     const std::string diagnostics = gua_get_diagnostics_json(context);

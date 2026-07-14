@@ -39,7 +39,9 @@ button:disabled {
   cursor: default;
 }
 
-.gua-connect input {
+.gua-connect input,
+.gua-action-editor input,
+.gua-file-field textarea {
   background: #0f141b;
   border: 1px solid #354151;
   color: #e8edf4;
@@ -204,8 +206,23 @@ button:disabled {
 
 .gua-command-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.gua-action-editor {
+  border-bottom: 1px solid #2b333d;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+}
+
+.gua-action-editor > label {
+  align-items: center;
+  display: flex;
+  gap: 6px;
 }
 
 .gua-detail {
@@ -286,6 +303,48 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.gua-automation-panel {
+  grid-column: 1 / -1;
+}
+
+.gua-automation-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gua-automation-grid h3 {
+  color: #c8d2df;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.gua-file-field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.gua-file-field > span {
+  color: #96a3b3;
+}
+
+.gua-file-field textarea {
+  min-height: 62px;
+  resize: vertical;
+}
+
+.gua-visual-result {
+  border: 1px solid #354151;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+}
+
+.gua-visual-result--matched strong { color: #8fd6a4; }
+.gua-visual-result--failed strong { color: #ffb86b; }
+
 .gua-log-list {
   display: grid;
 }
@@ -347,5 +406,9 @@ button:disabled {
   .gua-connect input {
     min-width: 0;
     width: 100%;
+  }
+
+  .gua-automation-grid {
+    grid-template-columns: 1fr;
   }
 }

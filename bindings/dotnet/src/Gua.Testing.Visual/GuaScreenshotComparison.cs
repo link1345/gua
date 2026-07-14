@@ -32,8 +32,8 @@ public static class GuaVisualAssertions
     public static async Task<ScreenshotComparisonResult> ExpectScreenshotAsync(
         IGuaContext context, string name, ScreenshotOptions? options = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (context is null) throw new ArgumentNullException(nameof(context));
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Screenshot name is required.", nameof(name));
         options ??= new ScreenshotOptions();
         Validate(options);
         if (options.WaitForStableSnapshot)

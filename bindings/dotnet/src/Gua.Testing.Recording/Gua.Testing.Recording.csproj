@@ -4,13 +4,12 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageId>Gua.Testing.Visual</PackageId>
+    <PackageId>Gua.Testing.Recording</PackageId>
     <Version>$(GuaPackageVersion)</Version>
     <Authors>Gua contributors</Authors>
-    <Title>Gua Testing Visual</Title>
-    <Description>Opt-in PNG baseline comparison for Gua UI automation tests.</Description>
-    <PackageTags>gua;game-ui;automation;testing;visual-regression;screenshot</PackageTags>
+    <Title>Gua Testing Recording</Title>
+    <Description>Semantic UI operation recording and correlated replay for Gua.</Description>
+    <PackageTags>gua;game-ui;automation;testing;recording;replay</PackageTags>
     <PackageProjectUrl>https://github.com/link1345/gua</PackageProjectUrl>
     <RepositoryUrl>https://github.com/link1345/gua</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -22,8 +21,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Gua.Testing\Gua.Testing.csproj" />
-    <PackageReference Include="StbImageSharp" Version="2.30.15" />
-    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
