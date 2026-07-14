@@ -15,6 +15,7 @@ if (command === "mcp") {
 
 Environment:
   GUA_BRIDGE_URL  WebSocket URL for the Gua runtime bridge. Defaults to ws://127.0.0.1:8765.
+  GUA_ARTIFACT_DIR  Root for recordings, baselines, and visual artifacts. Defaults to .gua.
 `);
 } else {
   process.stderr.write(`[gui-mcp] error: unknown command: ${command}\n`);

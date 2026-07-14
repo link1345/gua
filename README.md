@@ -339,6 +339,16 @@ The ImGui bridge pushes snapshot notifications while the UI is running, so the
 Inspector updates without polling. The `Poll` toggle in the Inspector remains as
 a fallback for bridges that only implement request/response.
 
+The Inspector Automation panel can record semantic actions issued from the UI,
+download or import a `recording.schema.json` document, replay every semantic
+action, and supply sensitive replay values from an in-memory JSON map. Its Visual
+comparison controls accept the current screenshot or a selected image as a
+baseline, compare in the browser, and download Actual/Expected/Diff images plus a
+machine-readable manifest. Browser Inspector files are explicit downloads; it
+does not silently write arbitrary local paths.
+Coordinate fallback recordings are accepted as schema v1 documents but are not
+executed by the Inspector; replay remains semantic-target-only by default.
+
 The bridge speaks the same JSON command shape used by Gua runtime adapters:
 
 ```json
@@ -394,12 +404,28 @@ The MCP tool surface is:
 ```text
 get_ui_tree
 click_node
+focus_node
+set_value
+set_checked
+select
+scroll
 press_key
 wait_for_node
 get_screenshot
 get_logs
+start_recording
+stop_recording
+save_recording
+replay_recording
+compare_screenshot
+get_visual_artifacts
 run_test
 ```
+
+Recording, baseline, and visual failure files default to `.gua`. Set
+`GUA_ARTIFACT_DIR` to choose a different root. Names supplied to MCP tools cannot
+escape that root. Semantic action tools wait for request-ID-correlated host
+completion when the connected bridge supports it.
 
 ## Release automation
 

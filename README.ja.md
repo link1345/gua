@@ -158,6 +158,15 @@ Inspectorの接続先は次のとおりです。
 ws://127.0.0.1:8765
 ```
 
+InspectorのAutomationパネルでは、画面から実行したSemantic操作の記録、
+`recording.schema.json`の読み込み・ダウンロード、全Semantic操作のReplayを
+行えます。秘密値はメモリ上のJSON mapからだけ解決します。Visual comparisonでは、
+現在のスクリーンショットまたは選択した画像をbaselineにしてブラウザー内で比較し、
+Actual・Expected・Diff画像とmanifestをダウンロードできます。ブラウザー版Inspectorが
+任意のローカルパスへ暗黙に書き込むことはありません。
+座標fallbackを含むRecordingもschema v1として読み込めますが、Inspectorは実行せず、
+Replayは既定でSemantic targetだけを使用します。
+
 静的InspectorのビルドとTauriデスクトップシェルの開発起動には、次のコマンドを使用します。TauriにはRustツールチェーンも必要です。
 
 ```powershell
@@ -193,12 +202,28 @@ bunx gui-mcp@latest mcp
 ```text
 get_ui_tree
 click_node
+focus_node
+set_value
+set_checked
+select
+scroll
 press_key
 wait_for_node
 get_screenshot
 get_logs
+start_recording
+stop_recording
+save_recording
+replay_recording
+compare_screenshot
+get_visual_artifacts
 run_test
 ```
+
+Recording、baseline、Visual失敗artifactは既定で`.gua`へ保存します。
+`GUA_ARTIFACT_DIR`で保存rootを変更できますが、MCPツールへ渡した名前からroot外へは
+書き出せません。接続先bridgeが対応している場合、Semantic action toolは
+request IDに対応するhost完了eventまで待機します。
 
 ## Godot 4.7 C#サンプル
 

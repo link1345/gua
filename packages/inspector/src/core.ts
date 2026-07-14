@@ -65,6 +65,7 @@ export interface GuaInspectorClient {
   getUiTree(): Promise<GuaUiTree>;
   getLogs(): Promise<GuaLogEntry[]>;
   getScreenshot(): Promise<GuaScreenshot>;
+  performAction(action: SemanticActionInput): Promise<ActionOutcome>;
   clickNode(nodeId: string): Promise<void>;
   focusNode(nodeId: string): Promise<void>;
 }
@@ -73,19 +74,30 @@ export type GuaInspectorCommand =
   | { id: number; type: "get_ui_tree" }
   | { id: number; type: "get_logs" }
   | { id: number; type: "get_screenshot" }
+  | { id: number; type: "poll_events"; requestId: number }
   | { id: number; type: "click_node"; nodeId: string }
   | { id: number; type: "focus_node"; nodeId: string }
-  | { id: number; type: "press_key"; key: string };
+  | { id: number; type: "set_value"; nodeId: string; value: string; sensitive?: boolean }
+  | { id: number; type: "set_checked"; nodeId: string; checked: boolean }
+  | { id: number; type: "select"; nodeId: string; value: string }
+  | { id: number; type: "scroll"; nodeId: string; deltaX: number; deltaY: number; scrollUnit?: number }
+  | { id: number; type: "press_key"; nodeId?: string; key: string; modifiers?: number };
 
 type GuaInspectorCommandInput =
   | { type: "get_ui_tree" }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
+  | { type: "poll_events"; requestId: number }
   | { type: "click_node"; nodeId: string }
-  | { type: "focus_node"; nodeId: string };
+  | { type: "focus_node"; nodeId: string }
+  | { type: "set_value"; nodeId: string; value: string; sensitive?: boolean }
+  | { type: "set_checked"; nodeId: string; checked: boolean }
+  | { type: "select"; nodeId: string; value: string }
+  | { type: "scroll"; nodeId: string; deltaX: number; deltaY: number; scrollUnit?: number }
+  | { type: "press_key"; nodeId?: string; key: string; modifiers?: number };
 
 export type GuaInspectorResponse =
-  | { id: number; ok: true; result: GuaUiTree | GuaLogEntry[] | GuaScreenshot | null }
+  | { id: number; ok: true; result: unknown }
   | { id: number; ok: false; error: string };
 
 export type GuaInspectorNotification =
@@ -269,6 +281,19 @@ export class MockInspectorClient implements GuaInspectorClient {
     };
   }
 
+  async performAction(action: SemanticActionInput): Promise<ActionOutcome> {
+    if (action.action === "click") await this.clickNode(action.nodeId as string);
+    else if (action.action === "focus") await this.focusNode(action.nodeId as string);
+    else {
+      this.logs = [...this.logs, {
+        sequence: this.logs.length + 1,
+        level: "info",
+        message: `${action.action}(${action.nodeId ?? "current-focus"})`,
+      }];
+    }
+    return {};
+  }
+
   async clickNode(nodeId: string): Promise<void> {
     this.logs = [
       ...this.logs,
@@ -296,6 +321,30 @@ export class MockInspectorClient implements GuaInspectorClient {
       },
     ];
   }
+}
+
+function actionCommand(action: SemanticActionInput): GuaInspectorCommandInput {
+  switch (action.action) {
+    case "click": return { type: "click_node", nodeId: requiredNodeId(action) };
+    case "focus": return { type: "focus_node", nodeId: requiredNodeId(action) };
+    case "set_value": return {
+      type: "set_value", nodeId: requiredNodeId(action), value: action.value ?? "", sensitive: action.sensitive,
+    };
+    case "set_checked": return { type: "set_checked", nodeId: requiredNodeId(action), checked: action.checked === true };
+    case "select": return { type: "select", nodeId: requiredNodeId(action), value: action.value ?? "" };
+    case "scroll": return {
+      type: "scroll", nodeId: requiredNodeId(action), deltaX: action.deltaX ?? 0,
+      deltaY: action.deltaY ?? 0, scrollUnit: action.scrollUnit,
+    };
+    case "press_key": return {
+      type: "press_key", nodeId: action.nodeId, key: action.key ?? "", modifiers: action.modifiers,
+    };
+  }
+}
+
+function requiredNodeId(action: SemanticActionInput): string {
+  if (action.nodeId === undefined || action.nodeId.length === 0) throw new Error(`${action.action} requires nodeId.`);
+  return action.nodeId;
 }
 
 interface PendingRequest {
@@ -329,12 +378,28 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     return this.request<GuaScreenshot>({ type: "get_screenshot" });
   }
 
+  async performAction(action: SemanticActionInput): Promise<ActionOutcome> {
+    const command = actionCommand(action);
+    const receipt = await this.request<{ requestId: number } | null>(command);
+    if (receipt === null) return {};
+    const started = Date.now();
+    while (Date.now() - started <= 10000) {
+      const completion = await this.request<NonNullable<ActionOutcome["completion"]> | null>({ type: "poll_events", requestId: receipt.requestId });
+      if (completion !== null) {
+        if (!completion.succeeded) throw new Error(`Gua action failed with error ${completion.error}.`);
+        return { requestId: receipt.requestId, completion };
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    }
+    throw new Error(`Timed out waiting for Gua action request ${receipt.requestId}.`);
+  }
+
   async clickNode(nodeId: string): Promise<void> {
-    await this.request<null>({ type: "click_node", nodeId });
+    await this.performAction({ action: "click", nodeId });
   }
 
   async focusNode(nodeId: string): Promise<void> {
-    await this.request<null>({ type: "focus_node", nodeId });
+    await this.performAction({ action: "focus", nodeId });
   }
 
   close(): void {
@@ -470,3 +535,4 @@ function parseJson<T>(json: string, description: string): T {
 function isNotification(value: GuaInspectorResponse | GuaInspectorNotification): value is GuaInspectorNotification {
   return "type" in value && value.type === "snapshot";
 }
+import type { ActionOutcome, SemanticActionInput } from "./automation";

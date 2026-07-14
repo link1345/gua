@@ -76,3 +76,8 @@ jobs:
 
       - name: Check
         run: bun run check
+
+      - name: Test MCP automation
+        run: |
+          bun run --filter gui-mcp test
+          bun run --filter @gua/inspector test
