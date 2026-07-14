@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Diagnostics;
 using Gua.Core;
+using Gua.Runtime;
 using Gua.Testing;
 using Gua.Testing.Godot;
 using NUnit.Framework;
@@ -12,6 +14,40 @@ namespace Gua.Selector.Tests;
 [TestFixture]
 public sealed class SelectorParityTests
 {
+    [Test]
+    public void RemoteTreeDeserializesProtocolBoundsAndNestedState()
+    {
+        const string json = """
+            {"screen":"fixture","revision":4,"nodes":[{"id":"remember","role":"checkbox","label":"Remember","visible":true,"enabled":true,"bounds":{"x":10,"y":20,"w":30,"h":40},"state":{"focused":false,"checked":true,"selected":false},"actions":["click"]}]}
+            """;
+        var tree = JsonSerializer.Deserialize<GuaRemoteTree>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var node = tree!.Nodes.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(node.Bounds.X, Is.EqualTo(10));
+            Assert.That(node.Bounds.Y, Is.EqualTo(20));
+            Assert.That(node.Bounds.Width, Is.EqualTo(30));
+            Assert.That(node.Bounds.Height, Is.EqualTo(40));
+            Assert.That(node.Focused, Is.False);
+            Assert.That(node.Checked, Is.True);
+            Assert.That(node.Selected, Is.False);
+        });
+    }
+
+    [Test]
+    public void RuntimeJsonCopiesRemainValidWhileVersionSizeChanges()
+    {
+        using var runtime = new GuaRuntime();
+        var writer = Task.Run(() =>
+        {
+            for (var index = 0; index < 10_000; index++)
+                runtime.SetAdapterVersion("unity", index % 2 == 0 ? "1" : new string('2', 1000));
+        });
+        for (var index = 0; index < 10_000; index++)
+            using (JsonDocument.Parse(runtime.GetVersionJson())) { }
+        writer.GetAwaiter().GetResult();
+    }
+
     [Test]
     public void VersionModelReportsCapabilitiesAndCompatibilityFailures()
     {
@@ -167,6 +203,15 @@ public sealed class SelectorParityTests
             });
             Assert.That(remoteVersion.Capabilities, Does.Contain("version_v1"));
 
+            using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(sharedRemote.EnqueueClick("save-a"), Is.True);
+            Assert.That(Native.gua_runtime_consume_click_request(runtime, "save-a"), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_emit_click(runtime, "save-a"), Is.EqualTo(1));
+            Assert.That(sharedRemote.TryPollEvent(out var legacyEvent), Is.True);
+            Assert.That(legacyEvent.Type, Is.EqualTo(GuaEventType.Click));
+            Assert.That(legacyEvent.NodeId, Is.EqualTo("save-a"));
+
             var invalid = new GuaSelector(Text: "[", TextMatch: GuaMatchMode.Regex);
             Assert.Multiple(() =>
             {
@@ -237,11 +282,52 @@ public sealed class SelectorParityTests
             var error = Assert.Throws<GuaScreenshotException>(() =>
                 remote.CaptureScreenshot(TimeSpan.FromMilliseconds(30), afterFrameSequence: 1));
             Assert.That(error!.Error, Is.EqualTo(GuaScreenshotError.Timeout));
+
+            using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromMilliseconds(20));
+            sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var stopwatch = Stopwatch.StartNew();
+            var sharedError = Assert.Throws<GuaRemoteScreenshotException>(() =>
+                sharedRemote.CaptureScreenshot(TimeSpan.FromMilliseconds(100), afterFrameSequence: 1));
+            stopwatch.Stop();
+            Assert.That(sharedError!.Error, Is.EqualTo(GuaRemoteScreenshotError.Timeout));
+            Assert.That(stopwatch.Elapsed, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(70)),
+                "CaptureScreenshot must honor its capture timeout instead of the shorter default request timeout.");
         }
         finally
         {
             Native.gua_runtime_stop_inspector_bridge(runtime);
             Native.gua_runtime_destroy(runtime);
+        }
+    }
+
+    [Test]
+    public async Task CompletingCanceledRuntimeScreenshotIsBenign()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.BeginFrame("fixture");
+        runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var capture = Task.Run(() => remote.CaptureScreenshot(TimeSpan.FromSeconds(1), afterFrameSequence: 0));
+
+            GuaScreenshotRequest request = default;
+            Assert.That(SpinWait.SpinUntil(() => runtime.TryConsumeScreenshotRequest(out request), TimeSpan.FromSeconds(2)), Is.True);
+            var error = Assert.ThrowsAsync<GuaScreenshotException>(async () => await capture);
+            Assert.That(error!.Error, Is.EqualTo(GuaScreenshotError.Timeout));
+            Assert.Multiple(() =>
+            {
+                Assert.That(runtime.TryCompleteScreenshot(request, GuaScreenshotAvailability.Available,
+                    "data:image/png;base64,aGVsbG8=", 1, 1), Is.False);
+                Assert.DoesNotThrow(() => runtime.CompleteScreenshot(request, GuaScreenshotAvailability.RenderingDisabled));
+            });
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
         }
     }
 
@@ -268,6 +354,10 @@ public sealed class SelectorParityTests
         internal static extern void gua_runtime_register_node(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string role, [MarshalAs(UnmanagedType.LPUTF8Str)] string label,
             GuaBounds bounds, int visible, int enabled);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_consume_click_request(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_emit_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]

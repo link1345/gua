@@ -44,6 +44,7 @@ if(BUILD_TESTING)
     add_executable(gua-runtime-screenshot-tests tests/screenshot_request_tests.cpp)
     target_link_libraries(gua-runtime-screenshot-tests PRIVATE gua-runtime)
     target_compile_features(gua-runtime-screenshot-tests PRIVATE cxx_std_20)
+    target_compile_options(gua-runtime-screenshot-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME gua-runtime-screenshot-tests COMMAND gua-runtime-screenshot-tests)
 endif()
 

@@ -9,6 +9,11 @@
     "coreVersion": { "type": "string", "minLength": 1 },
     "runtimeVersion": { "type": "string", "minLength": 1 },
     "godotPluginVersion": { "type": ["string", "null"] },
+    "adapterVersions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9_]+$" },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
     "abiVersion": { "type": "integer", "minimum": 1 },
     "buildId": { "type": "string", "minLength": 1 },
     "capabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9_]+$" } }

@@ -1,0 +1,22 @@
+{
+  "name": "com.link1345.gua",
+  "version": "0.5.0-preview.3",
+  "displayName": "Gua Runtime UI Automation",
+  "description": "Managed Unity adapter for the Gua runtime UI automation protocol.",
+  "unity": "6000.0",
+  "dependencies": {
+    "com.unity.ugui": "2.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.modules.screencapture": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0"
+  },
+  "samples": [
+    {
+      "displayName": "Runtime UI Fixture",
+      "description": "UI Toolkit, uGUI, and TextMeshPro controls reflected automatically by Gua.",
+      "path": "Samples~/Runtime UI Fixture"
+    }
+  ],
+  "author": { "name": "Gua contributors", "url": "https://github.com/link1345/gua" },
+  "license": "MIT"
+}

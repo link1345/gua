@@ -17,6 +17,10 @@ A UI tree response describes one frame or snapshot of runtime UI state.
 Nodes are intentionally semantic. They describe role, label, state, bounds, and
 supported actions, not rendering internals.
 
+All adapters report bounds in physical viewport pixels using the same coordinate
+space as screenshots: the origin is the top-left corner, X increases rightward,
+and Y increases downward. Adapters must not publish NaN or infinite coordinates.
+
 Version 2 adds `parentId`, `text`, `value`, and optional boolean state. An
 omitted property means that the adapter cannot observe that state. A present
 property whose value is `false` means that the adapter observed the state and
@@ -70,7 +74,10 @@ many selected items it discarded. Every successful reset increments
 `reset_context` commands must provide `expectedSessionEpoch`. A stale remote
 epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
-WebSocket connection.
+WebSocket connection. Runtime-owned on-demand screenshot requests, in-flight
+batches, and unpolled results from the previous epoch become `stale_session`
+after every successful reset; `GUA_RESET_SCREENSHOT` separately controls whether
+the latest published context screenshot is cleared.
 
 High-level testing clients may compose status, reset, diagnostics, and screenshot
 APIs into independent startup/teardown policies. Teardown capture runs before
@@ -297,6 +304,8 @@ MCP tools:
 - `wait_for_node`: polls `get_ui_tree` until a node id appears
 - `get_screenshot`: returns the latest screenshot payload
 - `get_logs`: returns ordered runtime logs
+- `get_diagnostics`: returns the versioned best-effort diagnostics snapshot
+- `get_version`: returns `version.schema.json` for the components actually loaded. `godotPluginVersion` is retained for compatibility and is `null` outside Godot. Engine integrations publish their versions in the additive `adapterVersions` map (for example, `{"unity":"0.5.0"}`). Capability IDs are stable public identifiers; new IDs are additive.
 - `start_recording`, `stop_recording`, `save_recording`: manage a client-local recording session and persist a recording v1 document
 - `replay_recording`: resolves semantic targets and secrets, honors delay/condition timing, and waits for correlated completion
 - `compare_screenshot`: compares an explicit PNG baseline and writes visual artifacts without implicitly changing the baseline

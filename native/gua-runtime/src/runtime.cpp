@@ -4,17 +4,24 @@
 
 #include <cstdio>
 #include <chrono>
+#include <algorithm>
 #include <deque>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
 
 struct gua_runtime_t {
+    struct ScreenshotBatch {
+        uint64_t session_epoch = 0;
+        std::vector<uint64_t> request_ids;
+    };
+
     gua_context_t* context = nullptr;
     mutable std::mutex context_mutex;
     mutable std::mutex bridge_mutex;
@@ -26,9 +33,10 @@ struct gua_runtime_t {
     std::string screenshot_json;
     std::string diagnostics_json;
     std::string godot_plugin_version;
+    std::map<std::string, std::string> adapter_versions;
     uint64_t next_screenshot_request_id = 1;
     std::deque<gua_screenshot_request_t> screenshot_requests;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> screenshot_batches;
+    std::unordered_map<uint64_t, ScreenshotBatch> screenshot_batches;
     std::unordered_map<uint64_t, std::string> screenshot_results;
 };
 
@@ -87,11 +95,34 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
             json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
         }
     }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
+    }
     return json;
+}
+
+bool valid_adapter_name(std::string_view adapter)
+{
+    if (adapter.empty()) return false;
+    for (const unsigned char ch : adapter) {
+        if ((ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '_') return false;
+    }
+    return true;
 }
 
 std::string copy_version_json(gua_runtime_t* runtime)
 {
+    const std::lock_guard lock(runtime->context_mutex);
     char buffer[2048] {};
     gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
     std::string json = buffer;
@@ -101,6 +132,19 @@ std::string copy_version_json(gua_runtime_t* runtime)
         if (position != std::string::npos) {
             json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
         }
+    }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
     }
     return json;
 }
@@ -125,12 +169,38 @@ std::string status_json(gua_runtime_t* runtime)
         ",\"firstEventNodeId\":\"" + escape_json(status.first_event_node_id) + "\"}";
 }
 
+std::string stale_screenshot_json(uint64_t request_id, const gua_context_status_t& status)
+{
+    return "{\"requestId\":" + std::to_string(request_id) +
+        ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+        ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
+        ",\"unavailable\":\"stale_session\"}";
+}
+
+void invalidate_screenshot_requests(gua_runtime_t* runtime)
+{
+    gua_context_status_t status { sizeof(gua_context_status_t) };
+    if (gua_get_context_status(runtime->context, &status) == 0) return;
+    for (const auto& request : runtime->screenshot_requests)
+        runtime->screenshot_results[request.request_id] = stale_screenshot_json(request.request_id, status);
+    runtime->screenshot_requests.clear();
+    for (const auto& [leader, batch] : runtime->screenshot_batches) {
+        (void)leader;
+        for (const auto request_id : batch.request_ids)
+            runtime->screenshot_results[request_id] = stale_screenshot_json(request_id, status);
+    }
+    runtime->screenshot_batches.clear();
+    for (auto& [request_id, result] : runtime->screenshot_results)
+        result = stale_screenshot_json(request_id, status);
+}
+
 std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags, bool strict)
 {
     gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const std::lock_guard lock(runtime->context_mutex);
     const int result = gua_reset_context(runtime->context, &options, &report);
+    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
     return "{\"result\":" + std::to_string(result) +
         ",\"previousSessionEpoch\":" + std::to_string(report.previous_session_epoch) +
         ",\"sessionEpoch\":" + std::to_string(report.session_epoch) +
@@ -231,7 +301,12 @@ extern "C" int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_no
 
 extern "C" int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descriptor_v3_t* descriptor)
 {
-    return runtime != nullptr ? gua_register_node_v3(runtime->context, descriptor) : 0;
+    if (!valid_runtime(runtime)) {
+        return 0;
+    }
+
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_register_node_v3(runtime->context, descriptor);
 }
 
 extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
@@ -336,17 +411,25 @@ extern "C" int gua_runtime_consume_screenshot_request(gua_runtime_t* runtime, gu
             ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
             ",\"frameSequence\":" + std::to_string(status.frame_sequence) + ",\"unavailable\":\"stale_session\"}";
     }
-    if (runtime->screenshot_requests.empty()) return 0;
-    auto first = runtime->screenshot_requests.front();
-    std::vector<uint64_t> batch;
+    const auto first_ready = std::find_if(runtime->screenshot_requests.begin(), runtime->screenshot_requests.end(),
+        [&status](const auto& pending) {
+            return pending.session_epoch == status.session_epoch && status.frame_sequence > pending.after_frame_sequence;
+        });
+    if (first_ready == runtime->screenshot_requests.end()) return 0;
+    auto first = *first_ready;
     uint64_t after = first.after_frame_sequence;
-    while (!runtime->screenshot_requests.empty() && runtime->screenshot_requests.front().session_epoch == first.session_epoch) {
-        batch.push_back(runtime->screenshot_requests.front().request_id);
-        after = std::max(after, runtime->screenshot_requests.front().after_frame_sequence);
-        runtime->screenshot_requests.pop_front();
+    std::vector<uint64_t> batch;
+    for (auto pending = runtime->screenshot_requests.begin(); pending != runtime->screenshot_requests.end();) {
+        if (pending->session_epoch == first.session_epoch && status.frame_sequence > pending->after_frame_sequence) {
+            batch.push_back(pending->request_id);
+            after = std::max(after, pending->after_frame_sequence);
+            pending = runtime->screenshot_requests.erase(pending);
+        } else {
+            ++pending;
+        }
     }
     first.after_frame_sequence = after;
-    runtime->screenshot_batches[first.request_id] = std::move(batch);
+    runtime->screenshot_batches[first.request_id] = { first.session_epoch, std::move(batch) };
     *out_request = first;
     return 1;
 }
@@ -359,9 +442,14 @@ extern "C" int gua_runtime_complete_screenshot_request(gua_runtime_t* runtime, u
     if (batch == runtime->screenshot_batches.end()) return 0;
     gua_context_status_t status { sizeof(gua_context_status_t) };
     gua_get_context_status(runtime->context, &status);
-    if (result == GUA_SCREENSHOT_AVAILABLE) gua_set_screenshot(runtime->context, data_uri, width, height);
-    for (const auto id : batch->second) {
-        if (result == GUA_SCREENSHOT_AVAILABLE) {
+    const bool stale_session = batch->second.session_epoch != status.session_epoch;
+    if (!stale_session && result == GUA_SCREENSHOT_AVAILABLE) gua_set_screenshot(runtime->context, data_uri, width, height);
+    for (const auto id : batch->second.request_ids) {
+        if (stale_session) {
+            runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
+                ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
+                ",\"frameSequence\":" + std::to_string(status.frame_sequence) + ",\"unavailable\":\"stale_session\"}";
+        } else if (result == GUA_SCREENSHOT_AVAILABLE) {
             runtime->screenshot_results[id] = "{\"requestId\":" + std::to_string(id) +
                 ",\"sessionEpoch\":" + std::to_string(status.session_epoch) +
                 ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
@@ -400,11 +488,13 @@ extern "C" int gua_runtime_cancel_screenshot_request(gua_runtime_t* runtime, uin
             [request_id](const auto& request) { return request.request_id == request_id; }),
         runtime->screenshot_requests.end());
     removed = removed || before != runtime->screenshot_requests.size();
-    for (auto& [leader, batch] : runtime->screenshot_batches) {
-        (void)leader;
-        const auto batch_before = batch.size();
-        batch.erase(std::remove(batch.begin(), batch.end(), request_id), batch.end());
-        removed = removed || batch_before != batch.size();
+    for (auto batch_entry = runtime->screenshot_batches.begin(); batch_entry != runtime->screenshot_batches.end();) {
+        auto& batch = batch_entry->second;
+        const auto batch_before = batch.request_ids.size();
+        batch.request_ids.erase(std::remove(batch.request_ids.begin(), batch.request_ids.end(), request_id), batch.request_ids.end());
+        removed = removed || batch_before != batch.request_ids.size();
+        if (batch.request_ids.empty()) batch_entry = runtime->screenshot_batches.erase(batch_entry);
+        else ++batch_entry;
     }
     return removed ? 1 : 0;
 }
@@ -447,6 +537,16 @@ extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, con
     if (!valid_runtime(runtime)) return;
     const std::lock_guard lock(runtime->context_mutex);
     runtime->godot_plugin_version = version == nullptr ? "" : version;
+    if (runtime->godot_plugin_version.empty()) runtime->adapter_versions.erase("godot");
+    else runtime->adapter_versions["godot"] = runtime->godot_plugin_version;
+}
+
+extern "C" void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version)
+{
+    if (!valid_runtime(runtime) || adapter == nullptr || !valid_adapter_name(adapter)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (version == nullptr || version[0] == '\0') runtime->adapter_versions.erase(adapter);
+    else runtime->adapter_versions[adapter] = version;
 }
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)
@@ -614,12 +714,16 @@ extern "C" int gua_runtime_poll_event_v2_for_request(gua_runtime_t* runtime, uin
 
 extern "C" int gua_runtime_poll_event_v3(gua_runtime_t* runtime, gua_event_v3_t* out_event)
 {
-    return runtime != nullptr ? gua_poll_event_v3(runtime->context, out_event) : 0;
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v3(runtime->context, out_event);
 }
 
 extern "C" int gua_runtime_poll_event_v3_for_request(gua_runtime_t* runtime, uint64_t request_id, gua_event_v3_t* out_event)
 {
-    return runtime != nullptr ? gua_poll_event_v3_for_request(runtime->context, request_id, out_event) : 0;
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_poll_event_v3_for_request(runtime->context, request_id, out_event);
 }
 
 extern "C" int gua_runtime_get_context_status(gua_runtime_t* runtime, gua_context_status_t* out_status)
@@ -633,7 +737,9 @@ extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset
 {
     if (!valid_runtime(runtime)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(runtime->context_mutex);
-    return gua_reset_context(runtime->context, options, out_report);
+    const int result = gua_reset_context(runtime->context, options, out_report);
+    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
+    return result;
 }
 
 extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port)

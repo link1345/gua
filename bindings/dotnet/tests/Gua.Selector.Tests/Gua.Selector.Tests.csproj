@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Gua.Core\Gua.Core.csproj" />
+    <ProjectReference Include="..\..\src\Gua.Runtime\Gua.Runtime.csproj" />
     <ProjectReference Include="..\..\src\Gua.Testing\Gua.Testing.csproj" />
     <ProjectReference Include="..\..\src\Gua.Testing.Godot\Gua.Testing.Godot.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

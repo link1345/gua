@@ -63,6 +63,7 @@ if(BUILD_TESTING)
     add_executable(gua-core-state-tests tests/state_model_tests.cpp)
     target_link_libraries(gua-core-state-tests PRIVATE gua-core)
     target_compile_features(gua-core-state-tests PRIVATE cxx_std_20)
+    target_compile_options(gua-core-state-tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/UNDEBUG> $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNDEBUG>)
     add_test(NAME gua-core-state-tests COMMAND gua-core-state-tests)
 
 endif()

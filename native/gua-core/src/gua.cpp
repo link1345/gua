@@ -30,7 +30,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
         ? "null"
         : "\"" + escape_json(godot_plugin_version) + "\"";
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
-        "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin +
+        "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
         "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\"]}";
 }
@@ -706,10 +706,33 @@ extern "C" int gua_register_node_v2(gua_context_t* ctx, const gua_node_descripto
 
 extern "C" int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor)
 {
-    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v3_t) ||
-        descriptor->base.struct_size < sizeof(gua_node_descriptor_v2_t)) return 0;
-    if (gua_register_node_v2(ctx, &descriptor->base) == 0) return 0;
+    if (ctx == nullptr) return 0;
+
     const std::lock_guard lock(ctx->mutex);
+    if (!ctx->frame_in_progress || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v3_t) ||
+        descriptor->base.struct_size < sizeof(gua_node_descriptor_v2_t) || descriptor->base.id == nullptr ||
+        descriptor->base.role == nullptr) {
+        ctx->staging_valid = false;
+        return 0;
+    }
+    const auto& base = descriptor->base;
+    ctx->staging_nodes.push_back(Node {
+        base.id,
+        base.role,
+        base.label != nullptr ? base.label : "",
+        base.bounds,
+        base.visible != 0,
+        base.enabled != 0,
+        base.known_mask,
+        base.parent_id != nullptr ? base.parent_id : "",
+        base.text != nullptr ? base.text : "",
+        base.value != nullptr ? base.value : "",
+        base.focused != 0,
+        base.hovered != 0,
+        base.pressed != 0,
+        base.checked != 0,
+        base.selected != 0,
+    });
     Node& node = ctx->staging_nodes.back();
     node.caret_position = descriptor->caret_position; node.selection_start = descriptor->selection_start; node.selection_end = descriptor->selection_end;
     node.scroll_x = descriptor->scroll_x; node.scroll_y = descriptor->scroll_y; node.scroll_max_x = descriptor->scroll_max_x; node.scroll_max_y = descriptor->scroll_max_y;

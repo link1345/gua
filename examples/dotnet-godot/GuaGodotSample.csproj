@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Core\Gua.Core.csproj" />
+    <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Runtime\Gua.Runtime.csproj" />
     <ProjectReference Include="..\..\bindings\dotnet\src\Gua.Testing\Gua.Testing.csproj" />
   </ItemGroup>
 

@@ -1,0 +1,5 @@
+<linker>
+  <assembly fullname="Gua.Runtime" preserve="all" />
+  <assembly fullname="Gua.Unity" preserve="all" />
+  <assembly fullname="Gua.Unity.TMP" preserve="all" />
+</linker>
