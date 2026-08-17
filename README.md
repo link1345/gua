@@ -5,11 +5,59 @@ English | [日本語](README.ja.md)
 [![License](https://img.shields.io/github/license/link1345/gua)](https://github.com/link1345/gua/blob/main/LICENSE)
 [![Discord](https://img.shields.io/discord/1329272750099136552)](https://discord.gg/Zy65k8AxH2)
 
-**Gua** is a runtime UI automation protocol for games.
+> **Playwright-style UI automation for games, with Godot support and MCP access
+> for AI coding agents.**
 
-It exposes a semantic UI tree from a running game, so test runners and AI agents
-can inspect, query, click, and verify in-game UI without relying on fragile image
-recognition or coordinate-based input.
+**Gua** is a runtime UI automation protocol for games. It gives automated tests,
+inspectors, and AI agents a semantic interface to the UI of a running game.
+Instead of relying on fragile image recognition or screen coordinates, they can
+find controls by ID, role, text, and state; interact with them; wait for changes;
+read logs; capture screenshots; and verify results.
+
+Gua's recommended engine integration is the **Godot 4.7 GDScript addon**. Its
+MCP server, `gui-mcp`, makes the same runtime UI available to MCP-enabled AI
+coding agents for AI-assisted game development and AI playtesting.
+
+**Build → Run → Inspect → Test → Fix → Test again.**
+
+Think of Gua as a Playwright-style automation layer for game UI: the browser DOM
+becomes a Semantic UI Tree, while locators, actions, waits, assertions,
+screenshots, and visual comparisons operate against the live game runtime.
+
+## What can I do with Gua?
+
+### Godot UI testing
+
+- Expose standard Godot `Control` nodes as a Semantic UI Tree.
+- Find controls by ID, role, text, value, and state instead of coordinates.
+- Click, focus, enter values, select options, scroll, and press keys.
+- Wait for UI state changes and assert them from regular .NET tests.
+- Capture screenshots, compare visual baselines, and retain failure diagnostics.
+- Run end-to-end Godot UI tests in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
+
+### AI coding and AI playtesting
+
+`gui-mcp` connects an MCP-enabled AI coding agent to the same bridge used by the
+Inspector. The agent can inspect the UI tree, operate semantic controls, wait for
+expected state, read game logs, capture screenshots, replay recordings, compare
+visuals, and run small test sequences against the game it is helping to build.
+
+Gua complements an AI coding agent: the agent edits the game, while Gua lets it
+observe, operate, and verify the running game. Gua does not replace the game
+engine or coding agent, and semantic targeting does not depend on image
+recognition.
+
+## Godot 4.7 support
+
+The recommended Godot integration is the GDScript addon backed by GDExtension.
+It automatically reflects standard `Control` nodes and can be used by both
+GDScript projects and .NET-enabled Godot projects. The separate C# runtime sample
+is experimental and does not provide the full adapter feature set.
+
+For Godot developers, Gua provides semantic UI automation, external end-to-end
+testing, screenshot and visual regression testing, CI testing, Inspector-based
+debugging, and MCP-based AI playtesting. See [Godot 4.7 GDScript Addon](#godot-47-gdscript-addon)
+for setup details.
 
 ## NuGet Packages
 
@@ -188,11 +236,9 @@ while (ui.TryPollEvent(out var e))
 }
 ```
 
-* Gua is not a game engine.
-* Gua is not an editor MCP.
-* Gua is not an image-recognition QA bot.
-
-Gua is a small bridge between a game runtime and automation tools.
+Gua is the runtime UI layer between a game and its automation tools. It works
+alongside game engines, editor tools, test runners, and AI coding agents rather
+than replacing them.
 
 ## Scope
 

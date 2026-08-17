@@ -2,7 +2,7 @@
   "name": "gua",
   "version": "0.0.0",
   "private": true,
-  "description": "Runtime UI automation protocol for games.",
+  "description": "Playwright-style runtime UI automation for games, with Godot support and MCP access for AI coding agents.",
   "license": "MIT",
   "packageManager": "bun@1.3.14",
   "workspaces": [
