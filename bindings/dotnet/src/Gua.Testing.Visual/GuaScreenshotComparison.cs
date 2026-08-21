@@ -54,15 +54,33 @@ public static class GuaVisualAssertions
             }
             var missingDir = CreateArtifactDirectory(options, safeName);
             File.WriteAllBytes(Path.Combine(missingDir, "actual.png"), actualBytes);
-            WriteComparison(missingDir, new { schemaVersion = 1, matched = false, reason = "baseline_missing", baselinePath = baseline });
-            throw new InvalidOperationException($"Screenshot baseline is missing: {baseline}. Actual artifact: {missingDir}");
+            var missingActual = ImageResult.FromMemory(actualBytes, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
+            WriteComparison(missingDir, new
+            {
+                schemaVersion = 1,
+                name,
+                variant = options.BaselineVariant,
+                matched = false,
+                baselineCreated = false,
+                reason = "baseline_missing",
+                width = missingActual.Width,
+                height = missingActual.Height,
+                comparedPixels = 0,
+                differentPixels = 0,
+                differentPixelRatio = 0,
+                options.PixelThreshold,
+                options.MaxDifferentPixelRatio,
+                masks = options.Masks,
+                baselinePath = baseline
+            });
+            throw new InvalidOperationException($"Screenshot baseline is missing: {baseline}. Artifacts: {missingDir}");
         }
 
         var expectedBytes = File.ReadAllBytes(baseline);
         var expected = ImageResult.FromMemory(expectedBytes, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         var actual = ImageResult.FromMemory(actualBytes, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
         if (expected.Width != actual.Width || expected.Height != actual.Height)
-            return FailDimension(expectedBytes, actualBytes, expected, actual, baseline, options, safeName);
+            return FailDimension(expectedBytes, actualBytes, expected, actual, baseline, options, safeName, name);
 
         var diff = new byte[actual.Data.Length];
         long compared = 0, different = 0;
@@ -90,19 +108,56 @@ public static class GuaVisualAssertions
         if (ratio <= options.MaxDifferentPixelRatio)
             return new(true, actual.Width, actual.Height, compared, different, ratio, baseline, null, false);
         var directory = CreateArtifactDirectory(options, safeName);
+        var diffBytes = PngBytes(diff, actual.Width, actual.Height);
         File.WriteAllBytes(Path.Combine(directory, "expected.png"), expectedBytes);
         File.WriteAllBytes(Path.Combine(directory, "actual.png"), actualBytes);
-        WritePng(Path.Combine(directory, "diff.png"), diff, actual.Width, actual.Height);
-        WriteComparison(directory, new { schemaVersion = 1, matched = false, actual.Width, actual.Height, comparedPixels = compared, differentPixels = different, differentPixelRatio = ratio, options.PixelThreshold, options.MaxDifferentPixelRatio, masks = options.Masks, baselinePath = baseline });
+        File.WriteAllBytes(Path.Combine(directory, "diff.png"), diffBytes);
+        WriteComparison(directory, new
+        {
+            schemaVersion = 1,
+            name,
+            variant = options.BaselineVariant,
+            matched = false,
+            baselineCreated = false,
+            reason = "pixel_difference",
+            actual.Width,
+            actual.Height,
+            comparedPixels = compared,
+            differentPixels = different,
+            differentPixelRatio = ratio,
+            options.PixelThreshold,
+            options.MaxDifferentPixelRatio,
+            masks = options.Masks,
+            baselinePath = baseline
+        });
         throw new InvalidOperationException($"Screenshot comparison failed: ratio {ratio:F6} exceeds {options.MaxDifferentPixelRatio:F6}. Artifacts: {directory}");
     }
 
-    private static ScreenshotComparisonResult FailDimension(byte[] expectedBytes, byte[] actualBytes, ImageResult expected, ImageResult actual, string baseline, ScreenshotOptions options, string name)
+    private static ScreenshotComparisonResult FailDimension(byte[] expectedBytes, byte[] actualBytes, ImageResult expected, ImageResult actual, string baseline, ScreenshotOptions options, string safeName, string name)
     {
-        var directory = CreateArtifactDirectory(options, name);
+        var directory = CreateArtifactDirectory(options, safeName);
         File.WriteAllBytes(Path.Combine(directory, "expected.png"), expectedBytes);
         File.WriteAllBytes(Path.Combine(directory, "actual.png"), actualBytes);
-        WriteComparison(directory, new { schemaVersion = 1, matched = false, reason = "dimension_mismatch", expected = new { expected.Width, expected.Height }, actual = new { actual.Width, actual.Height }, baselinePath = baseline });
+        WriteComparison(directory, new
+        {
+            schemaVersion = 1,
+            name,
+            variant = options.BaselineVariant,
+            matched = false,
+            baselineCreated = false,
+            reason = "dimension_mismatch",
+            width = actual.Width,
+            height = actual.Height,
+            expectedWidth = expected.Width,
+            expectedHeight = expected.Height,
+            comparedPixels = 0,
+            differentPixels = 0,
+            differentPixelRatio = 0,
+            options.PixelThreshold,
+            options.MaxDifferentPixelRatio,
+            masks = options.Masks,
+            baselinePath = baseline
+        });
         throw new InvalidOperationException($"Screenshot dimensions differ: expected {expected.Width}x{expected.Height}, actual {actual.Width}x{actual.Height}. Artifacts: {directory}");
     }
 
@@ -133,7 +188,7 @@ public static class GuaVisualAssertions
         var path = Path.Combine(parent, $"visual-{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path); return path;
     }
-    private static void WriteComparison(string directory, object value) => File.WriteAllText(Path.Combine(directory, "comparison.json"), JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
-    private static void WritePng(string path, byte[] data, int width, int height) { using var stream = File.Create(path); new ImageWriter().WritePng(data, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream); }
+    private static void WriteComparison(string directory, object value) => File.WriteAllText(Path.Combine(directory, "comparison.json"), JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    private static byte[] PngBytes(byte[] data, int width, int height) { using var stream = new MemoryStream(); new ImageWriter().WritePng(data, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream); return stream.ToArray(); }
     internal static string Sanitize(string value) { var invalid = Path.GetInvalidFileNameChars(); var result = new string(value.Select(c => invalid.Contains(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim(); return string.IsNullOrEmpty(result) ? "unnamed" : result; }
 }
