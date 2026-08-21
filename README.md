@@ -237,7 +237,7 @@ tests:
 For a typical consumer repository, the workflow can be as small as:
 
 ```yaml
-- uses: link1345/gua-tester/godot@v2
+- uses: link1345/gua-tester/godot@v2.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -253,7 +253,7 @@ x64 Mono Player on Linux, transfers it to a Windows runner, and runs the
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v2
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v2.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
