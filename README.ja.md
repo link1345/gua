@@ -70,6 +70,11 @@ regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテ
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Godotプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
+- **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)]([https://www.nuget.org/packages/Gua.Testing.Godot](https://www.nuget.org/packages/Gua.Testing.Unity)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
+  Unityプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
+  テストヘルパーです。
+- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)]([https://www.nuget.org/packages/Gua.Runtime](https://www.nuget.org/packages/Gua.Testing.Runtime)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
+  エンジンアダプタ用のC ABIに対する共有マネージドラッパーです。`net10.0`および`netstandard2.1`をターゲットとしています。
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
   オプトインのPNGベースライン比較と、機械可読な差分成果物を提供します。
 - **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
