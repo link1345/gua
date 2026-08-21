@@ -27,10 +27,14 @@ var result = await GuaVisualAssertions.ExpectScreenshotAsync(host.Context, "titl
 ```
 
 Missing baselines fail unless `UpdateBaselines = true` or
-`GUA_UPDATE_BASELINES=1` is explicit. A failed comparison writes
-`expected.png`, `actual.png`, `diff.png`, and `comparison.json`. Pass the failure
-artifact path returned by `GuaDiagnosticWriter` as `FailureDirectory` when visual
-artifacts should share the same diagnostic directory.
+`GUA_UPDATE_BASELINES=1` is explicit. A pixel-difference failure writes
+`expected.png`, `actual.png`, `diff.png`, and `comparison.json`. Missing-baseline
+and dimension-mismatch failures write the same manifest with only the PNGs that
+exist for that failure. The manifest records the comparison name, variant,
+dimensions, reason, metrics, thresholds, masks, and diagnostic baseline path.
+Pass the failure artifact path returned by `GuaDiagnosticWriter` as
+`FailureDirectory` when visual artifacts should share the same diagnostic
+directory.
 
 Use masks only for genuinely nondeterministic regions such as a clock or generated
 avatar. Masks are excluded from both the diff and the compared-pixel denominator;
@@ -62,6 +66,15 @@ Example GitHub Actions steps:
     path: artifacts/gua
     if-no-files-found: ignore
 ```
+
+To render these data artifacts as a static report or publish the latest `main`
+result through GitHub Pages, use the separate
+`link1345/gua-tester/visual-report` action. It combines the manifests and PNGs
+with a prebuilt Astro viewer without adding JavaScript dependencies to this
+package or installing Astro in the consumer test job.
+
+Screenshots can contain rendered secrets or personal information. Review the
+captured content before enabling Pages, especially for public repositories.
 
 ## OS and renderer variants
 

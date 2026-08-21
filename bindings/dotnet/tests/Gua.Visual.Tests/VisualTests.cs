@@ -38,11 +38,70 @@ public sealed class VisualTests
         var context = new FakeContext(Png(1, 1, 1));
         var missing = Assert.ThrowsAsync<InvalidOperationException>(() => GuaVisualAssertions.ExpectScreenshotAsync(context, "missing", Options("default")));
         Assert.That(missing!.Message, Does.Contain("baseline is missing"));
+        var missingDirectory = Directory.GetDirectories(Path.Combine(_root, "artifacts", "missing")).Single();
+        using var missingMetadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(missingDirectory, "comparison.json")));
+        Assert.Multiple(() =>
+        {
+            Assert.That(Directory.GetFiles(missingDirectory).Select(Path.GetFileName), Is.EquivalentTo(new[] { "actual.png", "comparison.json" }));
+            Assert.That(missingMetadata.RootElement.GetProperty("name").GetString(), Is.EqualTo("missing"));
+            Assert.That(missingMetadata.RootElement.GetProperty("variant").GetString(), Is.EqualTo("default"));
+            Assert.That(missingMetadata.RootElement.GetProperty("baselineCreated").GetBoolean(), Is.False);
+            Assert.That(missingMetadata.RootElement.GetProperty("reason").GetString(), Is.EqualTo("baseline_missing"));
+            Assert.That(missingMetadata.RootElement.GetProperty("width").GetInt32(), Is.EqualTo(1));
+            Assert.That(missingMetadata.RootElement.GetProperty("height").GetInt32(), Is.EqualTo(1));
+        });
         await GuaVisualAssertions.ExpectScreenshotAsync(context, "size", Options("default", update: true));
         context.Set(Png(2, 1, 1));
         var mismatch = Assert.ThrowsAsync<InvalidOperationException>(() => GuaVisualAssertions.ExpectScreenshotAsync(context, "size", Options("default")));
         Assert.That(mismatch!.Message, Does.Contain("dimensions differ"));
-        Assert.That(Directory.GetFiles(Path.Combine(_root, "artifacts"), "comparison.json", SearchOption.AllDirectories), Is.Not.Empty);
+        var mismatchDirectory = Directory.GetDirectories(Path.Combine(_root, "artifacts", "size")).Single();
+        using var mismatchMetadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(mismatchDirectory, "comparison.json")));
+        Assert.Multiple(() =>
+        {
+            Assert.That(Directory.GetFiles(mismatchDirectory).Select(Path.GetFileName), Is.EquivalentTo(new[] { "expected.png", "actual.png", "comparison.json" }));
+            Assert.That(mismatchMetadata.RootElement.GetProperty("reason").GetString(), Is.EqualTo("dimension_mismatch"));
+            Assert.That(mismatchMetadata.RootElement.GetProperty("width").GetInt32(), Is.EqualTo(2));
+            Assert.That(mismatchMetadata.RootElement.GetProperty("height").GetInt32(), Is.EqualTo(1));
+            Assert.That(mismatchMetadata.RootElement.GetProperty("expectedWidth").GetInt32(), Is.EqualTo(1));
+            Assert.That(mismatchMetadata.RootElement.GetProperty("expectedHeight").GetInt32(), Is.EqualTo(1));
+            Assert.That(Directory.GetFiles(Path.Combine(_root, "artifacts"), "index.html", SearchOption.AllDirectories), Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task PixelDifferenceWritesPortableDataAndPreservesNamesAsJson()
+    {
+        const string name = "danger<script>alert(1)<script>";
+        const string variant = "variant<script>alert(2)<script>";
+        var context = new FakeContext(Png(2, 1, 10));
+        await GuaVisualAssertions.ExpectScreenshotAsync(context, name, Options(variant, update: true));
+        context.Set(Png(2, 1, 200));
+
+        var failure = Assert.ThrowsAsync<InvalidOperationException>(
+            () => GuaVisualAssertions.ExpectScreenshotAsync(context, name, Options(variant, threshold: .1f, ratio: .2, masks: [new(0, 0, 0, 0)])));
+        var comparison = Directory.GetFiles(Path.Combine(_root, "artifacts"), "comparison.json", SearchOption.AllDirectories).Single();
+        using var metadata = JsonDocument.Parse(File.ReadAllText(comparison));
+        var directory = Path.GetDirectoryName(comparison)!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(failure!.Message, Does.Contain(Path.GetFullPath(directory)));
+            Assert.That(Directory.GetFiles(directory).Select(Path.GetFileName), Is.EquivalentTo(new[] { "expected.png", "actual.png", "diff.png", "comparison.json" }));
+            Assert.That(Directory.GetFiles(directory, "*.html"), Is.Empty);
+            Assert.That(metadata.RootElement.GetProperty("name").GetString(), Is.EqualTo(name));
+            Assert.That(metadata.RootElement.GetProperty("variant").GetString(), Is.EqualTo(variant));
+            Assert.That(metadata.RootElement.GetProperty("baselineCreated").GetBoolean(), Is.False);
+            Assert.That(metadata.RootElement.GetProperty("reason").GetString(), Is.EqualTo("pixel_difference"));
+            Assert.That(metadata.RootElement.GetProperty("width").GetInt32(), Is.EqualTo(2));
+            Assert.That(metadata.RootElement.GetProperty("height").GetInt32(), Is.EqualTo(1));
+            Assert.That(metadata.RootElement.GetProperty("comparedPixels").GetInt64(), Is.EqualTo(2));
+            Assert.That(metadata.RootElement.GetProperty("differentPixels").GetInt64(), Is.EqualTo(2));
+            Assert.That(metadata.RootElement.GetProperty("differentPixelRatio").GetDouble(), Is.EqualTo(1));
+            Assert.That(metadata.RootElement.GetProperty("pixelThreshold").GetSingle(), Is.EqualTo(.1f));
+            Assert.That(metadata.RootElement.GetProperty("maxDifferentPixelRatio").GetDouble(), Is.EqualTo(.2));
+            Assert.That(metadata.RootElement.GetProperty("masks")[0].GetProperty("x").GetInt32(), Is.Zero);
+            Assert.That(Path.IsPathFullyQualified(metadata.RootElement.GetProperty("baselinePath").GetString()!), Is.True);
+        });
     }
 
     private ScreenshotOptions Options(string variant, bool update = false, float threshold = 0, double ratio = 0, IReadOnlyList<GuaMaskRectangle>? masks = null) => new() { BaselineDirectory = Path.Combine(_root, "baselines"), ArtifactDirectory = Path.Combine(_root, "artifacts"), BaselineVariant = variant, UpdateBaselines = update, PixelThreshold = threshold, MaxDifferentPixelRatio = ratio, Masks = masks ?? [] };
