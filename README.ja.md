@@ -86,7 +86,7 @@ Unityの両方に対応する公開CI部品です。Godotでは、Godot本体と
 準備して外部.NETテストを実行します。
 
 ```yaml
-- uses: link1345/gua-tester/godot@v2
+- uses: link1345/gua-tester/godot@v2.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -101,7 +101,7 @@ Unityでは、LinuxでWindows x64 Mono Playerをビルドし、Windows runnerへ
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v2
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v2.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
