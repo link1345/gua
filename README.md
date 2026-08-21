@@ -69,7 +69,7 @@ for setup details.
   Starts a Godot process and provides helpers for controlling and verifying a running scene through the Gua bridge.
 - **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)]([https://www.nuget.org/packages/Gua.Testing.Godot](https://www.nuget.org/packages/Gua.Testing.Unity)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
   Starts a Unity process and provides helpers for controlling and verifying a running scene through the Gua bridge.
-- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)]([https://www.nuget.org/packages/Gua.Runtime](https://www.nuget.org/packages/Gua.Testing.Unity/)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
+- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)]([https://www.nuget.org/packages/Gua.Runtime](https://www.nuget.org/packages/Gua.Testing.Runtime/)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
   shared managed wrapper over the `gua_runtime` C ABI for engine adapters. Targets `net10.0` and `netstandard2.1`.
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
   Adds opt-in PNG baseline comparison and machine-readable visual failure artifacts.
