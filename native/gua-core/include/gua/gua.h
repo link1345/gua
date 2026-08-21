@@ -31,6 +31,31 @@ enum {
 };
 
 enum {
+    GUA_CLOCK_OK = 1,
+    GUA_CLOCK_ERROR_INVALID_ARGUMENT = -1,
+    GUA_CLOCK_ERROR_NOT_INSTALLED = -2,
+    GUA_CLOCK_ERROR_INVALID_STATE = -3,
+    GUA_CLOCK_ERROR_EXECUTION_LIMIT = -4
+};
+
+typedef struct gua_clock_status_t {
+    uint32_t struct_size;
+    int installed;
+    int paused;
+    double now_ms;
+    double default_step_ms;
+    double pending_ms;
+    uint64_t generation;
+} gua_clock_status_t;
+
+typedef struct gua_clock_step_t {
+    uint32_t struct_size;
+    double delta_ms;
+    int final_step;
+    uint64_t generation;
+} gua_clock_step_t;
+
+enum {
     GUA_ACTION_ACCEPTED = 1,
     GUA_ACTION_ERROR_INVALID_ARGUMENT = -1,
     GUA_ACTION_ERROR_NODE_NOT_FOUND = -2,
@@ -111,7 +136,8 @@ enum {
     GUA_RESET_HISTORY = 1U << 3,
     GUA_RESET_LOGS = 1U << 4,
     GUA_RESET_SCREENSHOT = 1U << 5,
-    GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY
+    GUA_RESET_CLOCK = 1U << 6,
+    GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_CLOCK
 };
 
 enum {
@@ -321,6 +347,14 @@ const char* gua_get_diagnostics_json(gua_context_t* ctx);
 int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int out_json_size);
 /* Returns version/capability JSON. The required byte size includes the trailing NUL. */
 int gua_copy_version_json(char* out_json, int out_json_size);
+int gua_clock_install(gua_context_t* ctx, double initial_time_ms, double step_ms);
+int gua_clock_pause(gua_context_t* ctx);
+int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double step_ms);
+int gua_clock_advance(gua_context_t* ctx, double duration_ms);
+int gua_clock_resume(gua_context_t* ctx);
+int gua_clock_get_status(gua_context_t* ctx, gua_clock_status_t* out_status);
+int gua_clock_copy_status_json(gua_context_t* ctx, char* out_json, int out_json_size);
+int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
 /* Returns 0 rather than a partial state when a v2 string does not fit its fixed output buffer. */
 int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);

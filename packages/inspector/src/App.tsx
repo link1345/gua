@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   type GuaInspectorClient,
+  type GuaClockStatus,
   type GuaNode,
   type InspectorSnapshot,
   type InspectorState,
@@ -43,6 +44,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [baselineDataUri, setBaselineDataUri] = useState<string | null>(null);
   const [visualResult, setVisualResult] = useState<BrowserVisualResult | null>(null);
   const [secretsJson, setSecretsJson] = useState("{}");
+  const [clock, setClock] = useState<GuaClockStatus | null>(null);
 
   useEffect(() => {
     if (client !== undefined) {
@@ -57,6 +59,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
     try {
       const snapshot = await readSnapshot(inspectorClient);
       setState((current) => updateInspectorState(current, snapshot));
+      try { setClock(await inspectorClient.getClock()); } catch { setClock(null); }
       setStatus("idle");
     } catch (caught) {
       setError((caught as Error).message);
@@ -236,6 +239,14 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
         />
         <ScreenshotPanel screenshot={state.screenshot} selectedNode={selectedNode} />
         <LogPanel logs={state.logs} />
+        <ClockPanel
+          clock={clock}
+          onInstall={async (step) => setClock(await inspectorClient.installClock(0, step))}
+          onPause={async () => setClock(await inspectorClient.pauseClock())}
+          onRunFor={async (duration, step) => { setClock(await inspectorClient.runClockFor(duration, step)); await refresh(); }}
+          onResume={async () => setClock(await inspectorClient.resumeClock())}
+          onError={(message) => setError(message)}
+        />
         <AutomationPanel
           recording={recording}
           lastRecording={lastRecording}
@@ -264,6 +275,29 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       </main>
     </div>
   );
+}
+
+function ClockPanel({ clock, onInstall, onPause, onRunFor, onResume, onError }: {
+  clock: GuaClockStatus | null;
+  onInstall(step?: number): Promise<void>; onPause(): Promise<void>;
+  onRunFor(duration: number, step?: number): Promise<void>; onResume(): Promise<void>;
+  onError(message: string): void;
+}) {
+  const [duration, setDuration] = useState("1000");
+  const [step, setStep] = useState("");
+  const parsedStep = step === "" ? undefined : Number(step);
+  const run = (action: () => Promise<void>) => void action().catch((caught) => onError((caught as Error).message));
+  return <section className="gua-panel">
+    <PanelHeader title="Virtual Clock" detail={clock === null ? "unsupported" : `${clock.state} · ${clock.nowMs.toFixed(2)} ms`} />
+    <div className="gua-clock-controls">
+      <input aria-label="Clock duration milliseconds" type="number" min="0" value={duration} onChange={(e) => setDuration(e.currentTarget.value)} />
+      <input aria-label="Clock step milliseconds" type="number" min="0.001" placeholder="default step" value={step} onChange={(e) => setStep(e.currentTarget.value)} />
+      <button type="button" disabled={clock === null || clock.installed} onClick={() => run(() => onInstall(parsedStep))}>Install</button>
+      <button type="button" disabled={clock === null || !clock.installed || clock.state === "paused"} onClick={() => run(onPause)}>Pause</button>
+      <button type="button" disabled={clock === null || clock.state !== "paused" || Number(duration) < 0} onClick={() => run(() => onRunFor(Number(duration), parsedStep))}>Run for</button>
+      <button type="button" disabled={clock === null || clock.state !== "paused"} onClick={() => run(onResume)}>Resume</button>
+    </div>
+  </section>;
 }
 
 function closeClient(client: GuaInspectorClient): void {

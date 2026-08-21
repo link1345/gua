@@ -148,6 +148,24 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 
 ## MCPとInspector
 
+### 決定論的な仮想時間
+
+Guaは、時間依存のゲームロジック向けにオプトインの仮想時計を提供する。
+`GuaClock`へ処理を登録し、時計を停止してから、実時間を待たずに進められる。
+
+```csharp
+var clock = new GuaClock(ui);
+clock.Install();
+clock.Schedule(TimeSpan.FromSeconds(2), ShowMessage);
+clock.Pause();
+clock.RunFor(TimeSpan.FromSeconds(2));
+```
+
+`Pause`の対象はGuaClockのSchedulerとTick購読処理だけだ。エンジン標準の
+Timer、物理、Animation、Audio、OS時刻、ネットワークは停止しない。
+bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
+`clock_run_for`、`clock_resume`を利用できる。
+
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を
   AIエージェントへ公開する薄いMCPサーバーです。

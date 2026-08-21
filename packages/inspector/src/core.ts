@@ -45,6 +45,7 @@ export interface GuaScreenshot {
   width: number;
   height: number;
 }
+export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; }
 
 export interface InspectorPanel {
   id: "tree" | "node" | "screenshot" | "logs";
@@ -68,6 +69,11 @@ export interface GuaInspectorClient {
   performAction(action: SemanticActionInput): Promise<ActionOutcome>;
   clickNode(nodeId: string): Promise<void>;
   focusNode(nodeId: string): Promise<void>;
+  getClock(): Promise<GuaClockStatus>;
+  installClock(initialTimeMs?: number, stepMs?: number): Promise<GuaClockStatus>;
+  pauseClock(): Promise<GuaClockStatus>;
+  runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus>;
+  resumeClock(): Promise<GuaClockStatus>;
 }
 
 export type GuaInspectorCommand =
@@ -77,6 +83,9 @@ export type GuaInspectorCommand =
   | { id: number; type: "poll_events"; requestId: number }
   | { id: number; type: "click_node"; nodeId: string }
   | { id: number; type: "focus_node"; nodeId: string }
+  | { id: number; type: "get_clock" | "clock_pause" | "clock_resume" }
+  | { id: number; type: "clock_install"; initialTimeMs?: number; stepMs?: number }
+  | { id: number; type: "clock_run_for"; durationMs: number; stepMs?: number }
   | { id: number; type: "set_value"; nodeId: string; value: string; sensitive?: boolean }
   | { id: number; type: "set_checked"; nodeId: string; checked: boolean }
   | { id: number; type: "select"; nodeId: string; value: string }
@@ -90,6 +99,9 @@ type GuaInspectorCommandInput =
   | { type: "poll_events"; requestId: number }
   | { type: "click_node"; nodeId: string }
   | { type: "focus_node"; nodeId: string }
+  | { type: "get_clock" | "clock_pause" | "clock_resume" }
+  | { type: "clock_install"; initialTimeMs?: number; stepMs?: number }
+  | { type: "clock_run_for"; durationMs: number; stepMs?: number }
   | { type: "set_value"; nodeId: string; value: string; sensitive?: boolean }
   | { type: "set_checked"; nodeId: string; checked: boolean }
   | { type: "select"; nodeId: string; value: string }
@@ -178,6 +190,7 @@ export async function readSnapshot(client: GuaInspectorClient): Promise<Inspecto
 }
 
 export class MockInspectorClient implements GuaInspectorClient {
+  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0 };
   private logs: GuaLogEntry[] = [
     { sequence: 1, level: "info", message: "Inspector connected to mock runtime." },
     { sequence: 2, level: "debug", message: "Title screen snapshot received." },
@@ -321,6 +334,11 @@ export class MockInspectorClient implements GuaInspectorClient {
       },
     ];
   }
+  async getClock() { return this.clock; }
+  async installClock(initialTimeMs = 0, stepMs = 1000 / 60) { this.clock = { ...this.clock, installed: true, state: "running", nowMs: initialTimeMs, defaultStepMs: stepMs, generation: this.clock.generation + 1 }; return this.clock; }
+  async pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
+  async runClockFor(durationMs: number, stepMs?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + durationMs, defaultStepMs: stepMs ?? this.clock.defaultStepMs }; return this.clock; }
+  async resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
 }
 
 function actionCommand(action: SemanticActionInput): GuaInspectorCommandInput {
@@ -377,6 +395,20 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   async getScreenshot(): Promise<GuaScreenshot> {
     return this.request<GuaScreenshot>({ type: "get_screenshot" });
   }
+
+  async getClock(): Promise<GuaClockStatus> { return this.request({ type: "get_clock" }); }
+  async installClock(initialTimeMs = 0, stepMs?: number): Promise<GuaClockStatus> { return this.request({ type: "clock_install", initialTimeMs, stepMs }); }
+  async pauseClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_pause" }); }
+  async runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus> {
+    let status = await this.request<GuaClockStatus>({ type: "clock_run_for", durationMs, stepMs });
+    const started = Date.now();
+    while (status.pendingMs > 0 && Date.now() - started < this.requestTimeoutMs) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5)); status = await this.getClock();
+    }
+    if (status.pendingMs > 0) throw new Error("Timed out waiting for Gua clock run_for completion.");
+    return status;
+  }
+  async resumeClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_resume" }); }
 
   async performAction(action: SemanticActionInput): Promise<ActionOutcome> {
     const command = actionCommand(action);

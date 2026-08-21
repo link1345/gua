@@ -1,6 +1,8 @@
 class_name GuaAutoAdapter
 extends RefCounted
 
+signal clock_tick(delta: float)
+
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
 const CONTEXT_CLASS := "GuaContext"
@@ -26,6 +28,13 @@ const REQUIRED_CONTEXT_METHODS := [
 	"poll_event_v2",
 	"get_context_status",
 	"reset_context",
+	"clock_install",
+	"clock_pause",
+	"clock_run_for",
+	"clock_resume",
+	"clock_advance",
+	"get_clock",
+	"consume_clock_steps",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -41,6 +50,9 @@ var suppressed_clicks: Dictionary = {}
 var gdextension_resource: Resource
 var unavailable := false
 var screenshot_capture_scheduled := false
+var last_clock_ticks_ms := Time.get_ticks_msec()
+var clock_schedules: Array[Dictionary] = []
+var next_clock_schedule_id := 1
 
 
 func attach(root_control: Control) -> void:
@@ -51,6 +63,14 @@ func attach(root_control: Control) -> void:
 func update(screen: String) -> void:
 	if not _ensure_context():
 		return
+	var ticks_ms := Time.get_ticks_msec()
+	var clock_status: Dictionary = context.get_clock()
+	if clock_status.get("installed", false) and clock_status.get("state", "running") == "running":
+		context.clock_advance(maxi(0, ticks_ms - last_clock_ticks_ms))
+	last_clock_ticks_ms = ticks_ms
+	for step in context.consume_clock_steps():
+		_drain_clock_schedules(float(context.get_clock().get("now_ms", 0.0)))
+		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
 
 	if root == null:
 		push_error("GuaAutoAdapter.update called before attach.")
@@ -171,6 +191,50 @@ func get_context_status() -> Dictionary:
 	if not _ensure_context():
 		return {}
 	return context.get_context_status()
+
+
+func clock_install(initial_time_ms: float = 0.0, step_ms: float = 1000.0 / 60.0) -> Dictionary:
+	return context.clock_install(initial_time_ms, step_ms) if _ensure_context() else {}
+
+func clock_pause() -> Dictionary:
+	return context.clock_pause() if _ensure_context() else {}
+
+func clock_run_for(duration_ms: float, step_ms: float = 0.0) -> Dictionary:
+	return context.clock_run_for(duration_ms, step_ms) if _ensure_context() else {}
+
+func clock_resume() -> Dictionary:
+	return context.clock_resume() if _ensure_context() else {}
+
+func get_clock() -> Dictionary:
+	return context.get_clock() if _ensure_context() else {}
+
+func clock_schedule(delay_ms: float, callback: Callable, interval_ms: float = 0.0) -> int:
+	if delay_ms < 0.0 or interval_ms < 0.0 or not callback.is_valid():
+		return 0
+	var schedule_id := next_clock_schedule_id
+	next_clock_schedule_id += 1
+	clock_schedules.append({"id": schedule_id, "due_ms": float(get_clock().get("now_ms", 0.0)) + delay_ms, "interval_ms": interval_ms, "callback": callback})
+	return schedule_id
+
+func clock_cancel(schedule_id: int) -> void:
+	clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool: return int(item.id) != schedule_id)
+
+func _drain_clock_schedules(now_ms: float) -> void:
+	clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
+	var callbacks := 0
+	while not clock_schedules.is_empty() and float(clock_schedules[0].due_ms) <= now_ms:
+		callbacks += 1
+		if callbacks > 1000000:
+			push_error("Gua clock execution_limit")
+			return
+		var item: Dictionary = clock_schedules.pop_front()
+		(item.callback as Callable).call()
+		if float(item.interval_ms) > 0.0:
+			item.due_ms = float(item.due_ms) + float(item.interval_ms)
+			clock_schedules.append(item)
+			clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+				return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 
 
 func reset_context(options: Dictionary = {}) -> Dictionary:

@@ -346,6 +346,28 @@ Dictionary GuaContext::poll_event_v2()
     return result;
 }
 
+Dictionary GuaContext::get_clock() const
+{
+    gua_clock_status_t status { sizeof(gua_clock_status_t) }; Dictionary result;
+    if (gua_runtime_clock_get_status(runtime_, &status) == 0) return result;
+    result["schema_version"] = 1; result["installed"] = status.installed != 0;
+    result["state"] = status.paused != 0 ? "paused" : "running"; result["now_ms"] = status.now_ms;
+    result["default_step_ms"] = status.default_step_ms; result["pending_ms"] = status.pending_ms; result["generation"] = status.generation;
+    return result;
+}
+Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { gua_runtime_clock_install(runtime_, initial_time_ms, step_ms); return get_clock(); }
+Dictionary GuaContext::clock_pause() { gua_runtime_clock_pause(runtime_); return get_clock(); }
+Dictionary GuaContext::clock_run_for(double duration_ms, double step_ms)
+{ const Dictionary status = get_clock(); const double actual = step_ms > 0.0 ? step_ms : static_cast<double>(status["default_step_ms"]); gua_runtime_clock_run_for(runtime_, duration_ms, actual); return get_clock(); }
+Dictionary GuaContext::clock_resume() { gua_runtime_clock_resume(runtime_); return get_clock(); }
+Dictionary GuaContext::clock_advance(double duration_ms) { gua_runtime_clock_advance(runtime_, duration_ms); return get_clock(); }
+Array GuaContext::consume_clock_steps()
+{
+    Array result; gua_clock_step_t step { sizeof(gua_clock_step_t) };
+    while (gua_runtime_clock_consume_step(runtime_, &step) != 0) { Dictionary item; item["delta_ms"] = step.delta_ms; item["final"] = step.final_step != 0; item["generation"] = step.generation; result.push_back(item); step = gua_clock_step_t { sizeof(gua_clock_step_t) }; }
+    return result;
+}
+
 Dictionary GuaContext::get_context_status() const
 {
     gua_context_status_t status { sizeof(gua_context_status_t) };
@@ -448,6 +470,13 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("poll_event_v2"), &GuaContext::poll_event_v2);
     ClassDB::bind_method(D_METHOD("get_context_status"), &GuaContext::get_context_status);
     ClassDB::bind_method(D_METHOD("reset_context", "options"), &GuaContext::reset_context, DEFVAL(Dictionary()));
+    ClassDB::bind_method(D_METHOD("clock_install", "initial_time_ms", "step_ms"), &GuaContext::clock_install, DEFVAL(0.0), DEFVAL(1000.0 / 60.0));
+    ClassDB::bind_method(D_METHOD("clock_pause"), &GuaContext::clock_pause);
+    ClassDB::bind_method(D_METHOD("clock_run_for", "duration_ms", "step_ms"), &GuaContext::clock_run_for, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("clock_resume"), &GuaContext::clock_resume);
+    ClassDB::bind_method(D_METHOD("clock_advance", "duration_ms"), &GuaContext::clock_advance);
+    ClassDB::bind_method(D_METHOD("get_clock"), &GuaContext::get_clock);
+    ClassDB::bind_method(D_METHOD("consume_clock_steps"), &GuaContext::consume_clock_steps);
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);
     ClassDB::bind_method(D_METHOD("inspector_bridge_running"), &GuaContext::inspector_bridge_running);

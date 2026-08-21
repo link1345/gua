@@ -74,6 +74,23 @@ int main()
     gua_context_t* context = gua_create_context();
     assert(context != nullptr);
 
+    assert(gua_clock_pause(context) == GUA_CLOCK_ERROR_NOT_INSTALLED);
+    assert(gua_clock_install(context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(context, 25.0, 10.0) == GUA_CLOCK_OK);
+    gua_clock_step_t clock_step { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 10.0 && clock_step.final_step == 0);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 5.0 && clock_step.final_step == 1);
+    gua_clock_status_t clock_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.now_ms == 25.0 && clock_status.paused == 1);
+    assert(gua_clock_resume(context) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(context, 4.0) == GUA_CLOCK_OK);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 4.0);
+
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();
     gua_begin_frame(atomic_context, "initial-staging");
@@ -304,6 +321,8 @@ int main()
     assert(gua_get_context_status(context, &status) == 1);
     assert(status.session_epoch == 2 && status.frame_sequence == 0 && status.revision == 0);
     assert(status.node_count == 0 && status.pending_request_count == 0 && status.unconsumed_event_count == 0);
+    clock_status = gua_clock_status_t { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.installed == 0);
     const std::string reset_diagnostics = gua_get_diagnostics_json(context);
     assert(reset_diagnostics.find("\"operations\":[]") != std::string::npos);
     assert(reset_diagnostics.find("\"events\":[]") != std::string::npos);

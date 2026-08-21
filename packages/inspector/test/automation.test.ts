@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, validateRecording } from "../src/automation";
+import { MockInspectorClient } from "../src/core";
 
 describe("InspectorRecorder", () => {
+  test("controls the mock virtual clock deterministically", async () => {
+    const client = new MockInspectorClient();
+    await client.installClock(0, 10);
+    await client.pauseClock();
+    const status = await client.runClockFor(25);
+    expect(status.nowMs).toBe(25);
+    expect(status.state).toBe("paused");
+  });
   test("exports schema v1 and redacts sensitive values", () => {
     const recorder = new InspectorRecorder();
     recorder.start();

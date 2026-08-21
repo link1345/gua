@@ -22,6 +22,8 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("replay_recording");
     expect(guaMcpTools).toContain("compare_screenshot");
     expect(guaMcpTools).toContain("get_visual_artifacts");
+    expect(guaMcpTools).toContain("clock_pause");
+    expect(guaMcpTools).toContain("clock_run_for");
   });
 
   test("records, redacts, saves, and reloads semantic operations", async () => {

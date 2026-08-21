@@ -42,8 +42,11 @@ struct Command {
     unsigned long long expected_session_epoch = 0;
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
-    unsigned int reset_flags = 15;
+    unsigned int reset_flags = 79;
     bool strict = false;
+    double initial_time_ms = 0;
+    double duration_ms = 0;
+    double step_ms = 0;
 };
 
 struct ClientConnection {
@@ -620,8 +623,11 @@ Command parse_command(std::string_view json)
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
-    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(15));
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
     command.strict = json_bool_field(json, "strict");
+    command.initial_time_ms = json_number_field(json, "initialTimeMs").value_or(0);
+    command.duration_ms = json_number_field(json, "durationMs").value_or(0);
+    command.step_ms = json_number_field(json, "stepMs").value_or(0);
     return command;
 }
 
@@ -934,6 +940,19 @@ private:
                 return handlers_.get_version_json
                     ? ok_response(command.id, handlers_.get_version_json())
                     : error_response(command.id, "get_version is not supported by this bridge");
+            }
+            if (command.type == "get_clock") {
+                return handlers_.get_clock_json
+                    ? ok_response(command.id, handlers_.get_clock_json())
+                    : error_response(command.id, "unsupported");
+            }
+            if (command.type == "clock_install" || command.type == "clock_pause" ||
+                command.type == "clock_run_for" || command.type == "clock_resume") {
+                if (!handlers_.control_clock) return error_response(command.id, "unsupported");
+                const auto result = handlers_.control_clock(command.type,
+                    command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
+                    command.step_ms);
+                return result.ok ? ok_response(command.id, result.json) : error_response(command.id, result.error);
             }
             if (command.type == "query_nodes") {
                 if (!handlers_.query_nodes_json) {

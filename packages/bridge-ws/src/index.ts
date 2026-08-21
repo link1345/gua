@@ -4,11 +4,12 @@ import type {
   GuaLogEntry,
   GuaScreenshot,
   GuaUiTree,
+  GuaClockStatus,
 } from "@gua/inspector/core";
 
 const defaultPort = 8765;
 const port = Number.parseInt(Bun.env.GUA_BRIDGE_PORT ?? Bun.argv[2] ?? `${defaultPort}`, 10);
-type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | null;
+type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | null;
 
 function handleMessage(message: string | Buffer): GuaInspectorResponse {
   if (typeof message !== "string") {
@@ -30,6 +31,11 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
         return ok(command.id, runtime.getLogs());
       case "get_screenshot":
         return ok(command.id, runtime.getScreenshot());
+      case "get_clock": return ok(command.id, runtime.getClock());
+      case "clock_install": return ok(command.id, runtime.installClock(command.initialTimeMs, command.stepMs));
+      case "clock_pause": return ok(command.id, runtime.pauseClock());
+      case "clock_run_for": return ok(command.id, runtime.runClockFor(command.durationMs, command.stepMs));
+      case "clock_resume": return ok(command.id, runtime.resumeClock());
       case "poll_events":
         return ok(command.id, null);
       case "click_node":
@@ -64,6 +70,7 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
 }
 
 class DemoRuntime {
+  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0 };
   private screen: "title" | "loading" = "title";
   private focusedNodeId = "start";
   private frameSequence = 1;
@@ -114,6 +121,11 @@ class DemoRuntime {
       height: 720,
     };
   }
+  getClock() { return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) { this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
+  pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
+  runClockFor(duration: number, step?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration, defaultStepMs: step ?? this.clock.defaultStepMs }; return this.clock; }
+  resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
 
   clickNode(nodeId: string): void {
     this.assertNodeExists(nodeId);

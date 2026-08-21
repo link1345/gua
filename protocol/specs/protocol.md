@@ -227,6 +227,20 @@ recording v1 redaction rule.
 
 Commands are external automation requests.
 
+### Virtual clock (v1)
+
+`clock_install`, `clock_pause`, `clock_run_for`, `clock_resume`, and `get_clock`
+control the opt-in Gua virtual clock. Installation starts at `initialTimeMs` (zero
+by default) in the running state. `clock_run_for` is accepted only while paused,
+advances in `stepMs` slices (the installed default when omitted), and remains
+paused. Clock time is monotonic and context reset invalidates pending steps.
+
+Only work explicitly scheduled on GuaClock or subscribed to its tick stream is
+controlled. Engine time, physics, animations, audio, OS time, network time, and
+engine-native timers are outside this capability. Adapters must continue their
+unscaled bridge pump while the Gua clock is paused. Capability
+`virtual_clock_v1` advertises support.
+
 Initial command types:
 
 - `get_ui_tree`

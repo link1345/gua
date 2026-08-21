@@ -5,7 +5,7 @@ using Gua.Core;
 
 namespace Gua.Testing;
 
-public sealed class GuaWebSocketContext : IGuaContext, IDisposable
+public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private readonly Uri uri;
     private readonly TimeSpan requestTimeout;
@@ -23,6 +23,21 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
     }
     public string GetUiTreeJson() => Raw(new { type = "get_ui_tree" });
     public GuaRemoteTree GetRemoteTree() => Request<GuaRemoteTree>(new { type = "get_ui_tree" });
+    public GuaClockStatus GetClockStatus() => ToClockStatus(Request<RemoteClockStatus>(new { type = "get_clock" }));
+    public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
+    { Request<RemoteClockStatus>(new { type = "clock_install", initialTimeMs = (initialTime ?? TimeSpan.Zero).TotalMilliseconds, stepMs = step?.TotalMilliseconds }); return GuaClockResult.Ok; }
+    public GuaClockResult PauseClock() { Request<RemoteClockStatus>(new { type = "clock_pause" }); return GuaClockResult.Ok; }
+    public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
+    {
+        var status = Request<RemoteClockStatus>(new { type = "clock_run_for", durationMs = duration.TotalMilliseconds, stepMs = step?.TotalMilliseconds });
+        var deadline = DateTime.UtcNow + requestTimeout;
+        while (status.PendingMs > 0 && DateTime.UtcNow < deadline) { Thread.Sleep(5); status = Request<RemoteClockStatus>(new { type = "get_clock" }); }
+        if (status.PendingMs > 0) throw new TimeoutException("Timed out waiting for Gua clock run_for completion.");
+        return GuaClockResult.Ok;
+    }
+    public GuaClockResult ResumeClock() { Request<RemoteClockStatus>(new { type = "clock_resume" }); return GuaClockResult.Ok; }
+    private static GuaClockStatus ToClockStatus(RemoteClockStatus value) => new(value.Installed,
+        string.Equals(value.State, "paused", StringComparison.Ordinal), value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
     public string GetDiagnosticsJson() => Raw(new { type = "get_diagnostics" });
     public GuaVersion GetVersion() => GuaVersion.Parse(Raw(new { type = "get_version" }));
     public string GetScreenshotJson() => Raw(new { type = "get_screenshot" });
@@ -146,6 +161,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private sealed record ActionResult(ulong RequestId);
+    private sealed record RemoteClockStatus(bool Installed, string State, double NowMs, double DefaultStepMs, double PendingMs, ulong Generation);
     private sealed record EventResult(ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive, ulong SessionEpoch, ulong FrameSequence, ulong Revision);
     private sealed record Status(ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);
     private sealed record ResetResult(int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount, uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount, uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);

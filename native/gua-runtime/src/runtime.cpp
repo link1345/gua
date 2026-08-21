@@ -532,6 +532,62 @@ extern "C" int gua_runtime_copy_version_json(gua_runtime_t* runtime, char* out_j
     return copy_json_string(copy_version_json(runtime), out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_clock_install(gua_runtime_t* runtime, double initial_time_ms, double step_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_install(runtime->context, initial_time_ms, step_ms);
+}
+
+extern "C" int gua_runtime_clock_pause(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_pause(runtime->context);
+}
+
+extern "C" int gua_runtime_clock_run_for(gua_runtime_t* runtime, double duration_ms, double step_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_run_for(runtime->context, duration_ms, step_ms);
+}
+
+extern "C" int gua_runtime_clock_resume(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_resume(runtime->context);
+}
+
+extern "C" int gua_runtime_clock_advance(gua_runtime_t* runtime, double duration_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_advance(runtime->context, duration_ms);
+}
+
+extern "C" int gua_runtime_clock_get_status(gua_runtime_t* runtime, gua_clock_status_t* out_status)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_get_status(runtime->context, out_status);
+}
+
+extern "C" int gua_runtime_clock_copy_status_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_copy_status_json(runtime->context, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_clock_consume_step(gua_runtime_t* runtime, gua_clock_step_t* out_step)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_consume_step(runtime->context, out_step);
+}
+
 extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* version)
 {
     if (!valid_runtime(runtime)) return;
@@ -788,6 +844,31 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_version_json = [runtime] {
             return copy_version_json(runtime);
+        },
+        .get_clock_json = [runtime] {
+            const int size = gua_runtime_clock_copy_status_json(runtime, nullptr, 0);
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_runtime_clock_copy_status_json(runtime, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
+        },
+        .control_clock = [runtime](std::string_view command, double value_ms, double step_ms) {
+            int result = GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+            if (command == "clock_install") result = gua_runtime_clock_install(runtime, value_ms, step_ms > 0 ? step_ms : 1000.0 / 60.0);
+            else if (command == "clock_pause") result = gua_runtime_clock_pause(runtime);
+            else if (command == "clock_run_for") result = gua_runtime_clock_run_for(runtime, value_ms, step_ms > 0 ? step_ms : 1000.0 / 60.0);
+            else if (command == "clock_resume") result = gua_runtime_clock_resume(runtime);
+            if (result != GUA_CLOCK_OK) {
+                const char* error = result == GUA_CLOCK_ERROR_NOT_INSTALLED ? "not_installed" :
+                    result == GUA_CLOCK_ERROR_INVALID_STATE ? "invalid_state" :
+                    result == GUA_CLOCK_ERROR_EXECUTION_LIMIT ? "execution_limit" : "invalid_duration";
+                return gua::ws::CommandResult { false, {}, error };
+            }
+            const int size = gua_runtime_clock_copy_status_json(runtime, nullptr, 0);
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_runtime_clock_copy_status_json(runtime, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return gua::ws::CommandResult { true, std::move(json), {} };
         },
         .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {
             gua_selector_v1_t native {

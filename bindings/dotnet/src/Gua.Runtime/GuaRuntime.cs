@@ -25,7 +25,11 @@ public sealed class GuaRuntime : IDisposable
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         { throw new InvalidOperationException("Failed to load the native Gua runtime. Ensure gua.dll and gua_runtime.dll match the current platform and architecture.", error); }
         if (_handle == 0) throw new InvalidOperationException("Failed to create a Gua runtime.");
+        Clock = new GuaRuntimeClock(this);
     }
+
+    public GuaRuntimeClock Clock { get; }
+    internal nint Handle { get { ThrowIfDisposed(); return _handle; } }
 
     public bool InspectorBridgeRunning { get { ThrowIfDisposed(); return Native.gua_runtime_inspector_bridge_running(_handle) != 0; } }
     public string InspectorBridgeUrl { get { ThrowIfDisposed(); return ReadUtf8(Native.gua_runtime_inspector_bridge_url(_handle)); } }

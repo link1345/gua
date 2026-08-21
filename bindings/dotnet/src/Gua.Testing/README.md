@@ -1,5 +1,12 @@
 # Gua.Testing
 
+## Virtual clock
+
+Contexts implementing `IGuaClockContext` can use
+`GuaClockControls.InstallClock`, `PauseClock`, `RunClockFor`, and `ResumeClock`
+with matching async methods. The clock advances explicitly connected GuaClock
+work; it is not a wall-clock sleep or an engine-global pause.
+
 `Gua.Testing` adds locator, assertion, wait, and test-host helpers on top of
 `Gua.Core`.
 

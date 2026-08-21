@@ -32,7 +32,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\"]}";
 }
 
 struct Node {
@@ -339,6 +339,13 @@ struct gua_context_t {
     unsigned long long next_history_sequence = 1;
     std::chrono::steady_clock::time_point diagnostics_history_started_at = std::chrono::steady_clock::now();
     std::string diagnostics_environment_json = "{}";
+    bool clock_installed = false;
+    bool clock_paused = false;
+    double clock_now_ms = 0.0;
+    double clock_default_step_ms = 1000.0 / 60.0;
+    double clock_pending_ms = 0.0;
+    double clock_pending_step_ms = 1000.0 / 60.0;
+    unsigned long long clock_generation = 0;
 };
 
 namespace {
@@ -876,6 +883,98 @@ extern "C" int gua_copy_version_json(char* out_json, int out_json_size)
     return copy_json_string(build_version_json(), out_json, out_json_size);
 }
 
+extern "C" int gua_clock_install(gua_context_t* ctx, double initial_time_ms, double step_ms)
+{
+    if (ctx == nullptr || !std::isfinite(initial_time_ms) || initial_time_ms < 0.0 ||
+        !std::isfinite(step_ms) || step_ms <= 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    ctx->clock_installed = true;
+    ctx->clock_paused = false;
+    ctx->clock_now_ms = initial_time_ms;
+    ctx->clock_default_step_ms = step_ms;
+    ctx->clock_pending_ms = 0.0;
+    ctx->clock_pending_step_ms = step_ms;
+    ++ctx->clock_generation;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_pause(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    ctx->clock_paused = true;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double step_ms)
+{
+    if (ctx == nullptr || !std::isfinite(duration_ms) || duration_ms < 0.0 ||
+        !std::isfinite(step_ms) || step_ms <= 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (!ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    if (duration_ms / step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
+    ctx->clock_pending_ms = duration_ms;
+    ctx->clock_pending_step_ms = step_ms;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_resume(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    ctx->clock_paused = false;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
+{
+    if (ctx == nullptr || !std::isfinite(duration_ms) || duration_ms < 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    ctx->clock_pending_ms = duration_ms;
+    ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_get_status(gua_context_t* ctx, gua_clock_status_t* out_status)
+{
+    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < sizeof(gua_clock_status_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    *out_status = gua_clock_status_t { sizeof(gua_clock_status_t), ctx->clock_installed ? 1 : 0,
+        ctx->clock_paused ? 1 : 0, ctx->clock_now_ms, ctx->clock_default_step_ms,
+        ctx->clock_pending_ms, ctx->clock_generation };
+    return 1;
+}
+
+extern "C" int gua_clock_copy_status_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(ctx->mutex);
+    char json[320];
+    std::snprintf(json, sizeof(json),
+        "{\"schemaVersion\":1,\"installed\":%s,\"state\":\"%s\",\"nowMs\":%.6f,\"defaultStepMs\":%.6f,\"pendingMs\":%.6f,\"generation\":%llu}",
+        ctx->clock_installed ? "true" : "false", ctx->clock_paused ? "paused" : "running",
+        ctx->clock_now_ms, ctx->clock_default_step_ms, ctx->clock_pending_ms, ctx->clock_generation);
+    return copy_json_string(json, out_json, out_json_size);
+}
+
+extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step)
+{
+    if (ctx == nullptr || out_step == nullptr || out_step->struct_size < sizeof(gua_clock_step_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed || ctx->clock_pending_ms <= 0.0) return 0;
+    const double delta = std::min(ctx->clock_pending_ms, ctx->clock_pending_step_ms);
+    ctx->clock_pending_ms = std::max(0.0, ctx->clock_pending_ms - delta);
+    ctx->clock_now_ms += delta;
+    *out_step = gua_clock_step_t { sizeof(gua_clock_step_t), delta, ctx->clock_pending_ms <= 0.0 ? 1 : 0, ctx->clock_generation };
+    return 1;
+}
+
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)
 {
     if (ctx == nullptr || node_id == nullptr || out_state == nullptr) {
@@ -1268,7 +1367,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
 {
     if (ctx == nullptr || options == nullptr || options->struct_size < sizeof(gua_reset_options_t) ||
         out_report == nullptr || out_report->struct_size < sizeof(gua_reset_report_t)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
-    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT | GUA_RESET_CLOCK;
     if ((options->flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
 
     const std::lock_guard lock(ctx->mutex);
@@ -1327,6 +1426,10 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     if ((options->flags & GUA_RESET_SCREENSHOT) != 0U) {
         ctx->screenshot = Screenshot {};
         ctx->screenshot_json_cache.clear();
+    }
+    if ((options->flags & GUA_RESET_CLOCK) != 0U) {
+        ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
+        ctx->clock_pending_ms = 0.0; ++ctx->clock_generation;
     }
     ctx->frame_sequence = 0;
     ctx->revision = 0;

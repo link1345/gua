@@ -12,6 +12,8 @@
     { "$ref": "#/$defs/scrollAction" },
     { "$ref": "#/$defs/resetContext" },
     { "$ref": "#/$defs/captureScreenshot" },
+    { "$ref": "#/$defs/clockInstall" },
+    { "$ref": "#/$defs/clockRunFor" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -104,7 +106,7 @@
       "properties": {
         "type": { "const": "reset_context" },
         "expectedSessionEpoch": { "type": "integer", "minimum": 1 },
-        "flags": { "type": "integer", "minimum": 0, "maximum": 63, "default": 15 },
+        "flags": { "type": "integer", "minimum": 0, "maximum": 127, "default": 79 },
         "strict": { "type": "boolean", "default": false }
       }
     },
@@ -116,6 +118,26 @@
         "type": { "const": "capture_screenshot" },
         "afterFrameSequence": { "type": ["integer", "null"], "minimum": 0 },
         "timeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "clockInstall": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "clock_install" },
+        "initialTimeMs": { "type": "number", "minimum": 0, "default": 0 },
+        "stepMs": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "clockRunFor": {
+      "type": "object",
+      "required": ["type", "durationMs"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "clock_run_for" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "stepMs": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
     "textInput": {
@@ -143,7 +165,7 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events"]
+          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "get_clock", "clock_pause", "clock_resume"]
         }
       }
     }

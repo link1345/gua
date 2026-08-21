@@ -61,6 +61,14 @@ int gua_runtime_set_diagnostics_environment_json(gua_runtime_t* runtime, const c
 const char* gua_runtime_get_diagnostics_json(gua_runtime_t* runtime);
 int gua_runtime_copy_diagnostics_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_copy_version_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_clock_install(gua_runtime_t* runtime, double initial_time_ms, double step_ms);
+int gua_runtime_clock_pause(gua_runtime_t* runtime);
+int gua_runtime_clock_run_for(gua_runtime_t* runtime, double duration_ms, double step_ms);
+int gua_runtime_clock_advance(gua_runtime_t* runtime, double duration_ms);
+int gua_runtime_clock_resume(gua_runtime_t* runtime);
+int gua_runtime_clock_get_status(gua_runtime_t* runtime, gua_clock_status_t* out_status);
+int gua_runtime_clock_copy_status_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_clock_consume_step(gua_runtime_t* runtime, gua_clock_step_t* out_step);
 void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* version);
 void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);
