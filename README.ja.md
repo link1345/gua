@@ -47,6 +47,7 @@ Playwrightスタイル自動化レイヤーだと考えると分かりやすい�
 - Godotと同じSemantic APIでControlを検索・操作
 - ゲーム側アダプターと外部NUnitテストホストを分離
 - Unityテスト失敗時にログ、スクリーンショット、診断情報を保存
+- [`link1345/gua-tester`](https://github.com/link1345/gua-tester)でWindows x64 Mono PlayerをCIビルド・テスト
 
 ### AIコーディングとAIプレイテスト
 
@@ -77,6 +78,44 @@ Editor Play Modeまたはビルド済みMono Playerを起動できます。現�
 Unity 6000.0以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
 EditorWindowの自動化には未対応です。導入・検証手順は
 [Unity 6 Windows x64](#unity-6-windows-x64)を参照してください。
+
+## GitHub Actions
+
+[`link1345/gua-tester`](https://github.com/link1345/gua-tester)は、Godotと
+Unityの両方に対応する公開CI部品です。Godotでは、Godot本体と配布済みアドオンを
+準備して外部.NETテストを実行します。
+
+```yaml
+- uses: link1345/gua-tester/godot@v2
+  with:
+    project-path: game
+    test-project: tests/GuaTester.Tests.csproj
+    godot-version: "4.7"
+    godot-status: stable
+```
+
+Unityでは、LinuxでWindows x64 Mono Playerをビルドし、Windows runnerへ渡して
+`Gua.Testing.Unity`のNUnitテストを実行します。
+
+```yaml
+jobs:
+  unity:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v2
+    with:
+      project-path: game
+      scene-path: Assets/Scenes/Title.unity
+      test-project: tests/GuaTester.Unity.Tests.csproj
+      unity-version: auto
+      gua-tag: gua-v0.15.0
+    secrets:
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+```
+
+`gua-tag`で選ぶUPM packageと`Gua.Testing.Unity`のNuGetバージョンは揃えてください。
+fork PRにはUnity credentialsが渡らないため、未信頼forkではUnity jobをskipします。
 
 ## NuGetパッケージ
 

@@ -44,6 +44,7 @@ screenshots, and visual comparisons operate against the live game runtime.
 - Locate and operate controls through the same semantic API used for Godot.
 - Keep game-side adapter code separate from external NUnit test hosts.
 - Capture logs, screenshots, and diagnostics when a Unity test fails.
+- Build and test a Windows x64 Mono Player in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
 
 ### AI coding and AI playtesting
 
@@ -229,14 +230,14 @@ tests do not create artifacts unless capture is explicitly requested.
 
 Want to try that in GitHub Actions without wiring every setup step by hand?
 [`link1345/gua-tester`](https://github.com/link1345/gua-tester) provides
-reusable Actions for Godot GDScript projects. It downloads Godot on the runner,
-links the released Gua Godot addon into your project, sets `GODOT_EXECUTABLE`,
-and runs your .NET tests that use `Gua.Testing.Godot`.
+versioned workflows for both Godot and Unity. The Godot action downloads Godot,
+links the released addon, sets `GODOT_EXECUTABLE`, and runs the external .NET
+tests:
 
 For a typical consumer repository, the workflow can be as small as:
 
 ```yaml
-- uses: link1345/gua-tester@v1
+- uses: link1345/gua-tester/godot@v2
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -244,8 +245,30 @@ For a typical consumer repository, the workflow can be as small as:
     godot-status: stable
 ```
 
-If you have a Godot project that starts the Gua bridge, give it a spin in CI and
-see whether the semantic UI tree catches regressions before they land.
+The Unity reusable workflow installs the released UPM package, builds a Windows
+x64 Mono Player on Linux, transfers it to a Windows runner, and runs the
+`Gua.Testing.Unity` NUnit project:
+
+```yaml
+jobs:
+  unity:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v2
+    with:
+      project-path: game
+      scene-path: Assets/Scenes/Title.unity
+      test-project: tests/GuaTester.Unity.Tests.csproj
+      unity-version: auto
+      gua-tag: gua-v0.15.0
+    secrets:
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+```
+
+Keep the UPM release selected by `gua-tag` aligned with the
+`Gua.Testing.Unity` NuGet version. Unity credentials are unavailable to fork
+pull requests, so skip the Unity job for untrusted forks.
 
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
