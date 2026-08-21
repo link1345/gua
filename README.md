@@ -258,17 +258,20 @@ jobs:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
+      artifact-key: game
       unity-version: auto
       gua-tag: gua-v0.15.0
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
 ```
 
 Keep the UPM release selected by `gua-tag` aligned with the
 `Gua.Testing.Unity` NuGet version. Unity credentials are unavailable to fork
-pull requests, so skip the Unity job for untrusted forks.
+pull requests, so skip the Unity job for untrusted forks. The reusable workflow
+fixes the Windows test runner display at 1920x1080 before launching the Player.
 
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");

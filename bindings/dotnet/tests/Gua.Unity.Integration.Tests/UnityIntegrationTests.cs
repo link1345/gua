@@ -135,14 +135,21 @@ public sealed class UnityIntegrationTests
         Assert.That(tmpKeyResult.Succeeded, Is.True, $"TMP press_key failed: {tmpKeyResult.Error}");
         Assert.That(tmpKeyResult.Value, Does.Contain("Z"));
 
+        var titleScreenshot = host.CaptureScreenshot(TimeSpan.FromSeconds(15));
+        Assert.That(titleScreenshot.Width, Is.GreaterThan(0));
+        Assert.That(titleScreenshot.Height, Is.GreaterThan(0));
+        var panelScale = titleScreenshot.Width / 640f;
+        Assert.That(titleScreenshot.Height / 360f, Is.EqualTo(panelScale).Within(0.01f),
+            "The scaled UI Toolkit fixture requires a 16:9 render surface.");
+
         Assert.That(WaitForBounds(host, "scaled-box", out var scaledBounds), Is.True);
-        Assert.That(scaledBounds.X, Is.EqualTo(200).Within(1));
-        Assert.That(scaledBounds.Y, Is.EqualTo(120).Within(1));
-        Assert.That(scaledBounds.Width, Is.EqualTo(400).Within(1));
-        Assert.That(scaledBounds.Height, Is.EqualTo(80).Within(1));
+        Assert.That(scaledBounds.X, Is.EqualTo(100 * panelScale).Within(1));
+        Assert.That(scaledBounds.Y, Is.EqualTo(60 * panelScale).Within(1));
+        Assert.That(scaledBounds.Width, Is.EqualTo(200 * panelScale).Within(1));
+        Assert.That(scaledBounds.Height, Is.EqualTo(40 * panelScale).Within(1));
         var remoteScaledBounds = host.RemoteContext.GetRemoteTree().Nodes.Single(node => node.Label == "scaled-box").Bounds;
-        Assert.That(remoteScaledBounds.Width, Is.EqualTo(400).Within(1));
-        Assert.That(remoteScaledBounds.Height, Is.EqualTo(80).Within(1));
+        Assert.That(remoteScaledBounds.Width, Is.EqualTo(200 * panelScale).Within(1));
+        Assert.That(remoteScaledBounds.Height, Is.EqualTo(40 * panelScale).Within(1));
 
         var settings = host.Context.FindNodeByRole("button", "Settings");
         var settingsError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Click, settings), out var settingsRequestId);

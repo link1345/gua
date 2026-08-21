@@ -106,16 +106,19 @@ jobs:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
+      artifact-key: game
       unity-version: auto
       gua-tag: gua-v0.15.0
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
 ```
 
 `gua-tag`で選ぶUPM packageと`Gua.Testing.Unity`のNuGetバージョンは揃えてください。
 fork PRにはUnity credentialsが渡らないため、未信頼forkではUnity jobをskipします。
+reusable workflowはPlayer起動前にWindows test runnerの画面解像度を1920x1080へ固定します。
 
 ## NuGetパッケージ
 
