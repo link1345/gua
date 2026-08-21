@@ -106,7 +106,29 @@ public static class GuaVisualAssertions
         }
         var ratio = compared == 0 ? 0 : (double)different / compared;
         if (ratio <= options.MaxDifferentPixelRatio)
-            return new(true, actual.Width, actual.Height, compared, different, ratio, baseline, null, false);
+        {
+            var matchedDirectory = CreateArtifactDirectory(options, safeName);
+            File.WriteAllBytes(Path.Combine(matchedDirectory, "actual.png"), actualBytes);
+            WriteComparison(matchedDirectory, new
+            {
+                schemaVersion = 1,
+                name,
+                variant = options.BaselineVariant,
+                matched = true,
+                baselineCreated = false,
+                reason = "matched",
+                actual.Width,
+                actual.Height,
+                comparedPixels = compared,
+                differentPixels = different,
+                differentPixelRatio = ratio,
+                options.PixelThreshold,
+                options.MaxDifferentPixelRatio,
+                masks = options.Masks,
+                baselinePath = baseline
+            });
+            return new(true, actual.Width, actual.Height, compared, different, ratio, baseline, matchedDirectory, false);
+        }
         var directory = CreateArtifactDirectory(options, safeName);
         var diffBytes = PngBytes(diff, actual.Width, actual.Height);
         File.WriteAllBytes(Path.Combine(directory, "expected.png"), expectedBytes);

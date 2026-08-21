@@ -19,7 +19,19 @@ public sealed class VisualTests
         var updated = await GuaVisualAssertions.ExpectScreenshotAsync(context, "title", options);
         Assert.That(updated.BaselineUpdated, Is.True);
         var matched = await GuaVisualAssertions.ExpectScreenshotAsync(context, "title", Options("windows"));
-        Assert.Multiple(() => { Assert.That(matched.Matched, Is.True); Assert.That(matched.BaselinePath, Does.EndWith(Path.Combine("title", "windows.png"))); });
+        Assert.Multiple(() =>
+        {
+            Assert.That(matched.Matched, Is.True);
+            Assert.That(matched.BaselinePath, Does.EndWith(Path.Combine("title", "windows.png")));
+            Assert.That(matched.ArtifactPath, Is.Not.Null);
+            Assert.That(Directory.GetFiles(matched.ArtifactPath!).Select(Path.GetFileName), Is.EquivalentTo(new[] { "actual.png", "comparison.json" }));
+        });
+        using var metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(matched.ArtifactPath!, "comparison.json")));
+        Assert.Multiple(() =>
+        {
+            Assert.That(metadata.RootElement.GetProperty("matched").GetBoolean(), Is.True);
+            Assert.That(metadata.RootElement.GetProperty("reason").GetString(), Is.EqualTo("matched"));
+        });
     }
 
     [Test]

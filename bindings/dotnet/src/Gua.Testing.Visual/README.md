@@ -27,7 +27,9 @@ var result = await GuaVisualAssertions.ExpectScreenshotAsync(host.Context, "titl
 ```
 
 Missing baselines fail unless `UpdateBaselines = true` or
-`GUA_UPDATE_BASELINES=1` is explicit. A pixel-difference failure writes
+`GUA_UPDATE_BASELINES=1` is explicit. A successful comparison writes its current
+`actual.png` and a `comparison.json` manifest with reason `matched`, allowing a
+visual report to show the screen even when no difference was found. A pixel-difference failure writes
 `expected.png`, `actual.png`, `diff.png`, and `comparison.json`. Missing-baseline
 and dimension-mismatch failures write the same manifest with only the PNGs that
 exist for that failure. The manifest records the comparison name, variant,
