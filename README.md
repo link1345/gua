@@ -5,8 +5,8 @@ English | [日本語](README.ja.md)
 [![License](https://img.shields.io/github/license/link1345/gua)](https://github.com/link1345/gua/blob/main/LICENSE)
 [![Discord](https://img.shields.io/discord/1329272750099136552)](https://discord.gg/Zy65k8AxH2)
 
-> **Playwright-style UI automation for games, with Godot support and MCP access
-> for AI coding agents.**
+> **Playwright-style UI automation for games, with Godot 4.7 and Unity 6
+> support plus MCP access for AI coding agents.**
 
 **Gua** is a runtime UI automation protocol for games. It gives automated tests,
 inspectors, and AI agents a semantic interface to the UI of a running game.
@@ -14,9 +14,11 @@ Instead of relying on fragile image recognition or screen coordinates, they can
 find controls by ID, role, text, and state; interact with them; wait for changes;
 read logs; capture screenshots; and verify results.
 
-Gua's recommended engine integration is the **Godot 4.7 GDScript addon**. Its
-MCP server, `gui-mcp`, makes the same runtime UI available to MCP-enabled AI
-coding agents for AI-assisted game development and AI playtesting.
+Gua provides runtime integrations for the **Godot 4.7 GDScript addon** and
+**Unity 6**. The Unity package automatically reflects UI Toolkit, uGUI, and
+TextMeshPro runtime UI on Windows x64 Mono builds. Its MCP server, `gui-mcp`,
+makes the same runtime UI available to MCP-enabled AI coding agents for
+AI-assisted game development and AI playtesting.
 
 **Build → Run → Inspect → Test → Fix → Test again.**
 
@@ -34,6 +36,14 @@ screenshots, and visual comparisons operate against the live game runtime.
 - Wait for UI state changes and assert them from regular .NET tests.
 - Capture screenshots, compare visual baselines, and retain failure diagnostics.
 - Run end-to-end Godot UI tests in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
+
+### Unity 6 UI testing
+
+- Automatically expose UI Toolkit, uGUI, and TextMeshPro runtime UI.
+- Exercise scenes in Editor Play Mode or a Windows x64 Mono Player.
+- Locate and operate controls through the same semantic API used for Godot.
+- Keep game-side adapter code separate from external NUnit test hosts.
+- Capture logs, screenshots, and diagnostics when a Unity test fails.
 
 ### AI coding and AI playtesting
 
@@ -59,6 +69,16 @@ testing, screenshot and visual regression testing, CI testing, Inspector-based
 debugging, and MCP-based AI playtesting. See [Godot 4.7 GDScript Addon](#godot-47-gdscript-addon)
 for setup details.
 
+## Unity 6 support
+
+The Unity package automatically starts the runtime adapter and reflects UI
+Toolkit, uGUI, and TextMeshPro controls without manual semantic-node
+registration. `Gua.Testing.Unity` can launch Editor Play Mode or a built Mono
+Player from ordinary .NET tests. The first supported scope is Unity 6000.0+ on
+Windows x64 with Mono; IL2CPP, non-Windows targets, Unity IMGUI, and EditorWindow
+automation are not currently supported. See [Unity 6 Windows x64](#unity-6-windows-x64)
+for installation and verification details.
+
 ## NuGet Packages
 
 - **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
@@ -67,14 +87,21 @@ for setup details.
   Adds Gua locators, waits, assertions, and adapter test loops to regular .NET tests.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Starts a Godot process and provides helpers for controlling and verifying a running scene through the Gua bridge.
-- **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)]([https://www.nuget.org/packages/Gua.Testing.Godot](https://www.nuget.org/packages/Gua.Testing.Unity)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
+- **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)](https://www.nuget.org/packages/Gua.Testing.Unity) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
   Starts a Unity process and provides helpers for controlling and verifying a running scene through the Gua bridge.
-- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)]([https://www.nuget.org/packages/Gua.Runtime](https://www.nuget.org/packages/Gua.Testing.Runtime/)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
-  shared managed wrapper over the `gua_runtime` C ABI for engine adapters. Targets `net10.0` and `netstandard2.1`.
+- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)](https://www.nuget.org/packages/Gua.Runtime) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
+  Shared managed wrapper for authors of engine adapters. Use it to publish semantic frames, consume actions, complete screenshot requests, and host the Inspector bridge without duplicating P/Invoke code. Application test projects normally use an engine package instead.
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
-  Adds opt-in PNG baseline comparison and machine-readable visual failure artifacts.
+  Adds opt-in PNG baseline comparison for rendering regressions that semantic assertions cannot detect, such as clipping, misplaced controls, incorrect assets, and unexpected overlays. Failures retain expected, actual, diff, and machine-readable comparison artifacts.
 - **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
-  Records semantic UI operations and replays them with correlated host completion.
+  Records repeatable user journeys as semantic operations and replays every step with correlated host completion. Use it for regression flows, bug reproduction, and sharing a scenario without storing fragile coordinates or plaintext secrets.
+
+See the [.NET package guide](https://gua.orizika.com/en/docs/dotnet-packages/)
+for package selection, then use the dedicated guides for
+[Gua.Runtime](https://gua.orizika.com/en/docs/gua-runtime/),
+[Visual testing](https://gua.orizika.com/en/visual-testing/), and
+[Recording](https://gua.orizika.com/en/recording/) for complete
+workflows and diagrams.
 
 ## MCP and Inspector
 
@@ -91,7 +118,8 @@ await expect(game.getById("loading")).toBeVisible()
 ```
 
 The current implementation exposes that shape for C++ and C# over the C ABI,
-adds Inspector and MCP consumers, and includes Godot 4.7 adapters and samples:
+adds Inspector and MCP consumers, and includes Godot 4.7 and Unity 6 adapters
+and samples:
 
 ```cpp
 gua::testing::get_by_role(ctx, "button", "Start Game").click();
@@ -257,10 +285,12 @@ The first implementation focuses on a small, stable core:
   over the shared native runtime bridge
 - Recommended Godot 4.7 GDScript addon using the same runtime bridge through
   GDExtension, including the full standard-Control adapter
+- Unity 6 runtime package for UI Toolkit, uGUI, and TextMeshPro, plus external
+  Editor Play Mode and Windows x64 Mono Player test hosts
 
-Engine-specific integrations such as Unity, Unreal Engine, Godot, and MonoGame
-are expected to be adapters built on top of the protocol, not the center of the
-project.
+Engine-specific integrations remain adapters built on top of the protocol, not
+the center of the project. Godot and Unity are the current supported adapters;
+additional engines can follow the same boundary.
 
 ## Native Toolchain
 

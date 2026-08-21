@@ -8,8 +8,8 @@
 > この日本語版は補助ドキュメントです。内容に差異がある場合は、
 > [英語版README](README.md)を正しい最新情報として扱ってください。
 
-> **ゲーム向けのPlaywrightスタイルUI自動化。Godotに対応し、MCP経由で
-> AIコーディングエージェントから利用できます。**
+> **ゲーム向けのPlaywrightスタイルUI自動化。Godot 4.7とUnity 6に対応し、
+> MCP経由でAIコーディングエージェントから利用できます。**
 
 **Gua**は、ゲーム向けのランタイムUI自動化プロトコルです。実行中の
 ゲームUIをSemantic UI Treeとして公開し、テスト、Inspector、AIエージェントから
@@ -17,9 +17,11 @@
 画面座標に頼らず、ID、role、text、状態からControlを検索し、操作、待機、ログ確認、
 スクリーンショット取得、結果検証を行えます。
 
-現在の推奨エンジン統合は**Godot 4.7 GDScriptアドオン**です。MCPサーバーの
-`gui-mcp`を使うと、同じランタイムUIをMCP対応のAIコーディングエージェントへ公開し、
-AI支援ゲーム開発とAIプレイテストに利用できます。
+Guaは**Godot 4.7 GDScriptアドオン**と**Unity 6**向けのランタイム統合を
+提供します。Unityパッケージは、Windows x64 Mono環境のUI Toolkit、uGUI、
+TextMeshProランタイムUIを自動収集します。MCPサーバーの`gui-mcp`を使うと、
+同じランタイムUIをMCP対応のAIコーディングエージェントへ公開し、AI支援ゲーム開発と
+AIプレイテストに利用できます。
 
 **実装 → 起動 → 観測 → テスト → 修正 → 再テスト。**
 
@@ -37,6 +39,14 @@ Playwrightスタイル自動化レイヤーだと考えると分かりやすい�
 - 通常の.NETテストからUI状態の変化を待機・検証
 - スクリーンショット、Visual baseline比較、失敗診断artifactを取得
 - [`link1345/gua-tester`](https://github.com/link1345/gua-tester)でGodotのE2E UIテストをCI実行
+
+### Unity 6 UIテスト
+
+- UI Toolkit、uGUI、TextMeshProのランタイムUIを自動的に公開
+- Editor Play ModeまたはWindows x64 Mono Playerでシーンを操作
+- Godotと同じSemantic APIでControlを検索・操作
+- ゲーム側アダプターと外部NUnitテストホストを分離
+- Unityテスト失敗時にログ、スクリーンショット、診断情報を保存
 
 ### AIコーディングとAIプレイテスト
 
@@ -59,6 +69,15 @@ Godot開発では、Semantic UI自動化、外部E2Eテスト、スクリーン�
 regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテストに利用できます。
 設定手順は[Godot 4.7 GDScriptアドオン](#godot-47-gdscriptアドオン)を参照してください。
 
+## Unity 6対応
+
+Unityパッケージはランタイムアダプターを自動起動し、UI Toolkit、uGUI、TextMeshProの
+Controlを手動登録なしで収集します。`Gua.Testing.Unity`を使うと、通常の.NETテストから
+Editor Play Modeまたはビルド済みMono Playerを起動できます。現在の対応範囲は
+Unity 6000.0以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
+EditorWindowの自動化には未対応です。導入・検証手順は
+[Unity 6 Windows x64](#unity-6-windows-x64)を参照してください。
+
 ## NuGetパッケージ
 
 - **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
@@ -70,15 +89,20 @@ regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテ
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
   Godotプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
-- **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)]([https://www.nuget.org/packages/Gua.Testing.Godot](https://www.nuget.org/packages/Gua.Testing.Unity)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
+- **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)](https://www.nuget.org/packages/Gua.Testing.Unity) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
   Unityプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
-- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)]([https://www.nuget.org/packages/Gua.Runtime](https://www.nuget.org/packages/Gua.Testing.Runtime)) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
-  エンジンアダプタ用のC ABIに対する共有マネージドラッパーです。`net10.0`および`netstandard2.1`をターゲットとしています。
+- **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)](https://www.nuget.org/packages/Gua.Runtime) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
+  エンジンアダプター開発者向けの共有マネージドラッパーです。P/Invokeを重複実装せず、Semantic frameの公開、actionの処理、スクリーンショット要求の完了、Inspectorブリッジのホストに利用できます。通常のゲームテストでは各エンジン向けパッケージを使用します。
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
-  オプトインのPNGベースライン比較と、機械可読な差分成果物を提供します。
+  Semantic assertionでは検出できないclipping、Controlの位置ずれ、asset間違い、予期しないoverlayなどの描画regressionをPNG baseline比較で検出します。失敗時はexpected、actual、diff、機械可読な比較結果を保存します。
 - **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
-  Semantic UI操作を記録し、ホスト側の完了を相関確認しながら再生します。
+  再現可能なユーザーフローをSemantic操作として記録し、各stepをホスト側の完了と相関確認しながら再生します。壊れやすい座標や秘密値の平文を保存せず、regression flow、bug再現、scenario共有に利用できます。
+
+パッケージの選び方は[.NETパッケージガイド](https://gua.orizika.com/docs/dotnet-packages/)、
+具体的な実装・運用は[Gua.Runtime実装ガイド](https://gua.orizika.com/docs/gua-runtime/)、
+[Visualテスト実践](https://gua.orizika.com/visual-testing/)、
+[Recording実践](https://gua.orizika.com/recording/)を参照してください。
 
 ## MCPとInspector
 
@@ -96,7 +120,7 @@ await game.getByRole("button", { name: "Start Game" }).click()
 await expect(game.getById("loading")).toBeVisible()
 ```
 
-現在の実装では、安定境界となるC ABIの上にC++とC#のAPIを提供し、InspectorとMCPをプロトコルの利用者として接続しています。Godot 4.7向けのアダプターとサンプルも含まれます。
+現在の実装では、安定境界となるC ABIの上にC++とC#のAPIを提供し、InspectorとMCPをプロトコルの利用者として接続しています。Godot 4.7とUnity 6向けのアダプターとサンプルも含まれます。
 
 ```cpp
 gua::testing::get_by_role(ctx, "button", "Start Game").click();
@@ -128,8 +152,9 @@ Guaは、ゲームランタイムと自動化ツールをつなぐUIレイヤー
 - ランタイムブリッジをAIエージェントへ公開するMCPサーバー
 - 共有ネイティブランタイム上で基本的なUI Tree収集とボタンクリックを示す、実験的なGodot 4.7 C#サンプル
 - GDExtension経由で標準Control向けの全機能を提供する、推奨Godot 4.7 GDScriptアドオン
+- UI Toolkit、uGUI、TextMeshPro向けUnity 6ランタイムパッケージと、Editor Play Mode・Windows x64 Mono Player用の外部テストホスト
 
-Unity、Unreal Engine、Godot、MonoGameなどのエンジン固有機能は、Guaの中心ではなく、プロトコル上に構築するアダプターとして扱います。
+エンジン固有機能はGuaの中心ではなく、プロトコル上に構築するアダプターとして扱います。現在はGodotとUnityに対応しており、追加エンジンも同じ境界上へ実装できます。
 
 ## ネイティブツールチェーン
 
@@ -159,6 +184,8 @@ cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target gua
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Recording/Gua.Testing.Recording.csproj --configuration Release
@@ -170,21 +197,23 @@ NUnitサンプルは次のコマンドで実行できます。
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
-### Unity 6 Windows Editor
+### Unity 6 Windows x64
 
 `Gua.Core`、`Gua.Testing`、`Gua.Testing.Visual`、`Gua.Testing.Recording`は
 `net10.0`と`netstandard2.1`の両方を対象にします。
 既定の**.NET Standard 2.1** API Compatibility Levelを使うUnity 6では、
-native C ABIを変えずにmanaged assemblyを読み込めます。最初の検証対象は
-Windows Editor x64です。managed assemblyとNuGet依存assemblyを
+native C ABIを変えずにmanaged assemblyを読み込めます。対応対象は
+Windows Editor x64とWindows Standalone x64 Mono Playerです。managed assemblyとNuGet依存assemblyを
 `Assets/Plugins/Gua/Managed`へ、`gua.dll`を`Assets/Plugins/x86_64`へ配置し、
 UnityのPlugin Import SettingsでWindows EditorとWindows Standalone x86_64を
 有効にします。
 
-最小`MonoBehaviour`、具体的なビルド・配置手順、Unityなしでも同じ
-`netstandard2.1` assemblyとnative呼び出しを検証できるsmoke hostは
-[`examples/unity-smoke`](examples/unity-smoke/README.md)を参照してください。
-IL2CPP/AOTとWindows以外のnative targetは個別検証が必要です。
+Unity Package Manager向けのビルド済み`.tgz`は各GitHub Releaseへ添付されます。
+Unity Package Managerの**Add package from tarball**から導入できます。パッケージは
+自動起動し、UI Toolkit、uGUI、TextMeshProのランタイムUIを収集します。
+`Gua.Testing.Unity`はEditor Play ModeとMono Windows Playerの外部テストホストを
+提供します。検証済みfixtureは[`examples/unity-smoke`](examples/unity-smoke/README.md)を
+参照してください。IL2CPP、Windows以外、IMGUI、EditorWindow UIには未対応です。
 
 ## Inspector
 
