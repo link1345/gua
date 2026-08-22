@@ -878,9 +878,10 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             return runtime->virtual_clock_enabled;
         },
         .get_clock_json = [runtime] {
-            const int size = gua_runtime_clock_copy_status_json(runtime, nullptr, 0);
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_clock_copy_status_json(runtime->context, nullptr, 0);
             std::string json(static_cast<std::size_t>(size), '\0');
-            gua_runtime_clock_copy_status_json(runtime, json.data(), size);
+            gua_clock_copy_status_json(runtime->context, json.data(), size);
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
         },

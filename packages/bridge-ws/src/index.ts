@@ -123,13 +123,15 @@ export class DemoRuntime {
     };
   }
   getClock() { return this.clock; }
-  installClock(initial = 0, step = 1000 / 60) { if (this.clock.installed) throw new Error("invalid_state"); if (step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) { if (this.clock.installed) throw new Error("invalid_state"); if (!Number.isFinite(initial) || initial < 0 || !Number.isFinite(step) || step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
   pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
-    if (step !== undefined && step <= 0) throw new Error("invalid_duration");
+    const nextTime = this.clock.nowMs + duration;
+    if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) ||
+        step !== undefined && (!Number.isFinite(step) || step <= 0)) throw new Error("invalid_duration");
     const operationSequence = this.nextClockOperationSequence++;
-    this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration };
+    this.clock = { ...this.clock, nowMs: nextTime };
     const result = { ...this.clock, operationSequence, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
     setTimeout(() => {
       this.clock = { ...this.clock, completedOperationSequence: operationSequence };

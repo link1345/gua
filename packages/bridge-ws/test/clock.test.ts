@@ -10,4 +10,14 @@ describe("DemoRuntime virtual clock", () => {
     expect(runtime.getClock().nowMs).toBe(100);
     expect(runtime.getClock().defaultStepMs).toBe(10);
   });
+
+  test("rejects durations that would rewind or overflow the timeline", () => {
+    const runtime = new DemoRuntime();
+    runtime.installClock(100, 10);
+    runtime.pauseClock();
+
+    expect(() => runtime.runClockFor(-25)).toThrow("invalid_duration");
+    expect(() => runtime.runClockFor(Number.POSITIVE_INFINITY)).toThrow("invalid_duration");
+    expect(runtime.getClock().nowMs).toBe(100);
+  });
 });
