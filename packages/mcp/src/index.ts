@@ -783,8 +783,16 @@ class GuaBridgeClient {
       if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
       if ((result.pendingMs ?? 0) <= 0 && (tree.frameSequence ?? 0) > completionFrame) return result;
       await sleep(5);
-      const status = await this.request<{ pendingMs: number }>({ type: "get_clock" });
-      result = { ...result, pendingMs: status.pendingMs };
+      const status = await this.request<{
+        schemaVersion: number;
+        installed: boolean;
+        state: "running" | "paused";
+        nowMs: number;
+        defaultStepMs: number;
+        pendingMs: number;
+        generation: number;
+      }>({ type: "get_clock" });
+      result = { ...result, ...status };
     }
     throw new Error("Timed out waiting for Gua clock run_for host completion.");
   }

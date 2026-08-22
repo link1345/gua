@@ -8,8 +8,11 @@ describe("InspectorRecorder", () => {
     const client = new MockInspectorClient();
     await client.installClock(0, 10);
     await client.pauseClock();
-    const status = await client.runClockFor(25);
+    const overridden = await client.runClockFor(4, 4);
+    expect(overridden.defaultStepMs).toBe(10);
+    const status = await client.runClockFor(21);
     expect(status.nowMs).toBe(25);
+    expect(status.defaultStepMs).toBe(10);
     expect(status.state).toBe("paused");
   });
   test("exports schema v1 and redacts sensitive values", () => {

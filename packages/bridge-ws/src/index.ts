@@ -127,7 +127,7 @@ class DemoRuntime {
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
     if (step !== undefined && step <= 0) throw new Error("invalid_duration");
-    this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration, defaultStepMs: step ?? this.clock.defaultStepMs };
+    this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration };
     const result = { ...this.clock, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
     setTimeout(() => { this.frameSequence += 1; this.revision += 1; }, 0);
     return result;

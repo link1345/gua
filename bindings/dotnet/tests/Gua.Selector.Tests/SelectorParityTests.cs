@@ -236,6 +236,10 @@ public sealed class SelectorParityTests
                 Assert.That(localVersion.Capabilities, Does.Contain("virtual_clock_v1"));
             });
             Assert.That(remoteVersion.Capabilities, Does.Contain("version_v1"));
+            Assert.That(() => remote.GetClockStatus(),
+                Throws.InvalidOperationException.With.Message.Contains("unsupported"));
+            Assert.That(() => remote.InstallClock(),
+                Throws.InvalidOperationException.With.Message.Contains("unsupported"));
 
             using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
             sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));

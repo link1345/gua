@@ -48,6 +48,7 @@ struct BridgeHandlers {
     std::function<CommandResult(unsigned long long after_frame_sequence, unsigned int timeout_ms)> capture_screenshot;
     std::function<std::string()> get_diagnostics_json;
     std::function<std::string()> get_version_json;
+    std::function<bool()> clock_supported;
     std::function<std::string()> get_clock_json;
     std::function<CommandResult(std::string_view command, double value_ms, double step_ms, bool step_ms_present)> control_clock;
     std::function<std::string(const QuerySelector& selector)> query_nodes_json;

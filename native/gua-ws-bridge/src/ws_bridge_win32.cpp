@@ -949,13 +949,14 @@ private:
                     : error_response(command.id, "get_version is not supported by this bridge");
             }
             if (command.type == "get_clock") {
-                return handlers_.get_clock_json
+                return handlers_.clock_supported && handlers_.clock_supported() && handlers_.get_clock_json
                     ? ok_response(command.id, handlers_.get_clock_json())
                     : error_response(command.id, "unsupported");
             }
             if (command.type == "clock_install" || command.type == "clock_pause" ||
                 command.type == "clock_run_for" || command.type == "clock_resume") {
-                if (!handlers_.control_clock) return error_response(command.id, "unsupported");
+                if (!handlers_.clock_supported || !handlers_.clock_supported() || !handlers_.control_clock)
+                    return error_response(command.id, "unsupported");
                 const auto result = handlers_.control_clock(command.type,
                     command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
                     command.step_ms, command.step_ms_present);

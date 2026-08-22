@@ -337,7 +337,7 @@ export class MockInspectorClient implements GuaInspectorClient {
   async getClock() { return this.clock; }
   async installClock(initialTimeMs = 0, stepMs = 1000 / 60) { this.clock = { ...this.clock, installed: true, state: "running", nowMs: initialTimeMs, defaultStepMs: stepMs, generation: this.clock.generation + 1 }; return this.clock; }
   async pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
-  async runClockFor(durationMs: number, stepMs?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + durationMs, defaultStepMs: stepMs ?? this.clock.defaultStepMs }; return this.clock; }
+  async runClockFor(durationMs: number, stepMs?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); if (stepMs !== undefined && stepMs <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + durationMs }; return this.clock; }
   async resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
 }
 
