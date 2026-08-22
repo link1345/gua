@@ -439,6 +439,36 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public async Task RemoteContextsSerializeConcurrentAsyncWebSocketRequests()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+        runtime.Clock.Pause();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var godotRemote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            godotRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var godotRequests = Enumerable.Range(0, 8).Select(_ => godotRemote.PauseClockAsync()).ToArray();
+            Assert.That(await Task.WhenAll(godotRequests).WaitAsync(TimeSpan.FromSeconds(2)),
+                Is.All.EqualTo(GuaClockResult.Ok));
+
+            using var sharedRemote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            sharedRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var sharedRequests = Enumerable.Range(0, 8).Select(_ => sharedRemote.PauseClockAsync()).ToArray();
+            Assert.That(await Task.WhenAll(sharedRequests).WaitAsync(TimeSpan.FromSeconds(2)),
+                Is.All.EqualTo(GuaClockResult.Ok));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public async Task RemoteClockRejectsMissingDurationAndNonnumericFields()
     {
         var port = ReservePort();

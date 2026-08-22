@@ -9,6 +9,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
 {
     private readonly Uri _bridgeUri;
     private readonly TimeSpan _requestTimeout;
+    private readonly SemaphoreSlim _requestGate = new(1, 1);
     private ClientWebSocket? _socket;
     private readonly List<GuaActionEvent> _bufferedActionEvents = new();
     private int _nextId = 1;
@@ -424,69 +425,79 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
 
     private T Request<T>(object command, bool allowNullResult = false)
     {
-        EnsureConnected();
-        var id = _nextId++;
-        var payload = JsonSerializer.Serialize(command, command.GetType());
-        using var document = JsonDocument.Parse(payload);
-        using var output = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(output))
+        _requestGate.Wait();
+        try
         {
-            writer.WriteStartObject();
-            writer.WriteNumber("id", id);
-            foreach (var property in document.RootElement.EnumerateObject())
+            EnsureConnected();
+            var id = _nextId++;
+            var payload = JsonSerializer.Serialize(command, command.GetType());
+            using var document = JsonDocument.Parse(payload);
+            using var output = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(output))
             {
-                property.WriteTo(writer);
+                writer.WriteStartObject();
+                writer.WriteNumber("id", id);
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
             }
-            writer.WriteEndObject();
+
+            Send(output.ToArray());
+            while (true)
+            {
+                var responseJson = ReceiveString();
+                using var response = JsonDocument.Parse(responseJson);
+                if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
+                {
+                    continue;
+                }
+
+                if (!response.RootElement.GetProperty("ok").GetBoolean())
+                {
+                    throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
+                }
+
+                var result = response.RootElement.GetProperty("result").Deserialize<T>(JsonOptions);
+                if (result is null && !allowNullResult)
+                {
+                    throw new InvalidOperationException("Gua bridge returned an empty result.");
+                }
+
+                return result!;
+            }
         }
-
-        Send(output.ToArray());
-        while (true)
-        {
-            var responseJson = ReceiveString();
-            using var response = JsonDocument.Parse(responseJson);
-            if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
-            {
-                continue;
-            }
-
-            if (!response.RootElement.GetProperty("ok").GetBoolean())
-            {
-                throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
-            }
-
-            var result = response.RootElement.GetProperty("result").Deserialize<T>(JsonOptions);
-            if (result is null && !allowNullResult)
-            {
-                throw new InvalidOperationException("Gua bridge returned an empty result.");
-            }
-
-            return result!;
-        }
+        finally { _requestGate.Release(); }
     }
 
     private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNullResult = false)
     {
-        await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-        var id = _nextId++;
-        var payload = BuildRequestPayload(command, id);
-        using (var sendTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            sendTimeout.CancelAfter(_requestTimeout);
-            var socket = _socket ?? throw new InvalidOperationException("Gua bridge WebSocket is not connected.");
-            await socket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, sendTimeout.Token).ConfigureAwait(false);
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            var id = _nextId++;
+            var payload = BuildRequestPayload(command, id);
+            using (var sendTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                sendTimeout.CancelAfter(_requestTimeout);
+                var socket = _socket ?? throw new InvalidOperationException("Gua bridge WebSocket is not connected.");
+                await socket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, sendTimeout.Token).ConfigureAwait(false);
+            }
+            while (true)
+            {
+                var responseJson = await ReceiveStringAsync(cancellationToken).ConfigureAwait(false);
+                using var response = JsonDocument.Parse(responseJson);
+                if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
+                if (!response.RootElement.GetProperty("ok").GetBoolean())
+                    throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
+                var result = response.RootElement.GetProperty("result").Deserialize<T>(JsonOptions);
+                if (result is null && !allowNullResult) throw new InvalidOperationException("Gua bridge returned an empty result.");
+                return result!;
+            }
         }
-        while (true)
-        {
-            var responseJson = await ReceiveStringAsync(cancellationToken).ConfigureAwait(false);
-            using var response = JsonDocument.Parse(responseJson);
-            if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
-            if (!response.RootElement.GetProperty("ok").GetBoolean())
-                throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
-            var result = response.RootElement.GetProperty("result").Deserialize<T>(JsonOptions);
-            if (result is null && !allowNullResult) throw new InvalidOperationException("Gua bridge returned an empty result.");
-            return result!;
-        }
+        finally { _requestGate.Release(); }
     }
 
     private static byte[] BuildRequestPayload(object command, int id)
@@ -533,39 +544,44 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
 
     private string RequestRawResult(object command, TimeSpan? responseTimeout = null)
     {
-        EnsureConnected();
-        var id = _nextId++;
-        var payload = JsonSerializer.Serialize(command, command.GetType());
-        using var document = JsonDocument.Parse(payload);
-        using var output = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(output))
+        _requestGate.Wait();
+        try
         {
-            writer.WriteStartObject();
-            writer.WriteNumber("id", id);
-            foreach (var property in document.RootElement.EnumerateObject())
+            EnsureConnected();
+            var id = _nextId++;
+            var payload = JsonSerializer.Serialize(command, command.GetType());
+            using var document = JsonDocument.Parse(payload);
+            using var output = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(output))
             {
-                property.WriteTo(writer);
+                writer.WriteStartObject();
+                writer.WriteNumber("id", id);
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
             }
-            writer.WriteEndObject();
+
+            Send(output.ToArray());
+            while (true)
+            {
+                var responseJson = ReceiveString(responseTimeout);
+                using var response = JsonDocument.Parse(responseJson);
+                if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
+                {
+                    continue;
+                }
+
+                if (!response.RootElement.GetProperty("ok").GetBoolean())
+                {
+                    throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
+                }
+
+                return response.RootElement.GetProperty("result").GetRawText();
+            }
         }
-
-        Send(output.ToArray());
-        while (true)
-        {
-            var responseJson = ReceiveString(responseTimeout);
-            using var response = JsonDocument.Parse(responseJson);
-            if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
-            {
-                continue;
-            }
-
-            if (!response.RootElement.GetProperty("ok").GetBoolean())
-            {
-                throw new InvalidOperationException(response.RootElement.GetProperty("error").GetString());
-            }
-
-            return response.RootElement.GetProperty("result").GetRawText();
-        }
+        finally { _requestGate.Release(); }
     }
 
     private void EnsureConnected()
