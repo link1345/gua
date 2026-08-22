@@ -127,6 +127,11 @@ export const guaMcpTools = [
   "wait_for_node",
   "get_screenshot",
   "get_logs",
+  "get_clock",
+  "clock_install",
+  "clock_pause",
+  "clock_run_for",
+  "clock_resume",
   "start_recording",
   "stop_recording",
   "save_recording",
@@ -223,6 +228,15 @@ const tools: McpTool[] = [
     description: "Read ordered runtime logs from the running game bridge.",
     inputSchema: objectSchema({}),
   },
+  { name: "get_clock", description: "Read the opt-in Gua virtual clock state.", inputSchema: objectSchema({}) },
+  { name: "clock_install", description: "Install the Gua virtual clock in running state.", inputSchema: objectSchema({
+    initialTimeMs: { type: "number", minimum: 0 }, stepMs: { type: "number", exclusiveMinimum: 0 },
+  }) },
+  { name: "clock_pause", description: "Pause work explicitly driven by GuaClock.", inputSchema: objectSchema({}) },
+  { name: "clock_run_for", description: "Advance a paused GuaClock without waiting for wall time.", inputSchema: objectSchema({
+    durationMs: { type: "number", minimum: 0 }, stepMs: { type: "number", exclusiveMinimum: 0 },
+  }, ["durationMs"]) },
+  { name: "clock_resume", description: "Resume real-time advancement of GuaClock.", inputSchema: objectSchema({}) },
   {
     name: "start_recording",
     description: "Start recording semantic actions invoked through this MCP server.",
@@ -489,6 +503,16 @@ async function executeTool(
       return bridge.getScreenshot();
     case "get_logs":
       return bridge.getLogs();
+    case "get_clock":
+      return bridge.getClock();
+    case "clock_install":
+      return bridge.controlClock({ type: "clock_install", initialTimeMs: readNumberArg(args, "initialTimeMs", 0), stepMs: readOptionalNumberArg(args, "stepMs") });
+    case "clock_pause":
+      return bridge.controlClock({ type: "clock_pause" });
+    case "clock_run_for":
+      return bridge.controlClock({ type: "clock_run_for", durationMs: readNumberArg(args, "durationMs", 0), stepMs: readOptionalNumberArg(args, "stepMs") });
+    case "clock_resume":
+      return bridge.controlClock({ type: "clock_resume" });
     case "start_recording":
       return { ...automation.startRecording(), artifactDirectory: automation.artifactRoot };
     case "stop_recording": {
@@ -744,6 +768,37 @@ class GuaBridgeClient {
     return this.request<GuaScreenshot>({ type: "get_screenshot" });
   }
 
+  async getClock(): Promise<unknown> { return this.request({ type: "get_clock" }); }
+  async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
+    { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
+  {
+    let result = await this.request<{ pendingMs?: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command);
+    if (command.type !== "clock_run_for") return result;
+    const completionEpoch = result.completionSessionEpoch;
+    const completionFrame = result.completionAfterFrameSequence;
+    const operationSequence = result.operationSequence;
+    if (completionEpoch === undefined || completionFrame === undefined || operationSequence === undefined) throw new Error("unsupported");
+    const started = Date.now();
+    while (Date.now() - started < 10000) {
+      const tree = await this.getUiTree();
+      if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
+      if ((result.completedOperationSequence ?? 0) >= operationSequence && (tree.frameSequence ?? 0) > completionFrame) return result;
+      await sleep(5);
+      const status = await this.request<{
+        schemaVersion: number;
+        installed: boolean;
+        state: "running" | "paused";
+        nowMs: number;
+        defaultStepMs: number;
+        pendingMs: number;
+        generation: number;
+        completedOperationSequence?: number;
+      }>({ type: "get_clock" });
+      result = { ...result, ...status };
+    }
+    throw new Error("Timed out waiting for Gua clock run_for host completion.");
+  }
+
   async performAction(input: SemanticActionInput): Promise<GuaActionReceipt | null> {
     const type = actionCommandType(input.action);
     return this.request<GuaActionReceipt | null>(compactResult({
@@ -898,6 +953,9 @@ type BridgeCommandInput =
   | { type: "get_logs" }
   | { type: "get_screenshot" }
   | { type: "poll_events"; requestId: number }
+  | { type: "get_clock" | "clock_pause" | "clock_resume" }
+  | { type: "clock_install"; initialTimeMs?: number; stepMs?: number }
+  | { type: "clock_run_for"; durationMs: number; stepMs?: number }
   | {
       type: "click_node" | "focus_node" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
       nodeId?: string;
@@ -986,6 +1044,13 @@ function readIntegerArg(args: Record<string, unknown>, name: string, fallback: n
 function readNumberArg(args: Record<string, unknown>, name: string, fallback: number): number {
   const value = args[name];
   if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Expected finite number argument: ${name}`);
+  return value;
+}
+
+function readOptionalNumberArg(args: Record<string, unknown>, name: string): number | undefined {
+  const value = args[name];
+  if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Expected finite number argument: ${name}`);
   return value;
 }

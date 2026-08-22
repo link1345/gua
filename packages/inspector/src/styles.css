@@ -60,6 +60,8 @@ button:disabled {
   min-height: 100vh;
   background: #0f1216;
 }
+.gua-clock-controls { display: grid; grid-template-columns: 1fr 1fr auto auto auto auto; gap: 0.5rem; padding: 0.75rem; }
+.gua-clock-controls input { min-width: 0; }
 
 .gua-topbar {
   align-items: center;

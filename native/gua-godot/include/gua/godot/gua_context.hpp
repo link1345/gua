@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -43,6 +44,15 @@ public:
     Dictionary poll_event_v2();
     Dictionary get_context_status() const;
     Dictionary reset_context(const Dictionary& options = Dictionary());
+    Dictionary clock_install(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0);
+    Dictionary clock_pause();
+    Dictionary clock_run_for(double duration_ms, double step_ms = 0.0);
+    Dictionary clock_resume();
+    Dictionary clock_advance(double duration_ms);
+    Dictionary get_clock() const;
+    Dictionary consume_clock_step();
+    Array consume_clock_steps();
+    void enable_virtual_clock_adapter();
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

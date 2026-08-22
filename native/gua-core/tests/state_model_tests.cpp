@@ -1,6 +1,8 @@
 #include "gua/gua.h"
+#include "gua/gua.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <cstdint>
@@ -73,6 +75,127 @@ int main()
     gua_destroy_context(detailed_context);
     gua_context_t* context = gua_create_context();
     assert(context != nullptr);
+
+    assert(gua_clock_pause(context) == GUA_CLOCK_ERROR_NOT_INSTALLED);
+    assert(gua_clock_install(context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(context, 25.0, 10.0) == GUA_CLOCK_OK);
+    gua_clock_step_t clock_step { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 10.0 && clock_step.final_step == 0);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 5.0 && clock_step.final_step == 1);
+    gua_clock_status_t clock_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.now_ms == 25.0 && clock_status.paused == 1);
+    assert(gua_clock_resume(context) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(context, 4.0) == GUA_CLOCK_OK);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 4.0);
+    assert(gua_clock_install(context, 0.0, 1.0) == GUA_CLOCK_ERROR_INVALID_STATE);
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.now_ms == 29.0);
+    assert(gua_clock_advance(context, 10000001.0) == GUA_CLOCK_ERROR_EXECUTION_LIMIT);
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.pending_ms == 0.0);
+
+    gua_context_t* pause_context = gua_create_context();
+    assert(gua_clock_install(pause_context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(pause_context, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(pause_context) == GUA_CLOCK_ERROR_INVALID_STATE);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(pause_context, &clock_step) == 1);
+    assert(gua_clock_pause(pause_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(pause_context, 10.0, 10.0) == GUA_CLOCK_OK);
+    gua_reset_options_t clock_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
+    gua_reset_report_t clock_reset_report { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(pause_context, &clock_reset, &clock_reset_report) == GUA_RESET_SUCCEEDED);
+    gua_clock_operation_status_t reset_operation_status { sizeof(gua_clock_operation_status_t) };
+    assert(gua_clock_get_operation_status(pause_context, &reset_operation_status) == 1);
+    assert(reset_operation_status.latest_operation_sequence == reset_operation_status.completed_operation_sequence);
+    gua_destroy_context(pause_context);
+
+    gua_context_t* overflow_context = gua_create_context();
+    assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_get_status(overflow_context, &clock_status) == 1 &&
+        std::isfinite(clock_status.now_ms) && clock_status.pending_ms == 0.0);
+    gua_destroy_context(overflow_context);
+
+    gua_context_t* precision_context = gua_create_context();
+    assert(gua_clock_install(precision_context, 0.0, 1e-7) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(precision_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(precision_context, 2e-7, 1e-7) == GUA_CLOCK_OK);
+    std::vector<char> clock_json(static_cast<std::size_t>(gua_clock_copy_status_json(precision_context, nullptr, 0)));
+    gua_clock_copy_status_json(precision_context, clock_json.data(), static_cast<int>(clock_json.size()));
+    const std::string precise_status(clock_json.data());
+    const auto number_after = [&](const std::string& field) {
+        const auto offset = precise_status.find(field);
+        assert(offset != std::string::npos);
+        return std::stod(precise_status.substr(offset + field.size()));
+    };
+    assert(number_after("\"defaultStepMs\":") == 1e-7);
+    assert(number_after("\"pendingMs\":") == 2e-7);
+    gua_destroy_context(precision_context);
+
+    const auto count_clock_steps = [](double duration, double step) {
+        gua_context_t* rounding_context = gua_create_context();
+        assert(gua_clock_install(rounding_context, 0.0, step) == GUA_CLOCK_OK);
+        assert(gua_clock_pause(rounding_context) == GUA_CLOCK_OK);
+        assert(gua_clock_run_for(rounding_context, duration, step) == GUA_CLOCK_OK);
+        int count = 0;
+        gua_clock_step_t rounding_step { sizeof(gua_clock_step_t) };
+        while (gua_clock_consume_step(rounding_context, &rounding_step) == 1) ++count;
+        gua_clock_status_t rounding_status { sizeof(gua_clock_status_t) };
+        assert(gua_clock_get_status(rounding_context, &rounding_status) == 1);
+        assert(rounding_status.now_ms == duration && rounding_status.pending_ms == 0.0);
+        gua_destroy_context(rounding_context);
+        return count;
+    };
+    assert(count_clock_steps(1.0, 0.1) == 10);
+    assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
+    assert(count_clock_steps(1e-16, 1.0) == 1);
+
+    gua_context_t* magnitude_context = gua_create_context();
+    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_install(magnitude_context, 1e16, 3.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(magnitude_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(magnitude_context, 100.0, 3.0) == GUA_CLOCK_OK);
+    gua_clock_status_t magnitude_status { sizeof(gua_clock_status_t) };
+    double previous_now = 1e16;
+    int magnitude_steps = 0;
+    gua_clock_step_t magnitude_step { sizeof(gua_clock_step_t) };
+    while (gua_clock_consume_step(magnitude_context, &magnitude_step) == 1) {
+        assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
+        assert(magnitude_status.now_ms > previous_now);
+        previous_now = magnitude_status.now_ms;
+        ++magnitude_steps;
+        magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    }
+    assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
+    assert(magnitude_steps == 33 && magnitude_status.now_ms == 1e16 + 100.0 && magnitude_status.pending_ms == 0.0);
+    gua_clock_operation_status_t operation_status { sizeof(gua_clock_operation_status_t) };
+    assert(gua_clock_get_operation_status(magnitude_context, &operation_status) == 1);
+    assert(operation_status.latest_operation_sequence == 1 && operation_status.completed_operation_sequence == 0);
+    gua_begin_frame(magnitude_context, "clock-complete"); gua_end_frame(magnitude_context);
+    assert(gua_clock_get_operation_status(magnitude_context, &operation_status) == 1);
+    assert(operation_status.completed_operation_sequence == 1);
+    gua_destroy_context(magnitude_context);
+
+    magnitude_context = gua_create_context();
+    assert(gua_clock_install(magnitude_context, 1e16, 3.0) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(magnitude_context, 100.0) == GUA_CLOCK_OK);
+    magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    while (gua_clock_consume_step(magnitude_context, &magnitude_step) == 1)
+        magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1 && magnitude_status.now_ms == 1e16 + 100.0);
+    gua_destroy_context(magnitude_context);
+
+    gua::Context cpp_context;
+    cpp_context.install_clock(0.0, 10.0);
+    cpp_context.pause_clock();
+    cpp_context.run_clock_for(25.0);
+    gua_clock_step_t cpp_step { sizeof(gua_clock_step_t) };
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 5.0);
 
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();
@@ -304,6 +427,8 @@ int main()
     assert(gua_get_context_status(context, &status) == 1);
     assert(status.session_epoch == 2 && status.frame_sequence == 0 && status.revision == 0);
     assert(status.node_count == 0 && status.pending_request_count == 0 && status.unconsumed_event_count == 0);
+    clock_status = gua_clock_status_t { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.installed == 0);
     const std::string reset_diagnostics = gua_get_diagnostics_json(context);
     assert(reset_diagnostics.find("\"operations\":[]") != std::string::npos);
     assert(reset_diagnostics.find("\"events\":[]") != std::string::npos);

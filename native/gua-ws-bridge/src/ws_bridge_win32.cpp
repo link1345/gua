@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -42,8 +43,14 @@ struct Command {
     unsigned long long expected_session_epoch = 0;
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
-    unsigned int reset_flags = 15;
+    unsigned int reset_flags = 79;
     bool strict = false;
+    double initial_time_ms = 0;
+    bool initial_time_ms_valid = true;
+    double duration_ms = 0;
+    bool duration_ms_valid = false;
+    double step_ms = 0;
+    bool step_ms_present = false;
 };
 
 struct ClientConnection {
@@ -546,7 +553,8 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
     if (end == start) {
         return std::nullopt;
     }
-    return std::stoi(std::string(json.substr(start, end - start)));
+    try { return std::stoi(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<unsigned long long> json_uint64_field(std::string_view json, std::string_view field)
@@ -561,7 +569,8 @@ std::optional<unsigned long long> json_uint64_field(std::string_view json, std::
     std::size_t end = start;
     while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
     if (end == start) return std::nullopt;
-    return std::stoull(std::string(json.substr(start, end - start)));
+    try { return std::stoull(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<double> json_number_field(std::string_view json, std::string_view field)
@@ -576,7 +585,19 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
     std::size_t end = start;
     while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.' || json[end] == 'e' || json[end] == 'E')) ++end;
     if (end == start) return std::nullopt;
-    return std::stod(std::string(json.substr(start, end - start)));
+    try {
+        std::size_t parsed = 0;
+        const std::string token(json.substr(start, end - start));
+        const double value = std::stod(token, &parsed);
+        return parsed == token.size() && std::isfinite(value) ? std::optional<double>(value) : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+bool json_has_field(std::string_view json, std::string_view field)
+{
+    return json.find("\"" + std::string(field) + "\"") != std::string_view::npos;
 }
 
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
@@ -620,8 +641,16 @@ Command parse_command(std::string_view json)
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
-    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(15));
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
     command.strict = json_bool_field(json, "strict");
+    const auto initial_time_ms = json_number_field(json, "initialTimeMs");
+    command.initial_time_ms = initial_time_ms.value_or(0);
+    command.initial_time_ms_valid = !json_has_field(json, "initialTimeMs") || initial_time_ms.has_value();
+    const auto duration_ms = json_number_field(json, "durationMs");
+    command.duration_ms = duration_ms.value_or(0);
+    command.duration_ms_valid = duration_ms.has_value();
+    command.step_ms = json_number_field(json, "stepMs").value_or(0);
+    command.step_ms_present = json_has_field(json, "stepMs");
     return command;
 }
 
@@ -934,6 +963,24 @@ private:
                 return handlers_.get_version_json
                     ? ok_response(command.id, handlers_.get_version_json())
                     : error_response(command.id, "get_version is not supported by this bridge");
+            }
+            if (command.type == "get_clock") {
+                return handlers_.clock_supported && handlers_.clock_supported() && handlers_.get_clock_json
+                    ? ok_response(command.id, handlers_.get_clock_json())
+                    : error_response(command.id, "unsupported");
+            }
+            if (command.type == "clock_install" || command.type == "clock_pause" ||
+                command.type == "clock_run_for" || command.type == "clock_resume") {
+                if (!handlers_.clock_supported || !handlers_.clock_supported() || !handlers_.control_clock)
+                    return error_response(command.id, "unsupported");
+                if (command.type == "clock_install" && !command.initial_time_ms_valid)
+                    return error_response(command.id, "invalid_duration");
+                if (command.type == "clock_run_for" && !command.duration_ms_valid)
+                    return error_response(command.id, "invalid_duration");
+                const auto result = handlers_.control_clock(command.type,
+                    command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
+                    command.step_ms, command.step_ms_present);
+                return result.ok ? ok_response(command.id, result.json) : error_response(command.id, result.error);
             }
             if (command.type == "query_nodes") {
                 if (!handlers_.query_nodes_json) {

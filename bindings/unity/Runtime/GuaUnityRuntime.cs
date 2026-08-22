@@ -47,6 +47,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         {
             runtime = new GuaRuntime();
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
+            runtime.EnableVirtualClockAdapter();
             var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
             var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
             if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");
@@ -62,11 +63,19 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     public static void RunFrame() { if (activeRuntime != null && activeRuntime.enabled) activeRuntime.Tick(); }
 
+    /// <summary>
+    /// Gets the clock that game logic must explicitly use to participate in
+    /// Gua pause and run-for operations.
+    /// </summary>
+    public static GuaRuntimeClock Clock => activeRuntime?.runtime?.Clock
+        ?? throw new InvalidOperationException("The Gua Unity runtime has not started yet.");
+
     private void Tick()
     {
         if (runtime == null) return;
         try
         {
+            runtime.Clock.Advance(TimeSpan.FromSeconds(Time.unscaledDeltaTime));
             targets.Clear();
             ids.Clear();
             clickTargetIds.Clear();

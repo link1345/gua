@@ -10,7 +10,8 @@ public enum GuaResetTargets : uint
     History = 1 << 3,
     Logs = 1 << 4,
     Screenshot = 1 << 5,
-    Default = Nodes | Requests | Events | History,
+    Clock = 1 << 6,
+    Default = Nodes | Requests | Events | History | Clock,
     All = Default | Logs | Screenshot,
 }
 

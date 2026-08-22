@@ -8,7 +8,11 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,7 +36,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\"]}";
 }
 
 struct Node {
@@ -339,9 +343,57 @@ struct gua_context_t {
     unsigned long long next_history_sequence = 1;
     std::chrono::steady_clock::time_point diagnostics_history_started_at = std::chrono::steady_clock::now();
     std::string diagnostics_environment_json = "{}";
+    bool clock_installed = false;
+    bool clock_paused = false;
+    double clock_now_ms = 0.0;
+    double clock_default_step_ms = 1000.0 / 60.0;
+    double clock_pending_ms = 0.0;
+    double clock_pending_step_ms = 1000.0 / 60.0;
+    double clock_pending_total_ms = 0.0;
+    double clock_pending_start_ms = 0.0;
+    double clock_pending_elapsed_ms = 0.0;
+    double clock_pending_target_ms = 0.0;
+    unsigned long long clock_pending_step_count = 0;
+    unsigned long long clock_pending_step_index = 0;
+    unsigned long long next_clock_operation_sequence = 1;
+    unsigned long long clock_pending_operation_sequence = 0;
+    unsigned long long clock_awaiting_frame_operation_sequence = 0;
+    unsigned long long clock_completed_operation_sequence = 0;
+    unsigned long long clock_generation = 0;
 };
 
 namespace {
+
+bool prepare_clock_operation(
+    double now_ms, double duration_ms, double step_ms, double& target_ms, unsigned long long& step_count)
+{
+    target_ms = now_ms + duration_ms;
+    if (!std::isfinite(target_ms)) return false;
+    if (duration_ms == 0.0) { step_count = 0; return true; }
+    const double emitted_step_ms = std::min(duration_ms, step_ms);
+    if (target_ms <= now_ms || now_ms + emitted_step_ms <= now_ms ||
+        target_ms - emitted_step_ms >= target_ms) return false;
+    double quotient = duration_ms / step_ms;
+    const double nearest = std::round(quotient);
+    const double quotient_tolerance = std::numeric_limits<double>::epsilon() * 8.0 * std::max(1.0, std::abs(quotient));
+    if (nearest >= 1.0 && std::abs(quotient - nearest) <= quotient_tolerance) quotient = nearest;
+    step_count = static_cast<unsigned long long>(std::ceil(quotient));
+    while (step_count > 1) {
+        const double previous_elapsed_ms = std::min(duration_ms, step_ms * static_cast<double>(step_count - 1));
+        if (now_ms + previous_elapsed_ms < target_ms) break;
+        --step_count;
+    }
+    if (step_count == 0) return false;
+    double previous_boundary_ms = now_ms;
+    for (unsigned long long index = 1; index <= step_count; ++index) {
+        const double elapsed_ms = index == step_count ? duration_ms :
+            std::min(duration_ms, step_ms * static_cast<double>(index));
+        const double boundary_ms = index == step_count ? target_ms : now_ms + elapsed_ms;
+        if (!std::isfinite(boundary_ms) || boundary_ms <= previous_boundary_ms) return false;
+        previous_boundary_ms = boundary_ms;
+    }
+    return true;
+}
 
 int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 {
@@ -637,6 +689,11 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
     ctx->staging_nodes.clear();
     ctx->frame_in_progress = false;
     ++ctx->frame_sequence;
+    if (ctx->clock_awaiting_frame_operation_sequence != 0) {
+        ctx->clock_completed_operation_sequence = std::max(
+            ctx->clock_completed_operation_sequence, ctx->clock_awaiting_frame_operation_sequence);
+        ctx->clock_awaiting_frame_operation_sequence = 0;
+    }
     if (semantic_snapshot != ctx->previous_semantic_snapshot) {
         ++ctx->revision;
         ctx->previous_semantic_snapshot = semantic_snapshot;
@@ -874,6 +931,169 @@ extern "C" int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int
 extern "C" int gua_copy_version_json(char* out_json, int out_json_size)
 {
     return copy_json_string(build_version_json(), out_json, out_json_size);
+}
+
+extern "C" int gua_clock_install(gua_context_t* ctx, double initial_time_ms, double step_ms)
+{
+    if (ctx == nullptr || !std::isfinite(initial_time_ms) || initial_time_ms < 0.0 ||
+        !std::isfinite(step_ms) || step_ms <= 0.0 || !std::isfinite(initial_time_ms + step_ms) ||
+        initial_time_ms + step_ms <= initial_time_ms)
+        return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (ctx->clock_installed) return GUA_CLOCK_ERROR_INVALID_STATE;
+    ctx->clock_installed = true;
+    ctx->clock_paused = false;
+    ctx->clock_now_ms = initial_time_ms;
+    ctx->clock_default_step_ms = step_ms;
+    ctx->clock_pending_ms = 0.0;
+    ctx->clock_pending_step_ms = step_ms;
+    ctx->clock_pending_total_ms = 0.0;
+    ctx->clock_pending_start_ms = initial_time_ms;
+    ctx->clock_pending_elapsed_ms = 0.0;
+    ctx->clock_pending_target_ms = initial_time_ms;
+    ctx->clock_pending_step_count = 0;
+    ctx->clock_pending_step_index = 0;
+    ++ctx->clock_generation;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_pause(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    ctx->clock_paused = true;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double step_ms)
+{
+    if (ctx == nullptr || !std::isfinite(duration_ms) || duration_ms < 0.0 ||
+        !std::isfinite(step_ms) || step_ms <= 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (!ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    if (duration_ms / step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
+    double target_ms = 0.0;
+    unsigned long long step_count = 0;
+    if (!prepare_clock_operation(ctx->clock_now_ms, duration_ms, step_ms, target_ms, step_count))
+        return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    ctx->clock_pending_ms = duration_ms;
+    ctx->clock_pending_step_ms = step_ms;
+    ctx->clock_pending_total_ms = duration_ms;
+    ctx->clock_pending_start_ms = ctx->clock_now_ms;
+    ctx->clock_pending_elapsed_ms = 0.0;
+    ctx->clock_pending_target_ms = target_ms;
+    ctx->clock_pending_step_count = step_count;
+    ctx->clock_pending_step_index = 0;
+    ctx->clock_pending_operation_sequence = ctx->next_clock_operation_sequence++;
+    if (duration_ms == 0.0) {
+        ctx->clock_awaiting_frame_operation_sequence = std::max(
+            ctx->clock_awaiting_frame_operation_sequence, ctx->clock_pending_operation_sequence);
+        ctx->clock_pending_operation_sequence = 0;
+    }
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_resume(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    ctx->clock_paused = false;
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
+{
+    if (ctx == nullptr || !std::isfinite(duration_ms) || duration_ms < 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    if (duration_ms / ctx->clock_default_step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
+    double target_ms = 0.0;
+    unsigned long long step_count = 0;
+    if (!prepare_clock_operation(
+            ctx->clock_now_ms, duration_ms, ctx->clock_default_step_ms, target_ms, step_count))
+        return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    ctx->clock_pending_ms = duration_ms;
+    ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
+    ctx->clock_pending_total_ms = duration_ms;
+    ctx->clock_pending_start_ms = ctx->clock_now_ms;
+    ctx->clock_pending_elapsed_ms = 0.0;
+    ctx->clock_pending_target_ms = target_ms;
+    ctx->clock_pending_step_count = step_count;
+    ctx->clock_pending_step_index = 0;
+    ctx->clock_pending_operation_sequence = ctx->next_clock_operation_sequence++;
+    if (duration_ms == 0.0) {
+        ctx->clock_awaiting_frame_operation_sequence = std::max(
+            ctx->clock_awaiting_frame_operation_sequence, ctx->clock_pending_operation_sequence);
+        ctx->clock_pending_operation_sequence = 0;
+    }
+    return GUA_CLOCK_OK;
+}
+
+extern "C" int gua_clock_get_status(gua_context_t* ctx, gua_clock_status_t* out_status)
+{
+    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < sizeof(gua_clock_status_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    *out_status = gua_clock_status_t { sizeof(gua_clock_status_t), ctx->clock_installed ? 1 : 0,
+        ctx->clock_paused ? 1 : 0, ctx->clock_now_ms, ctx->clock_default_step_ms,
+        ctx->clock_pending_ms, ctx->clock_generation };
+    return 1;
+}
+
+extern "C" int gua_clock_get_operation_status(gua_context_t* ctx, gua_clock_operation_status_t* out_status)
+{
+    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < sizeof(gua_clock_operation_status_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    *out_status = gua_clock_operation_status_t { sizeof(gua_clock_operation_status_t),
+        ctx->next_clock_operation_sequence - 1, ctx->clock_pending_operation_sequence,
+        ctx->clock_completed_operation_sequence };
+    return 1;
+}
+
+extern "C" int gua_clock_copy_status_json(gua_context_t* ctx, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(ctx->mutex);
+    std::ostringstream json;
+    json.imbue(std::locale::classic());
+    json << std::setprecision(std::numeric_limits<double>::max_digits10)
+         << "{\"schemaVersion\":1,\"installed\":" << (ctx->clock_installed ? "true" : "false")
+         << ",\"state\":\"" << (ctx->clock_paused ? "paused" : "running")
+         << "\",\"nowMs\":" << ctx->clock_now_ms
+         << ",\"defaultStepMs\":" << ctx->clock_default_step_ms
+         << ",\"pendingMs\":" << ctx->clock_pending_ms
+         << ",\"generation\":" << ctx->clock_generation
+         << ",\"completedOperationSequence\":" << ctx->clock_completed_operation_sequence << '}';
+    return copy_json_string(json.str(), out_json, out_json_size);
+}
+
+extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step)
+{
+    if (ctx == nullptr || out_step == nullptr || out_step->struct_size < sizeof(gua_clock_step_t)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->clock_installed || ctx->clock_pending_ms <= 0.0) return 0;
+    ++ctx->clock_pending_step_index;
+    const bool final_step = ctx->clock_pending_step_index >= ctx->clock_pending_step_count;
+    const double next_elapsed_ms = final_step ? ctx->clock_pending_total_ms :
+        std::min(ctx->clock_pending_total_ms,
+            ctx->clock_pending_step_ms * static_cast<double>(ctx->clock_pending_step_index));
+    const double delta = next_elapsed_ms - ctx->clock_pending_elapsed_ms;
+    ctx->clock_pending_elapsed_ms = next_elapsed_ms;
+    ctx->clock_pending_ms = final_step ? 0.0 : ctx->clock_pending_total_ms - next_elapsed_ms;
+    ctx->clock_now_ms = final_step ? ctx->clock_pending_target_ms : ctx->clock_pending_start_ms + next_elapsed_ms;
+    if (final_step) {
+        ctx->clock_pending_total_ms = 0.0;
+        ctx->clock_awaiting_frame_operation_sequence = std::max(
+            ctx->clock_awaiting_frame_operation_sequence, ctx->clock_pending_operation_sequence);
+        ctx->clock_pending_operation_sequence = 0;
+    }
+    *out_step = gua_clock_step_t { sizeof(gua_clock_step_t), delta, final_step ? 1 : 0, ctx->clock_generation };
+    return 1;
 }
 
 extern "C" int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state)
@@ -1268,7 +1488,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
 {
     if (ctx == nullptr || options == nullptr || options->struct_size < sizeof(gua_reset_options_t) ||
         out_report == nullptr || out_report->struct_size < sizeof(gua_reset_report_t)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
-    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT | GUA_RESET_CLOCK;
     if ((options->flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
 
     const std::lock_guard lock(ctx->mutex);
@@ -1327,6 +1547,14 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     if ((options->flags & GUA_RESET_SCREENSHOT) != 0U) {
         ctx->screenshot = Screenshot {};
         ctx->screenshot_json_cache.clear();
+    }
+    if ((options->flags & GUA_RESET_CLOCK) != 0U) {
+        ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
+        ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ctx->clock_pending_elapsed_ms = 0.0;
+        ctx->clock_pending_target_ms = 0.0; ctx->clock_pending_step_count = 0; ctx->clock_pending_step_index = 0;
+        ctx->clock_pending_operation_sequence = 0; ctx->clock_awaiting_frame_operation_sequence = 0;
+        ctx->clock_completed_operation_sequence = ctx->next_clock_operation_sequence - 1;
+        ++ctx->clock_generation;
     }
     ctx->frame_sequence = 0;
     ctx->revision = 0;

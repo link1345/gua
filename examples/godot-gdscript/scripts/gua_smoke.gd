@@ -116,6 +116,12 @@ func _run() -> void:
 	screen.add_child(scroll)
 
 	await process_frame
+	var extension := load("res://addons/gua/gua.gdextension")
+	var bare_context: Object = ClassDB.instantiate("GuaContext")
+	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1"):
+		_fail("A bare Godot GuaContext advertised the virtual clock without an adapter pump.")
+		return
+	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
 	adapter = ui
@@ -126,6 +132,9 @@ func _run() -> void:
 
 	ui.attach(screen)
 	ui.update("title")
+	if not ui.context.get_version_json().contains("virtual_clock_v1"):
+		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
+		return
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
@@ -317,6 +326,77 @@ func _run() -> void:
 		return
 	if ui.get_ui_tree_json().contains("secret-marker"):
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
+		return
+
+	var preinstall_schedule_count := [0]
+	ui.clock_schedule(20.0, func(): preinstall_schedule_count[0] += 1)
+	ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+	var clock_order: Array[String] = []
+	ui.clock_tick.connect(func(_delta: float): clock_order.append("tick:%d" % int(ui.get_clock().get("now_ms", -1.0))))
+	ui.clock_schedule(20.0, func(): clock_order.append("schedule:%d" % int(ui.get_clock().get("now_ms", -1.0))))
+	ui.clock_run_for(25.0)
+	ui.update("title")
+	if clock_order != ["tick:10", "schedule:20", "tick:20", "tick:25"]:
+		_fail("Gua clock did not process schedules and ticks at each step boundary: %s" % [clock_order])
+		return
+	if preinstall_schedule_count[0] != 1:
+		_fail("Gua dropped a game schedule that was registered before clock installation.")
+		return
+	var nested_schedule_order: Array[String] = []
+	var later_schedule_id := ui.clock_schedule(20.0, func(): nested_schedule_order.append("later"))
+	ui.clock_schedule(10.0, func():
+		nested_schedule_order.append("parent")
+		ui.clock_schedule(0.0, func(): nested_schedule_order.append("nested"))
+	)
+	ui.clock_run_for(10.0)
+	ui.update("title")
+	ui.clock_cancel(later_schedule_id)
+	if nested_schedule_order != ["parent", "nested"]:
+		_fail("Gua clock deferred a due schedule created by a running callback: %s" % [nested_schedule_order])
+		return
+
+	var interval_count := [0]
+	var interval_id := [0]
+	interval_id[0] = ui.clock_schedule(10.0, func():
+		interval_count[0] += 1
+		ui.clock_cancel(interval_id[0])
+	, 10.0)
+	ui.clock_run_for(30.0)
+	ui.update("title")
+	if interval_count[0] != 1:
+		_fail("Gua clock rescheduled a running interval after it cancelled itself: %d" % interval_count[0])
+		return
+
+	var limited_interval_count := [0]
+	ui.clock_schedule(1.0, func(): limited_interval_count[0] += 1, 1.0)
+	var limit_status := ui.get_clock()
+	var limited_callbacks := ui._drain_clock_schedules(
+		float(limit_status.get("now_ms", 0.0)) + 4.0, int(limit_status.get("generation", 0)), 2)
+	if limited_callbacks != 2 or limited_interval_count[0] != 2 or not ui.clock_schedules.is_empty() or not ui.clock_execution_limit_reached:
+		_fail("Gua clock callback budget did not cancel remaining interval work across the run.")
+		return
+	ui.clock_execution_limit_reached = false
+
+	var stale_schedule_count := [0]
+	ui.clock_schedule(100.0, func(): stale_schedule_count[0] += 1)
+	var clock_reset: Dictionary = ui.context.reset_context({
+		"expected_session_epoch": ui.get_context_status().get("session_epoch", 0),
+		"flags": ui.RESET_CLOCK_FLAG,
+	})
+	if clock_reset.get("result", 0) != 1:
+		_fail("Gua direct clock reset failed: %s" % clock_reset)
+		return
+	var reinstalled_clock := ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+	ui.clock_run_for(100.0)
+	ui.update("title")
+	if stale_schedule_count[0] != 0:
+		_fail("Gua invoked a schedule from a stale clock generation.")
+		return
+	var rejected_install := ui.clock_install(0.0, 10.0)
+	if reinstalled_clock.get("result", 0) != 1 or rejected_install.get("result", 0) != -3 or rejected_install.get("error", "") != "invalid_state":
+		_fail("Gua Godot clock controls did not surface native operation results: %s / %s" % [reinstalled_clock, rejected_install])
 		return
 
 	var leaked := ui.enqueue_action({"action": "focus", "node_id": "start"})

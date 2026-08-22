@@ -534,4 +534,36 @@ private:
     gua_context_t* context_;
 };
 
+class Clock {
+public:
+    explicit Clock(gua_context_t* context) : context_(context) { if (!context_) throw std::invalid_argument("Gua Clock requires a context"); }
+    void install(std::chrono::duration<double, std::milli> initial = std::chrono::milliseconds(0),
+        std::chrono::duration<double, std::milli> step = std::chrono::duration<double, std::milli>(1000.0 / 60.0)) const
+    { check(gua_clock_install(context_, initial.count(), step.count())); }
+    void pause() const { check(gua_clock_pause(context_)); }
+    void run_for(std::chrono::duration<double, std::milli> duration,
+        const std::function<void(std::chrono::duration<double, std::milli>)>& on_tick = {}) const
+    {
+        const auto current = status();
+        run_for(duration, std::chrono::duration<double, std::milli>(current.default_step_ms), on_tick);
+    }
+    void run_for(std::chrono::duration<double, std::milli> duration,
+        std::chrono::duration<double, std::milli> step,
+        const std::function<void(std::chrono::duration<double, std::milli>)>& on_tick = {}) const
+    {
+        check(gua_clock_run_for(context_, duration.count(), step.count()));
+        gua_clock_step_t value { sizeof(gua_clock_step_t) };
+        while (gua_clock_consume_step(context_, &value) != 0) {
+            if (on_tick) on_tick(std::chrono::duration<double, std::milli>(value.delta_ms));
+            value = gua_clock_step_t { sizeof(gua_clock_step_t) };
+        }
+    }
+    void resume() const { check(gua_clock_resume(context_)); }
+    [[nodiscard]] gua_clock_status_t status() const
+    { gua_clock_status_t value { sizeof(gua_clock_status_t) }; if (!gua_clock_get_status(context_, &value)) throw std::runtime_error("Failed to inspect Gua clock"); return value; }
+private:
+    static void check(int result) { if (result != GUA_CLOCK_OK) throw std::runtime_error("Gua clock operation failed: " + std::to_string(result)); }
+    gua_context_t* context_;
+};
+
 } // namespace gua::testing

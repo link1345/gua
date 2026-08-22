@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "installed": true,
+  "state": "paused",
+  "nowMs": 2000,
+  "defaultStepMs": 16.666667,
+  "pendingMs": 0,
+  "generation": 1
+}

@@ -107,6 +107,32 @@ workflows and diagrams.
 
 ## MCP and Inspector
 
+### Deterministic virtual time
+
+Gua can pause and advance game logic that uses GuaClock as its time source. It
+does not replace existing engine timers automatically. First change the game
+logic to use GuaClock schedules or ticks instead of Godot `Timer`, Unity
+`Time.deltaTime` / coroutines, or another native time source. Tests can then
+install and control that shared clock without waiting for wall time:
+
+```csharp
+// Game-side integration (done once in the production code).
+var clock = runtime.Clock;
+clock.Install();
+clock.Schedule(TimeSpan.FromSeconds(2), ShowMessage);
+
+// Test-side control of the same clock.
+clock.Pause();
+clock.RunFor(TimeSpan.FromSeconds(2));
+```
+
+Here, `Install` activates Gua's shared virtual clock; it does not inject the
+clock into arbitrary game objects. `Pause` affects only game logic already
+wired to GuaClock schedules or ticks. Engine-native timers, physics, animations,
+audio, OS time, and networking continue normally.
+The bridge, MCP, and Inspector expose `get_clock`, `clock_install`,
+`clock_pause`, `clock_run_for`, and `clock_resume`.
+
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   A thin MCP server that exposes Gua runtime actions to AI agents through the
   same WebSocket bridge used by the Inspector.

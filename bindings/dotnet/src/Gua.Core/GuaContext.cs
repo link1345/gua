@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Gua.Core;
 
-public sealed class GuaContext : IGuaContext, IDisposable
+public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private nint _handle;
 
@@ -143,6 +143,25 @@ public sealed class GuaContext : IGuaContext, IDisposable
     {
         ThrowIfDisposed();
         return GuaVersion.Parse(ReadCopiedJson(JsonSource.Version, _handle));
+    }
+
+    public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_install(_handle, (initialTime ?? TimeSpan.Zero).TotalMilliseconds, (step ?? TimeSpan.FromSeconds(1.0 / 60.0)).TotalMilliseconds); }
+    public GuaClockResult PauseClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_pause(_handle); }
+    public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_run_for(_handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(GetClockStatus().DefaultStepMilliseconds)).TotalMilliseconds); }
+    public GuaClockResult ResumeClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_resume(_handle); }
+    public GuaClockStatus GetClockStatus()
+    {
+        ThrowIfDisposed(); var value = new Native.GuaNativeClockStatus { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeClockStatus>() };
+        if (Native.gua_clock_get_status(_handle, ref value) == 0) throw new InvalidOperationException("Failed to read Gua clock status.");
+        return new(value.Installed != 0, value.Paused != 0, value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
+    }
+    public bool TryConsumeClockStep(out GuaClockStep step)
+    {
+        ThrowIfDisposed(); var value = new Native.GuaNativeClockStep { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeClockStep>() };
+        if (Native.gua_clock_consume_step(_handle, ref value) == 0) { step = default; return false; }
+        step = new(TimeSpan.FromMilliseconds(value.DeltaMs), value.FinalStep != 0, value.Generation); return true;
     }
 
     public void ConfigureDiagnostics(uint historyLimit, string environmentJson = "{}")

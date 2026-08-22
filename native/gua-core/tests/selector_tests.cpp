@@ -6,6 +6,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -110,5 +111,12 @@ int main()
 
     int attempts = 0;
     wait_until([&attempts] { return ++attempts == 3; }, "third predicate evaluation", std::chrono::milliseconds(20), std::chrono::milliseconds(1));
+
+    Clock clock(context);
+    clock.install(std::chrono::milliseconds(0), std::chrono::milliseconds(10));
+    clock.pause();
+    std::vector<double> clock_steps;
+    clock.run_for(std::chrono::milliseconds(25), [&](auto delta) { clock_steps.push_back(delta.count()); });
+    assert((clock_steps == std::vector<double> { 10.0, 10.0, 5.0 }));
     gua_destroy_context(context);
 }

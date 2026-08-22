@@ -24,12 +24,31 @@ std::string version(gua_runtime_t* runtime)
     return buffer.data();
 }
 
+std::string diagnostics(gua_runtime_t* runtime)
+{
+    const int size = gua_runtime_copy_diagnostics_json(runtime, nullptr, 0);
+    std::vector<char> buffer(static_cast<std::size_t>(size));
+    assert(gua_runtime_copy_diagnostics_json(runtime, buffer.data(), size) == size);
+    return buffer.data();
+}
+
 } // namespace
 
 int main()
 {
     gua_runtime_t* runtime = gua_runtime_create();
     assert(runtime != nullptr);
+    assert(version(runtime).find("virtual_clock_v1") == std::string::npos);
+    assert(gua_runtime_set_diagnostics_environment_json(
+        runtime, "{\"tags\":[\"test\",\"virtual_clock_v1\"]}") == 1);
+    const std::string diagnostics_json = diagnostics(runtime);
+    assert(diagnostics_json.find("\"tags\":[\"test\",\"virtual_clock_v1\"]") != std::string::npos);
+    const auto version_position = diagnostics_json.find("\"version\":");
+    const auto ui_tree_position = diagnostics_json.find(",\"uiTree\":", version_position);
+    assert(version_position != std::string::npos && ui_tree_position != std::string::npos);
+    assert(diagnostics_json.substr(version_position, ui_tree_position - version_position)
+        .find("virtual_clock_v1") == std::string::npos);
+    gua_runtime_set_virtual_clock_enabled(runtime, 1);
     gua_runtime_set_adapter_version(runtime, "unity", "0.5.0-preview.3");
     gua_runtime_set_adapter_version(runtime, "Unity", "invalid");
     gua_runtime_set_adapter_version(runtime, "ui-toolkit", "invalid");
@@ -39,6 +58,7 @@ int main()
     assert(version_json.find("\"godotPluginVersion\":\"0.4.0\"") != std::string::npos);
     assert(version_json.find("Unity") == std::string::npos);
     assert(version_json.find("ui-toolkit") == std::string::npos);
+    assert(version_json.find("virtual_clock_v1") != std::string::npos);
     std::thread version_writer([runtime] {
         for (int index = 0; index < 1000; ++index)
             gua_runtime_set_adapter_version(runtime, "unity", index % 2 == 0 ? "0.5.0-preview.3" : "0.5.0-preview.4");
@@ -51,6 +71,18 @@ int main()
     version_reader.join();
     gua_runtime_begin_frame(runtime, "title");
     gua_runtime_end_frame(runtime);
+
+    assert(gua_runtime_clock_install(runtime, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_runtime_clock_pause(runtime) == GUA_CLOCK_OK);
+    assert(gua_runtime_clock_run_for(runtime, 25.0, 0.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_runtime_clock_run_for(runtime, 25.0, 10.0) == GUA_CLOCK_OK);
+    gua_clock_step_t clock_step { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 5.0 && clock_step.final_step == 1);
+    assert(gua_runtime_clock_run_for(runtime, 1.0, -1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
 
     uint64_t first = 0;
     uint64_t second = 0;

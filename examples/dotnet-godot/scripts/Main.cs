@@ -33,6 +33,7 @@ public partial class Main : Control
 
     public override void _Process(double delta)
     {
+        _gua.AdvanceClock(TimeSpan.FromSeconds(delta));
         _gua.SyncAttachedTree(CurrentScreen);
     }
 

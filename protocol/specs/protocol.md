@@ -61,8 +61,10 @@ so sensitive values cannot leak through teardown diagnostics.
 Reset is scoped to one `gua_context_t` / `gua_runtime_t`; it does not use global
 state and cannot affect another context. The selectable flags are nodes (1),
 requests (2), events (4), retained diagnostic history (8), logs (16), and
-screenshot (32). The default is 15: nodes, requests, events, and history are
-cleared, while logs and screenshot are preserved unless explicitly selected.
+screenshot (32), and virtual clock state and pending work (64). The default is
+79: nodes, requests, events, history, and clock state are cleared, while logs
+and screenshot are preserved unless explicitly selected. Resetting the clock
+also advances its generation so language wrappers can discard old schedules.
 Bridge server, port, active WebSocket connections, and context configuration are
 never reset.
 
@@ -226,6 +228,40 @@ recording v1 redaction rule.
 ## Commands
 
 Commands are external automation requests.
+
+### Virtual clock (v1)
+
+`clock_install`, `clock_pause`, `clock_run_for`, `clock_resume`, and `get_clock`
+control the opt-in Gua virtual clock. Installation starts at `initialTimeMs` (zero
+by default) in the running state. `clock_run_for` is accepted only while paused,
+advances in `stepMs` slices (the installed default when omitted), and remains
+paused. Clock time is monotonic, so installing an already installed clock is
+rejected with `invalid_state`; reset the context before starting a new timeline.
+Context reset also invalidates pending steps.
+
+Only work explicitly scheduled on GuaClock or subscribed to its tick stream is
+controlled. Engine time, physics, animations, audio, OS time, network time, and
+engine-native timers are outside this capability. `clock_install` activates the
+shared virtual clock but does not hook or replace those native time sources.
+Game and adapter code must explicitly use GuaClock as the time source for every
+subsystem that needs to be controlled. Adapters must continue their unscaled
+bridge pump while the Gua clock is paused. An adapter must opt in to capability
+`virtual_clock_v1` only after it implements that pump and consumes every clock
+step; a bare runtime bridge does not advertise the capability. Remote
+`clock_run_for` responses include `operationSequence`, `completionSessionEpoch`,
+and `completionAfterFrameSequence`, captured atomically when the operation is
+queued. After consuming the final step, the core acknowledges that operation
+sequence on the adapter's next successfully published semantic frame. Consumers
+wait for `completedOperationSequence` to reach their own operation sequence and
+for the semantic frame to pass the correlated boundary. They do not use global
+`pendingMs` as completion evidence because it may belong to a later client run.
+An explicitly supplied `stepMs` must be positive; only an absent field selects
+the installed default. A positive duration or step that cannot advance the
+clock's finite-precision timeline is rejected with `invalid_duration` rather
+than consuming work without changing `nowMs`. A remote `clock_pause` is acknowledged only after any
+already queued running advance has been consumed and its host frame published;
+the lower-level C ABI reports `invalid_state` if pause is attempted while such
+work is still pending.
 
 Initial command types:
 
