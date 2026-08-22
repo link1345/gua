@@ -550,6 +550,11 @@ extern "C" int gua_runtime_clock_run_for(gua_runtime_t* runtime, double duration
 {
     if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(runtime->context_mutex);
+    if (step_ms == 0.0) {
+        gua_clock_status_t status { sizeof(gua_clock_status_t) };
+        if (gua_clock_get_status(runtime->context, &status) == 0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+        step_ms = status.default_step_ms;
+    }
     return gua_clock_run_for(runtime->context, duration_ms, step_ms);
 }
 
@@ -854,9 +859,9 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .control_clock = [runtime](std::string_view command, double value_ms, double step_ms) {
             int result = GUA_CLOCK_ERROR_INVALID_ARGUMENT;
-            if (command == "clock_install") result = gua_runtime_clock_install(runtime, value_ms, step_ms > 0 ? step_ms : 1000.0 / 60.0);
+            if (command == "clock_install") result = gua_runtime_clock_install(runtime, value_ms, step_ms == 0.0 ? 1000.0 / 60.0 : step_ms);
             else if (command == "clock_pause") result = gua_runtime_clock_pause(runtime);
-            else if (command == "clock_run_for") result = gua_runtime_clock_run_for(runtime, value_ms, step_ms > 0 ? step_ms : 1000.0 / 60.0);
+            else if (command == "clock_run_for") result = gua_runtime_clock_run_for(runtime, value_ms, step_ms);
             else if (command == "clock_resume") result = gua_runtime_clock_resume(runtime);
             if (result != GUA_CLOCK_OK) {
                 const char* error = result == GUA_CLOCK_ERROR_NOT_INSTALLED ? "not_installed" :

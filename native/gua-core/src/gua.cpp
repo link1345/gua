@@ -8,7 +8,11 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -888,6 +892,7 @@ extern "C" int gua_clock_install(gua_context_t* ctx, double initial_time_ms, dou
     if (ctx == nullptr || !std::isfinite(initial_time_ms) || initial_time_ms < 0.0 ||
         !std::isfinite(step_ms) || step_ms <= 0.0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(ctx->mutex);
+    if (ctx->clock_installed) return GUA_CLOCK_ERROR_INVALID_STATE;
     ctx->clock_installed = true;
     ctx->clock_paused = false;
     ctx->clock_now_ms = initial_time_ms;
@@ -936,6 +941,7 @@ extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
     const std::lock_guard lock(ctx->mutex);
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
     if (ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
+    if (duration_ms / ctx->clock_default_step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
     return GUA_CLOCK_OK;
@@ -955,12 +961,16 @@ extern "C" int gua_clock_copy_status_json(gua_context_t* ctx, char* out_json, in
 {
     if (ctx == nullptr) return copy_json_string("{}", out_json, out_json_size);
     const std::lock_guard lock(ctx->mutex);
-    char json[320];
-    std::snprintf(json, sizeof(json),
-        "{\"schemaVersion\":1,\"installed\":%s,\"state\":\"%s\",\"nowMs\":%.6f,\"defaultStepMs\":%.6f,\"pendingMs\":%.6f,\"generation\":%llu}",
-        ctx->clock_installed ? "true" : "false", ctx->clock_paused ? "paused" : "running",
-        ctx->clock_now_ms, ctx->clock_default_step_ms, ctx->clock_pending_ms, ctx->clock_generation);
-    return copy_json_string(json, out_json, out_json_size);
+    std::ostringstream json;
+    json.imbue(std::locale::classic());
+    json << std::setprecision(std::numeric_limits<double>::max_digits10)
+         << "{\"schemaVersion\":1,\"installed\":" << (ctx->clock_installed ? "true" : "false")
+         << ",\"state\":\"" << (ctx->clock_paused ? "paused" : "running")
+         << "\",\"nowMs\":" << ctx->clock_now_ms
+         << ",\"defaultStepMs\":" << ctx->clock_default_step_ms
+         << ",\"pendingMs\":" << ctx->clock_pending_ms
+         << ",\"generation\":" << ctx->clock_generation << '}';
+    return copy_json_string(json.str(), out_json, out_json_size);
 }
 
 extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step)

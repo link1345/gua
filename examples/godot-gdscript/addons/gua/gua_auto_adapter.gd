@@ -5,6 +5,8 @@ signal clock_tick(delta: float)
 
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
+const RESET_CLOCK_FLAG := 1 << 6
+const RESET_DEFAULT_FLAGS := 79
 const CONTEXT_CLASS := "GuaContext"
 const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
 const REBUILD_COMMAND := "cmake --build --preset windows-msvc-debug --target gua-godot"
@@ -34,6 +36,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"clock_resume",
 	"clock_advance",
 	"get_clock",
+	"consume_clock_step",
 	"consume_clock_steps",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
@@ -53,6 +56,8 @@ var screenshot_capture_scheduled := false
 var last_clock_ticks_ms := Time.get_ticks_msec()
 var clock_schedules: Array[Dictionary] = []
 var next_clock_schedule_id := 1
+var active_clock_schedule_id := 0
+var active_clock_schedule_cancelled := false
 
 
 func attach(root_control: Control) -> void:
@@ -68,7 +73,10 @@ func update(screen: String) -> void:
 	if clock_status.get("installed", false) and clock_status.get("state", "running") == "running":
 		context.clock_advance(maxi(0, ticks_ms - last_clock_ticks_ms))
 	last_clock_ticks_ms = ticks_ms
-	for step in context.consume_clock_steps():
+	while true:
+		var step: Dictionary = context.consume_clock_step()
+		if step.is_empty():
+			break
 		_drain_clock_schedules(float(context.get_clock().get("now_ms", 0.0)))
 		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
 
@@ -218,6 +226,8 @@ func clock_schedule(delay_ms: float, callback: Callable, interval_ms: float = 0.
 
 func clock_cancel(schedule_id: int) -> void:
 	clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool: return int(item.id) != schedule_id)
+	if active_clock_schedule_id == schedule_id:
+		active_clock_schedule_cancelled = true
 
 func _drain_clock_schedules(now_ms: float) -> void:
 	clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -229,12 +239,16 @@ func _drain_clock_schedules(now_ms: float) -> void:
 			push_error("Gua clock execution_limit")
 			return
 		var item: Dictionary = clock_schedules.pop_front()
+		active_clock_schedule_id = int(item.id)
+		active_clock_schedule_cancelled = false
 		(item.callback as Callable).call()
-		if float(item.interval_ms) > 0.0:
+		if float(item.interval_ms) > 0.0 and not active_clock_schedule_cancelled:
 			item.due_ms = float(item.due_ms) + float(item.interval_ms)
 			clock_schedules.append(item)
 			clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 				return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
+		active_clock_schedule_id = 0
+		active_clock_schedule_cancelled = false
 
 
 func reset_context(options: Dictionary = {}) -> Dictionary:
@@ -250,6 +264,10 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 		list_items_by_id.clear()
 		controls_by_id.clear()
 		suppressed_clicks.clear()
+		if (int(resolved.get("flags", RESET_DEFAULT_FLAGS)) & RESET_CLOCK_FLAG) != 0:
+			clock_schedules.clear()
+			active_clock_schedule_id = 0
+			active_clock_schedule_cancelled = false
 	return report
 
 

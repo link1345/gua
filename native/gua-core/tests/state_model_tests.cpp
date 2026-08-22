@@ -90,6 +90,26 @@ int main()
     assert(gua_clock_advance(context, 4.0) == GUA_CLOCK_OK);
     clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
     assert(gua_clock_consume_step(context, &clock_step) == 1 && clock_step.delta_ms == 4.0);
+    assert(gua_clock_install(context, 0.0, 1.0) == GUA_CLOCK_ERROR_INVALID_STATE);
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.now_ms == 29.0);
+    assert(gua_clock_advance(context, 10000001.0) == GUA_CLOCK_ERROR_EXECUTION_LIMIT);
+    assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.pending_ms == 0.0);
+
+    gua_context_t* precision_context = gua_create_context();
+    assert(gua_clock_install(precision_context, 0.0, 1e-7) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(precision_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(precision_context, 2e-7, 1e-7) == GUA_CLOCK_OK);
+    std::vector<char> clock_json(static_cast<std::size_t>(gua_clock_copy_status_json(precision_context, nullptr, 0)));
+    gua_clock_copy_status_json(precision_context, clock_json.data(), static_cast<int>(clock_json.size()));
+    const std::string precise_status(clock_json.data());
+    const auto number_after = [&](const std::string& field) {
+        const auto offset = precise_status.find(field);
+        assert(offset != std::string::npos);
+        return std::stod(precise_status.substr(offset + field.size()));
+    };
+    assert(number_after("\"defaultStepMs\":") == 1e-7);
+    assert(number_after("\"pendingMs\":") == 2e-7);
+    gua_destroy_context(precision_context);
 
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();

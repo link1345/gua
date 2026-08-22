@@ -33,4 +33,22 @@ public sealed class ClockTests
         Assert.That(clock.Status.Paused, Is.True);
         Assert.That(clock.Status, Is.TypeOf<GuaClockStatus>());
     }
+
+    [Test]
+    public void ResetGenerationDiscardsSchedulesFromThePreviousSession()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        var fired = false;
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Schedule(TimeSpan.FromMilliseconds(20), () => fired = true);
+
+        var report = context.Reset();
+        Assert.That(report.Result, Is.EqualTo(GuaResetResult.Succeeded));
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        clock.RunFor(TimeSpan.FromMilliseconds(25));
+
+        Assert.That(fired, Is.False);
+    }
 }

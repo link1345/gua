@@ -109,20 +109,27 @@ workflows and diagrams.
 
 ### Deterministic virtual time
 
-Gua exposes an opt-in virtual clock for time-dependent game logic. Install and
-pause it, schedule work through `GuaClock`, then advance it without waiting for
-wall time:
+Gua can pause and advance game logic that uses GuaClock as its time source. It
+does not replace existing engine timers automatically. First change the game
+logic to use GuaClock schedules or ticks instead of Godot `Timer`, Unity
+`Time.deltaTime` / coroutines, or another native time source. Tests can then
+install and control that shared clock without waiting for wall time:
 
 ```csharp
-var clock = new GuaClock(ui);
+// Game-side integration (done once in the production code).
+var clock = runtime.Clock;
 clock.Install();
 clock.Schedule(TimeSpan.FromSeconds(2), ShowMessage);
+
+// Test-side control of the same clock.
 clock.Pause();
 clock.RunFor(TimeSpan.FromSeconds(2));
 ```
 
-`Pause` affects only GuaClock schedules and tick subscribers. Engine-native
-timers, physics, animations, audio, OS time, and networking continue normally.
+Here, `Install` activates Gua's shared virtual clock; it does not inject the
+clock into arbitrary game objects. `Pause` affects only game logic already
+wired to GuaClock schedules or ticks. Engine-native timers, physics, animations,
+audio, OS time, and networking continue normally.
 The bridge, MCP, and Inspector expose `get_clock`, `clock_install`,
 `clock_pause`, `clock_run_for`, and `clock_resume`.
 

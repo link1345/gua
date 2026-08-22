@@ -7,7 +7,10 @@ WebSocket bridge without duplicating P/Invoke declarations.
 
 `GuaRuntime.Clock` is the adapter-side clock pump. Adapters call
 `Advance(unscaledDelta)` from their always-running update, while game code uses
-`Schedule` and `Tick` for deterministic pause/run-for behavior.
+`Schedule` and `Tick` for deterministic pause/run-for behavior. Installing the
+clock does not intercept `Time.deltaTime`, coroutines, or engine timers; each
+game subsystem that should be controllable must explicitly use this clock as
+its time source.
 
 The native `gua_runtime` library must be deployed for the current platform.
 

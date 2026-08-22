@@ -358,9 +358,16 @@ Dictionary GuaContext::get_clock() const
 Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { gua_runtime_clock_install(runtime_, initial_time_ms, step_ms); return get_clock(); }
 Dictionary GuaContext::clock_pause() { gua_runtime_clock_pause(runtime_); return get_clock(); }
 Dictionary GuaContext::clock_run_for(double duration_ms, double step_ms)
-{ const Dictionary status = get_clock(); const double actual = step_ms > 0.0 ? step_ms : static_cast<double>(status["default_step_ms"]); gua_runtime_clock_run_for(runtime_, duration_ms, actual); return get_clock(); }
+{ const Dictionary status = get_clock(); const double actual = step_ms == 0.0 ? static_cast<double>(status["default_step_ms"]) : step_ms; gua_runtime_clock_run_for(runtime_, duration_ms, actual); return get_clock(); }
 Dictionary GuaContext::clock_resume() { gua_runtime_clock_resume(runtime_); return get_clock(); }
 Dictionary GuaContext::clock_advance(double duration_ms) { gua_runtime_clock_advance(runtime_, duration_ms); return get_clock(); }
+Dictionary GuaContext::consume_clock_step()
+{
+    Dictionary result; gua_clock_step_t step { sizeof(gua_clock_step_t) };
+    if (gua_runtime_clock_consume_step(runtime_, &step) == 0) return result;
+    result["delta_ms"] = step.delta_ms; result["final"] = step.final_step != 0; result["generation"] = step.generation;
+    return result;
+}
 Array GuaContext::consume_clock_steps()
 {
     Array result; gua_clock_step_t step { sizeof(gua_clock_step_t) };
@@ -476,6 +483,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("clock_resume"), &GuaContext::clock_resume);
     ClassDB::bind_method(D_METHOD("clock_advance", "duration_ms"), &GuaContext::clock_advance);
     ClassDB::bind_method(D_METHOD("get_clock"), &GuaContext::get_clock);
+    ClassDB::bind_method(D_METHOD("consume_clock_step"), &GuaContext::consume_clock_step);
     ClassDB::bind_method(D_METHOD("consume_clock_steps"), &GuaContext::consume_clock_steps);
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);

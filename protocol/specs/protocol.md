@@ -61,8 +61,10 @@ so sensitive values cannot leak through teardown diagnostics.
 Reset is scoped to one `gua_context_t` / `gua_runtime_t`; it does not use global
 state and cannot affect another context. The selectable flags are nodes (1),
 requests (2), events (4), retained diagnostic history (8), logs (16), and
-screenshot (32). The default is 15: nodes, requests, events, and history are
-cleared, while logs and screenshot are preserved unless explicitly selected.
+screenshot (32), and virtual clock state and pending work (64). The default is
+79: nodes, requests, events, history, and clock state are cleared, while logs
+and screenshot are preserved unless explicitly selected. Resetting the clock
+also advances its generation so language wrappers can discard old schedules.
 Bridge server, port, active WebSocket connections, and context configuration are
 never reset.
 
@@ -233,12 +235,17 @@ Commands are external automation requests.
 control the opt-in Gua virtual clock. Installation starts at `initialTimeMs` (zero
 by default) in the running state. `clock_run_for` is accepted only while paused,
 advances in `stepMs` slices (the installed default when omitted), and remains
-paused. Clock time is monotonic and context reset invalidates pending steps.
+paused. Clock time is monotonic, so installing an already installed clock is
+rejected with `invalid_state`; reset the context before starting a new timeline.
+Context reset also invalidates pending steps.
 
 Only work explicitly scheduled on GuaClock or subscribed to its tick stream is
 controlled. Engine time, physics, animations, audio, OS time, network time, and
-engine-native timers are outside this capability. Adapters must continue their
-unscaled bridge pump while the Gua clock is paused. Capability
+engine-native timers are outside this capability. `clock_install` activates the
+shared virtual clock but does not hook or replace those native time sources.
+Game and adapter code must explicitly use GuaClock as the time source for every
+subsystem that needs to be controlled. Adapters must continue their unscaled
+bridge pump while the Gua clock is paused. Capability
 `virtual_clock_v1` advertises support.
 
 Initial command types:

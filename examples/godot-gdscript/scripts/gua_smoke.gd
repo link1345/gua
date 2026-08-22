@@ -319,6 +319,29 @@ func _run() -> void:
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
 		return
 
+	ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+	var clock_order: Array[String] = []
+	ui.clock_tick.connect(func(_delta: float): clock_order.append("tick:%d" % int(ui.get_clock().get("now_ms", -1.0))))
+	ui.clock_schedule(20.0, func(): clock_order.append("schedule:%d" % int(ui.get_clock().get("now_ms", -1.0))))
+	ui.clock_run_for(25.0)
+	ui.update("title")
+	if clock_order != ["tick:10", "schedule:20", "tick:20", "tick:25"]:
+		_fail("Gua clock did not process schedules and ticks at each step boundary: %s" % [clock_order])
+		return
+
+	var interval_count := [0]
+	var interval_id := [0]
+	interval_id[0] = ui.clock_schedule(10.0, func():
+		interval_count[0] += 1
+		ui.clock_cancel(interval_id[0])
+	, 10.0)
+	ui.clock_run_for(30.0)
+	ui.update("title")
+	if interval_count[0] != 1:
+		_fail("Gua clock rescheduled a running interval after it cancelled itself: %d" % interval_count[0])
+		return
+
 	var leaked := ui.enqueue_action({"action": "focus", "node_id": "start"})
 	if leaked.get("request_id", 0) == 0:
 		_fail("Gua smoke could not create a pending request for reset validation.")

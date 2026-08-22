@@ -52,6 +52,17 @@ int main()
     gua_runtime_begin_frame(runtime, "title");
     gua_runtime_end_frame(runtime);
 
+    assert(gua_runtime_clock_install(runtime, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_runtime_clock_pause(runtime) == GUA_CLOCK_OK);
+    assert(gua_runtime_clock_run_for(runtime, 25.0, 0.0) == GUA_CLOCK_OK);
+    gua_clock_step_t clock_step { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 10.0);
+    clock_step = { sizeof(gua_clock_step_t) };
+    assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 5.0 && clock_step.final_step == 1);
+    assert(gua_runtime_clock_run_for(runtime, 1.0, -1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+
     uint64_t first = 0;
     uint64_t second = 0;
     assert(gua_runtime_enqueue_screenshot_request(runtime, 1, &first) == 1);

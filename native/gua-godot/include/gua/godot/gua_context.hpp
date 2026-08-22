@@ -50,6 +50,7 @@ public:
     Dictionary clock_resume();
     Dictionary clock_advance(double duration_ms);
     Dictionary get_clock() const;
+    Dictionary consume_clock_step();
     Array consume_clock_steps();
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();

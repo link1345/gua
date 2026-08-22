@@ -42,7 +42,8 @@ public sealed class GuaClock
     {
         if (callback is null) throw new ArgumentNullException(nameof(callback));
         if (delay < TimeSpan.Zero || interval is { } repeat && repeat <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
-        var item = new Scheduled(++sequence, Status.NowMilliseconds + delay.TotalMilliseconds,
+        var status = Status;
+        var item = new Scheduled(++sequence, status.Generation, status.NowMilliseconds + delay.TotalMilliseconds,
             interval?.TotalMilliseconds, callback);
         scheduled.Add(item);
         return new Cancellation(item);
@@ -53,6 +54,7 @@ public sealed class GuaClock
         var callbacks = 0;
         while (context.TryConsumeClockStep(out var step))
         {
+            scheduled.RemoveAll(item => item.Generation != step.Generation);
             var now = context.GetClockStatus().NowMilliseconds;
             while (scheduled.Where(item => !item.Cancelled && item.DueMs <= now)
                        .OrderBy(item => item.DueMs).ThenBy(item => item.Sequence).FirstOrDefault() is { } item)
@@ -72,7 +74,7 @@ public sealed class GuaClock
     {
         if (result != GuaClockResult.Ok) throw new InvalidOperationException($"Gua clock operation failed: {result}.");
     }
-    private sealed class Scheduled(long sequence, double dueMs, double? intervalMs, Action callback)
-    { public long Sequence { get; } = sequence; public double DueMs { get; set; } = dueMs; public double? IntervalMs { get; } = intervalMs; public Action Callback { get; } = callback; public bool Cancelled { get; set; } }
+    private sealed class Scheduled(long sequence, ulong generation, double dueMs, double? intervalMs, Action callback)
+    { public long Sequence { get; } = sequence; public ulong Generation { get; } = generation; public double DueMs { get; set; } = dueMs; public double? IntervalMs { get; } = intervalMs; public Action Callback { get; } = callback; public bool Cancelled { get; set; } }
     private sealed class Cancellation(Scheduled item) : IDisposable { public void Dispose() => item.Cancelled = true; }
 }

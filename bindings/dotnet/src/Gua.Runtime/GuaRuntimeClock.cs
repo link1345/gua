@@ -26,7 +26,8 @@ public sealed class GuaRuntimeClock
     {
         if (callback is null) throw new ArgumentNullException(nameof(callback));
         if (delay < TimeSpan.Zero || interval is { } repeat && repeat <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
-        var item = new Scheduled(++sequence, Status.NowMilliseconds + delay.TotalMilliseconds, interval?.TotalMilliseconds, callback); scheduled.Add(item); return new Cancel(item);
+        var status = Status;
+        var item = new Scheduled(++sequence, status.Generation, status.NowMilliseconds + delay.TotalMilliseconds, interval?.TotalMilliseconds, callback); scheduled.Add(item); return new Cancel(item);
     }
     public void Drain()
     {
@@ -34,6 +35,7 @@ public sealed class GuaRuntimeClock
         var step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         while (Native.gua_runtime_clock_consume_step(runtime.Handle, ref step) != 0)
         {
+            scheduled.RemoveAll(x => x.Generation != step.Generation);
             var now = Status.NowMilliseconds;
             while (scheduled.Where(x => !x.Cancelled && x.Due <= now).OrderBy(x => x.Due).ThenBy(x => x.Sequence).FirstOrDefault() is { } item)
             { if (++callbackCount > 1_000_000) throw new InvalidOperationException("Gua clock execution_limit.");
@@ -43,7 +45,7 @@ public sealed class GuaRuntimeClock
         }
     }
     private static void Check(int result) { if (result != 1) throw new InvalidOperationException($"Gua clock operation failed: {(GuaClockResult)result}."); }
-    private sealed class Scheduled(long sequence, double due, double? interval, Action callback)
-    { public long Sequence { get; } = sequence; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action Callback { get; } = callback; public bool Cancelled { get; set; } }
+    private sealed class Scheduled(long sequence, ulong generation, double due, double? interval, Action callback)
+    { public long Sequence { get; } = sequence; public ulong Generation { get; } = generation; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action Callback { get; } = callback; public bool Cancelled { get; set; } }
     private sealed class Cancel(Scheduled item) : IDisposable { public void Dispose() => item.Cancelled = true; }
 }

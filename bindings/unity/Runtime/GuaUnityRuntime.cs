@@ -62,6 +62,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     public static void RunFrame() { if (activeRuntime != null && activeRuntime.enabled) activeRuntime.Tick(); }
 
+    /// <summary>
+    /// Gets the clock that game logic must explicitly use to participate in
+    /// Gua pause and run-for operations.
+    /// </summary>
+    public static GuaRuntimeClock Clock => activeRuntime?.runtime?.Clock
+        ?? throw new InvalidOperationException("The Gua Unity runtime has not started yet.");
+
     private void Tick()
     {
         if (runtime == null) return;

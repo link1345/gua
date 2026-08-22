@@ -150,19 +150,27 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 
 ### 決定論的な仮想時間
 
-Guaは、時間依存のゲームロジック向けにオプトインの仮想時計を提供する。
-`GuaClock`へ処理を登録し、時計を停止してから、実時間を待たずに進められる。
+GuaClockを時刻源にしたゲームロジックは、停止したり、実時間を待たずに
+進めたりできる。既存のengine timerを自動的に置き換える機能ではない。
+まずゲーム本体の対象ロジックを、Godotの`Timer`、Unityの`Time.deltaTime`や
+Coroutineなどではなく、GuaClockのScheduleまたはTickを使う実装へ変更する。
+その後、テストから共有ClockをInstallして操作する。
 
 ```csharp
-var clock = new GuaClock(ui);
+// ゲーム側の組み込み。production codeで一度行う。
+var clock = runtime.Clock;
 clock.Install();
 clock.Schedule(TimeSpan.FromSeconds(2), ShowMessage);
+
+// テスト側から同じClockを操作する。
 clock.Pause();
 clock.RunFor(TimeSpan.FromSeconds(2));
 ```
 
-`Pause`の対象はGuaClockのSchedulerとTick購読処理だけだ。エンジン標準の
-Timer、物理、Animation、Audio、OS時刻、ネットワークは停止しない。
+ここで`Install`が行うのは共有仮想Clockの有効化であり、任意のgame objectへ
+Clockを自動注入することではない。`Pause`の対象は、あらかじめGuaClockの
+SchedulerまたはTickへ接続したゲームロジックだけだ。engine標準のTimer、
+物理、Animation、Audio、OS時刻、ネットワークは停止しない。
 bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
 `clock_run_for`、`clock_resume`を利用できる。
 
