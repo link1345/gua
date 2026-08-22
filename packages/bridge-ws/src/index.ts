@@ -124,7 +124,12 @@ class DemoRuntime {
   getClock() { return this.clock; }
   installClock(initial = 0, step = 1000 / 60) { this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
   pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
-  runClockFor(duration: number, step?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration, defaultStepMs: step ?? this.clock.defaultStepMs }; return this.clock; }
+  runClockFor(duration: number, step?: number) {
+    if (this.clock.state !== "paused") throw new Error("invalid_state");
+    this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration, defaultStepMs: step ?? this.clock.defaultStepMs };
+    setTimeout(() => { this.frameSequence += 1; this.revision += 1; }, 0);
+    return this.clock;
+  }
   resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
 
   clickNode(nodeId: string): void {

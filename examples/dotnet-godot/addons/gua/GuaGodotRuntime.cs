@@ -20,6 +20,7 @@ public sealed class GuaGodotRuntime : IDisposable
             ProjectSettings.GlobalizePath("res://addons/gua/bin"));
         _runtime = new GuaRuntime();
         _runtime.SetGodotPluginVersion("0.1.0");
+        _runtime.EnableVirtualClockAdapter();
     }
 
     public bool InspectorBridgeRunning
@@ -103,6 +104,12 @@ public sealed class GuaGodotRuntime : IDisposable
         EndFrame();
         DispatchClickRequests();
         ScheduleScreenshotCapture();
+    }
+
+    public void AdvanceClock(TimeSpan unscaledDelta)
+    {
+        ThrowIfDisposed();
+        _runtime!.Clock.Advance(unscaledDelta);
     }
 
     public bool EnqueueClick(string id)

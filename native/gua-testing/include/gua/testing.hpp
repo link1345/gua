@@ -542,7 +542,13 @@ public:
     { check(gua_clock_install(context_, initial.count(), step.count())); }
     void pause() const { check(gua_clock_pause(context_)); }
     void run_for(std::chrono::duration<double, std::milli> duration,
-        std::chrono::duration<double, std::milli> step = std::chrono::duration<double, std::milli>(1000.0 / 60.0),
+        const std::function<void(std::chrono::duration<double, std::milli>)>& on_tick = {}) const
+    {
+        const auto current = status();
+        run_for(duration, std::chrono::duration<double, std::milli>(current.default_step_ms), on_tick);
+    }
+    void run_for(std::chrono::duration<double, std::milli> duration,
+        std::chrono::duration<double, std::milli> step,
         const std::function<void(std::chrono::duration<double, std::milli>)>& on_tick = {}) const
     {
         check(gua_clock_run_for(context_, duration.count(), step.count()));

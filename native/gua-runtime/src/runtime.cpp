@@ -34,6 +34,7 @@ struct gua_runtime_t {
     std::string diagnostics_json;
     std::string godot_plugin_version;
     std::map<std::string, std::string> adapter_versions;
+    bool virtual_clock_enabled = false;
     uint64_t next_screenshot_request_id = 1;
     std::deque<gua_screenshot_request_t> screenshot_requests;
     std::unordered_map<uint64_t, ScreenshotBatch> screenshot_batches;
@@ -56,6 +57,14 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
         std::snprintf(out_json, static_cast<std::size_t>(out_json_size), "%s", json.c_str());
     }
     return required_size;
+}
+
+void filter_runtime_capabilities(std::string& json, bool virtual_clock_enabled)
+{
+    if (virtual_clock_enabled) return;
+    const std::string capability = ",\"virtual_clock_v1\"";
+    const auto position = json.find(capability);
+    if (position != std::string::npos) json.erase(position, capability.size());
 }
 
 std::string copy_ui_tree_json(gua_runtime_t* runtime)
@@ -88,6 +97,7 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     std::string json = gua_get_diagnostics_json(runtime->context);
+    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
     if (!runtime->godot_plugin_version.empty()) {
         const std::string marker = "\"godotPluginVersion\":null";
         const auto position = json.find(marker);
@@ -126,6 +136,7 @@ std::string copy_version_json(gua_runtime_t* runtime)
     char buffer[2048] {};
     gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
     std::string json = buffer;
+    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
     if (!runtime->godot_plugin_version.empty()) {
         const std::string marker = "\"godotPluginVersion\":null";
         const auto position = json.find(marker);
@@ -608,6 +619,13 @@ extern "C" void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const ch
     const std::lock_guard lock(runtime->context_mutex);
     if (version == nullptr || version[0] == '\0') runtime->adapter_versions.erase(adapter);
     else runtime->adapter_versions[adapter] = version;
+}
+
+extern "C" void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, int enabled)
+{
+    if (!valid_runtime(runtime)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    runtime->virtual_clock_enabled = enabled != 0;
 }
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)

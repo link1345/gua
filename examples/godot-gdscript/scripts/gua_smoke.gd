@@ -342,6 +342,27 @@ func _run() -> void:
 		_fail("Gua clock rescheduled a running interval after it cancelled itself: %d" % interval_count[0])
 		return
 
+	var stale_schedule_count := [0]
+	ui.clock_schedule(100.0, func(): stale_schedule_count[0] += 1)
+	var clock_reset: Dictionary = ui.context.reset_context({
+		"expected_session_epoch": ui.get_context_status().get("session_epoch", 0),
+		"flags": ui.RESET_CLOCK_FLAG,
+	})
+	if clock_reset.get("result", 0) != 1:
+		_fail("Gua direct clock reset failed: %s" % clock_reset)
+		return
+	var reinstalled_clock := ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+	ui.clock_run_for(100.0)
+	ui.update("title")
+	if stale_schedule_count[0] != 0:
+		_fail("Gua invoked a schedule from a stale clock generation.")
+		return
+	var rejected_install := ui.clock_install(0.0, 10.0)
+	if reinstalled_clock.get("result", 0) != 1 or rejected_install.get("result", 0) != -3 or rejected_install.get("error", "") != "invalid_state":
+		_fail("Gua Godot clock controls did not surface native operation results: %s / %s" % [reinstalled_clock, rejected_install])
+		return
+
 	var leaked := ui.enqueue_action({"action": "focus", "node_id": "start"})
 	if leaked.get("request_id", 0) == 0:
 		_fail("Gua smoke could not create a pending request for reset validation.")

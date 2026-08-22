@@ -920,6 +920,7 @@ extern "C" int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double 
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
     if (!ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
     if (duration_ms / step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
+    if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = step_ms;
     return GUA_CLOCK_OK;
@@ -942,6 +943,7 @@ extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
     if (ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
     if (duration_ms / ctx->clock_default_step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
+    if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
     return GUA_CLOCK_OK;

@@ -47,6 +47,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         {
             runtime = new GuaRuntime();
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
+            runtime.EnableVirtualClockAdapter();
             var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
             var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
             if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");

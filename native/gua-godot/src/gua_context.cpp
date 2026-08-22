@@ -47,6 +47,35 @@ const char* action_name(int action)
     }
 }
 
+const char* clock_error_name(int result)
+{
+    switch (result) {
+    case GUA_CLOCK_ERROR_NOT_INSTALLED: return "not_installed";
+    case GUA_CLOCK_ERROR_INVALID_STATE: return "invalid_state";
+    case GUA_CLOCK_ERROR_EXECUTION_LIMIT: return "execution_limit";
+    case GUA_CLOCK_ERROR_INVALID_ARGUMENT: return "invalid_duration";
+    default: return "";
+    }
+}
+
+godot::Dictionary clock_result(gua_runtime_t* runtime, int result)
+{
+    gua_clock_status_t status { sizeof(gua_clock_status_t) };
+    godot::Dictionary value;
+    if (gua_runtime_clock_get_status(runtime, &status) != 0) {
+        value["schema_version"] = 1;
+        value["installed"] = status.installed != 0;
+        value["state"] = status.paused != 0 ? "paused" : "running";
+        value["now_ms"] = status.now_ms;
+        value["default_step_ms"] = status.default_step_ms;
+        value["pending_ms"] = status.pending_ms;
+        value["generation"] = status.generation;
+    }
+    value["result"] = result;
+    value["error"] = clock_error_name(result);
+    return value;
+}
+
 godot::String copy_runtime_json(gua_runtime_t* runtime, int (*copy_json)(gua_runtime_t*, char*, int))
 {
     int required_size = copy_json(runtime, nullptr, 0);
@@ -75,6 +104,7 @@ GuaContext::GuaContext()
     : runtime_(gua_runtime_create())
 {
     gua_runtime_set_godot_plugin_version(runtime_, GUA_GODOT_PLUGIN_VERSION);
+    gua_runtime_set_virtual_clock_enabled(runtime_, 1);
     if (runtime_ == nullptr) {
         UtilityFunctions::push_error(
             "GuaContext failed to create a Gua runtime. Check that the Gua native library and dependent DLLs are available.");
@@ -355,12 +385,12 @@ Dictionary GuaContext::get_clock() const
     result["default_step_ms"] = status.default_step_ms; result["pending_ms"] = status.pending_ms; result["generation"] = status.generation;
     return result;
 }
-Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { gua_runtime_clock_install(runtime_, initial_time_ms, step_ms); return get_clock(); }
-Dictionary GuaContext::clock_pause() { gua_runtime_clock_pause(runtime_); return get_clock(); }
+Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { return clock_result(runtime_, gua_runtime_clock_install(runtime_, initial_time_ms, step_ms)); }
+Dictionary GuaContext::clock_pause() { return clock_result(runtime_, gua_runtime_clock_pause(runtime_)); }
 Dictionary GuaContext::clock_run_for(double duration_ms, double step_ms)
-{ const Dictionary status = get_clock(); const double actual = step_ms == 0.0 ? static_cast<double>(status["default_step_ms"]) : step_ms; gua_runtime_clock_run_for(runtime_, duration_ms, actual); return get_clock(); }
-Dictionary GuaContext::clock_resume() { gua_runtime_clock_resume(runtime_); return get_clock(); }
-Dictionary GuaContext::clock_advance(double duration_ms) { gua_runtime_clock_advance(runtime_, duration_ms); return get_clock(); }
+{ return clock_result(runtime_, gua_runtime_clock_run_for(runtime_, duration_ms, step_ms)); }
+Dictionary GuaContext::clock_resume() { return clock_result(runtime_, gua_runtime_clock_resume(runtime_)); }
+Dictionary GuaContext::clock_advance(double duration_ms) { return clock_result(runtime_, gua_runtime_clock_advance(runtime_, duration_ms)); }
 Dictionary GuaContext::consume_clock_step()
 {
     Dictionary result; gua_clock_step_t step { sizeof(gua_clock_step_t) };

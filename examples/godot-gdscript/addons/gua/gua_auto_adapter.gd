@@ -77,7 +77,7 @@ func update(screen: String) -> void:
 		var step: Dictionary = context.consume_clock_step()
 		if step.is_empty():
 			break
-		_drain_clock_schedules(float(context.get_clock().get("now_ms", 0.0)))
+		_drain_clock_schedules(float(context.get_clock().get("now_ms", 0.0)), int(step.get("generation", 0)))
 		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
 
 	if root == null:
@@ -221,7 +221,8 @@ func clock_schedule(delay_ms: float, callback: Callable, interval_ms: float = 0.
 		return 0
 	var schedule_id := next_clock_schedule_id
 	next_clock_schedule_id += 1
-	clock_schedules.append({"id": schedule_id, "due_ms": float(get_clock().get("now_ms", 0.0)) + delay_ms, "interval_ms": interval_ms, "callback": callback})
+	var status := get_clock()
+	clock_schedules.append({"id": schedule_id, "generation": int(status.get("generation", 0)), "due_ms": float(status.get("now_ms", 0.0)) + delay_ms, "interval_ms": interval_ms, "callback": callback})
 	return schedule_id
 
 func clock_cancel(schedule_id: int) -> void:
@@ -229,7 +230,8 @@ func clock_cancel(schedule_id: int) -> void:
 	if active_clock_schedule_id == schedule_id:
 		active_clock_schedule_cancelled = true
 
-func _drain_clock_schedules(now_ms: float) -> void:
+func _drain_clock_schedules(now_ms: float, generation: int) -> void:
+	clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool: return int(item.get("generation", 0)) == generation)
 	clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 	var callbacks := 0

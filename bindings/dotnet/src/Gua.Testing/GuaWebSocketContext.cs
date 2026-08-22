@@ -30,10 +30,17 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IDispos
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
     {
         var status = Request<RemoteClockStatus>(new { type = "clock_run_for", durationMs = duration.TotalMilliseconds, stepMs = step?.TotalMilliseconds });
+        var before = GetContextStatus();
         var deadline = DateTime.UtcNow + requestTimeout;
-        while (status.PendingMs > 0 && DateTime.UtcNow < deadline) { Thread.Sleep(5); status = Request<RemoteClockStatus>(new { type = "get_clock" }); }
-        if (status.PendingMs > 0) throw new TimeoutException("Timed out waiting for Gua clock run_for completion.");
-        return GuaClockResult.Ok;
+        while (DateTime.UtcNow < deadline)
+        {
+            var context = GetContextStatus();
+            if (context.SessionEpoch != before.SessionEpoch) throw new InvalidOperationException("stale_session");
+            if (status.PendingMs <= 0 && context.FrameSequence > before.FrameSequence) return GuaClockResult.Ok;
+            Thread.Sleep(5);
+            status = Request<RemoteClockStatus>(new { type = "get_clock" });
+        }
+        throw new TimeoutException("Timed out waiting for Gua clock run_for host completion.");
     }
     public GuaClockResult ResumeClock() { Request<RemoteClockStatus>(new { type = "clock_resume" }); return GuaClockResult.Ok; }
     private static GuaClockStatus ToClockStatus(RemoteClockStatus value) => new(value.Installed,

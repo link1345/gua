@@ -245,8 +245,12 @@ engine-native timers are outside this capability. `clock_install` activates the
 shared virtual clock but does not hook or replace those native time sources.
 Game and adapter code must explicitly use GuaClock as the time source for every
 subsystem that needs to be controlled. Adapters must continue their unscaled
-bridge pump while the Gua clock is paused. Capability
-`virtual_clock_v1` advertises support.
+bridge pump while the Gua clock is paused. An adapter must opt in to capability
+`virtual_clock_v1` only after it implements that pump and consumes every clock
+step; a bare runtime bridge does not advertise the capability. Remote
+`clock_run_for` consumers wait for both `pendingMs` to reach zero and a semantic
+frame published after the command response, because consuming the final core
+step precedes adapter callbacks, tick delivery, and frame publication.
 
 Initial command types:
 

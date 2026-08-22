@@ -54,6 +54,8 @@ public sealed class GuaRuntime : IDisposable
     }
 
     public void SetGodotPluginVersion(string version) { ThrowIfDisposed(); Native.gua_runtime_set_godot_plugin_version(_handle, version ?? string.Empty); }
+    /// <summary>Advertises virtual_clock_v1 after an adapter has installed an unscaled clock pump.</summary>
+    public void EnableVirtualClockAdapter() { ThrowIfDisposed(); Native.gua_runtime_set_virtual_clock_enabled(_handle, 1); }
     public bool EnqueueClick(string id) { ThrowIfDisposed(); return Native.gua_runtime_enqueue_click(_handle, id) != 0; }
     public bool ConsumeClickRequest(string id) { ThrowIfDisposed(); return Native.gua_runtime_consume_click_request(_handle, id) != 0; }
     public bool EmitClick(string id) { ThrowIfDisposed(); return Native.gua_runtime_emit_click(_handle, id) != 0; }

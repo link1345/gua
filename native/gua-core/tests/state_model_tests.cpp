@@ -1,6 +1,8 @@
 #include "gua/gua.h"
+#include "gua/gua.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <cstdint>
@@ -95,6 +97,14 @@ int main()
     assert(gua_clock_advance(context, 10000001.0) == GUA_CLOCK_ERROR_EXECUTION_LIMIT);
     assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.pending_ms == 0.0);
 
+    gua_context_t* overflow_context = gua_create_context();
+    assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(overflow_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_get_status(overflow_context, &clock_status) == 1 &&
+        std::isfinite(clock_status.now_ms) && clock_status.pending_ms == 0.0);
+    gua_destroy_context(overflow_context);
+
     gua_context_t* precision_context = gua_create_context();
     assert(gua_clock_install(precision_context, 0.0, 1e-7) == GUA_CLOCK_OK);
     assert(gua_clock_pause(precision_context) == GUA_CLOCK_OK);
@@ -110,6 +120,15 @@ int main()
     assert(number_after("\"defaultStepMs\":") == 1e-7);
     assert(number_after("\"pendingMs\":") == 2e-7);
     gua_destroy_context(precision_context);
+
+    gua::Context cpp_context;
+    cpp_context.install_clock(0.0, 10.0);
+    cpp_context.pause_clock();
+    cpp_context.run_clock_for(25.0);
+    gua_clock_step_t cpp_step { sizeof(gua_clock_step_t) };
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
+    assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 5.0);
 
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();

@@ -772,16 +772,19 @@ class GuaBridgeClient {
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
   {
-    const result = await this.request<{ pendingMs?: number }>(command);
+    let result = await this.request<{ pendingMs?: number }>(command);
     if (command.type !== "clock_run_for") return result;
+    const before = await this.getUiTree();
+    const beforeFrameSequence = before.frameSequence ?? 0;
     const started = Date.now();
-    while ((result.pendingMs ?? 0) > 0 && Date.now() - started < 10000) {
+    while (Date.now() - started < 10000) {
+      const tree = await this.getUiTree();
+      if (tree.sessionEpoch !== before.sessionEpoch) throw new Error("stale_session");
+      if ((result.pendingMs ?? 0) <= 0 && (tree.frameSequence ?? 0) > beforeFrameSequence) return result;
       await sleep(5);
-      const status = await this.request<{ pendingMs: number }>({ type: "get_clock" });
-      if (status.pendingMs <= 0) return status;
+      result = await this.request<{ pendingMs: number }>({ type: "get_clock" });
     }
-    if ((result.pendingMs ?? 0) > 0) throw new Error("Timed out waiting for Gua clock run_for completion.");
-    return result;
+    throw new Error("Timed out waiting for Gua clock run_for host completion.");
   }
 
   async performAction(input: SemanticActionInput): Promise<GuaActionReceipt | null> {

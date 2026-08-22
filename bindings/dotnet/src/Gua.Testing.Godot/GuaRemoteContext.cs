@@ -5,7 +5,7 @@ using Gua.Core;
 
 namespace Gua.Testing.Godot;
 
-public sealed class GuaRemoteContext : IGuaContext, IDisposable
+public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private readonly Uri _bridgeUri;
     private readonly TimeSpan _requestTimeout;
@@ -41,6 +41,45 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     {
         return GuaVersion.Parse(RequestRawResult(new { type = "get_version" }));
     }
+
+    public GuaClockStatus GetClockStatus() => ToClockStatus(Request<RemoteClockStatus>(new { type = "get_clock" }));
+
+    public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
+    {
+        Request<RemoteClockStatus>(new { type = "clock_install", initialTimeMs = (initialTime ?? TimeSpan.Zero).TotalMilliseconds, stepMs = step?.TotalMilliseconds });
+        return GuaClockResult.Ok;
+    }
+
+    public GuaClockResult PauseClock()
+    {
+        Request<RemoteClockStatus>(new { type = "clock_pause" });
+        return GuaClockResult.Ok;
+    }
+
+    public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
+    {
+        var clock = Request<RemoteClockStatus>(new { type = "clock_run_for", durationMs = duration.TotalMilliseconds, stepMs = step?.TotalMilliseconds });
+        var before = GetContextStatus();
+        var deadline = DateTime.UtcNow + _requestTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var context = GetContextStatus();
+            if (context.SessionEpoch != before.SessionEpoch) throw new InvalidOperationException("stale_session");
+            if (clock.PendingMs <= 0 && context.FrameSequence > before.FrameSequence) return GuaClockResult.Ok;
+            Thread.Sleep(5);
+            clock = Request<RemoteClockStatus>(new { type = "get_clock" });
+        }
+        throw new TimeoutException("Timed out waiting for Gua clock run_for host completion.");
+    }
+
+    public GuaClockResult ResumeClock()
+    {
+        Request<RemoteClockStatus>(new { type = "clock_resume" });
+        return GuaClockResult.Ok;
+    }
+
+    private static GuaClockStatus ToClockStatus(RemoteClockStatus value) => new(value.Installed,
+        string.Equals(value.State, "paused", StringComparison.Ordinal), value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
 
     public Task<GuaVersion> GetVersionAsync(CancellationToken cancellationToken = default)
     {
@@ -475,6 +514,7 @@ public sealed class GuaRemoteContext : IGuaContext, IDisposable
     };
 
     private sealed record ActionRequestResult(ulong RequestId);
+    private sealed record RemoteClockStatus(bool Installed, string State, double NowMs, double DefaultStepMs, double PendingMs, ulong Generation);
     private sealed record ActionEventResult(
         ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive,
         ulong SessionEpoch, ulong FrameSequence, ulong Revision);

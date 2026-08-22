@@ -401,12 +401,16 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   async pauseClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_pause" }); }
   async runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus> {
     let status = await this.request<GuaClockStatus>({ type: "clock_run_for", durationMs, stepMs });
+    const before = await this.getUiTree();
     const started = Date.now();
-    while (status.pendingMs > 0 && Date.now() - started < this.requestTimeoutMs) {
-      await new Promise((resolve) => window.setTimeout(resolve, 5)); status = await this.getClock();
+    while (Date.now() - started < this.requestTimeoutMs) {
+      const tree = await this.getUiTree();
+      if (tree.sessionEpoch !== before.sessionEpoch) throw new Error("stale_session");
+      if (status.pendingMs <= 0 && tree.frameSequence > before.frameSequence) return status;
+      await new Promise((resolve) => window.setTimeout(resolve, 5));
+      status = await this.getClock();
     }
-    if (status.pendingMs > 0) throw new Error("Timed out waiting for Gua clock run_for completion.");
-    return status;
+    throw new Error("Timed out waiting for Gua clock run_for host completion.");
   }
   async resumeClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_resume" }); }
 

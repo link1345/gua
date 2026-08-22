@@ -199,7 +199,8 @@ public sealed class SelectorParityTests
                 Assert.That(remoteVersion.ProtocolSchemaVersion, Is.EqualTo(localVersion.ProtocolSchemaVersion));
                 Assert.That(remoteVersion.AbiVersion, Is.EqualTo(localVersion.AbiVersion));
                 Assert.That(remoteVersion.BuildId, Is.EqualTo(localVersion.BuildId));
-                Assert.That(remoteVersion.Capabilities, Is.EqualTo(localVersion.Capabilities));
+                Assert.That(remoteVersion.Capabilities, Does.Not.Contain("virtual_clock_v1"));
+                Assert.That(localVersion.Capabilities, Does.Contain("virtual_clock_v1"));
             });
             Assert.That(remoteVersion.Capabilities, Does.Contain("version_v1"));
 
@@ -231,6 +232,40 @@ public sealed class SelectorParityTests
         {
             Native.gua_runtime_stop_inspector_bridge(runtime);
             Native.gua_runtime_destroy(runtime);
+        }
+    }
+
+    [Test]
+    public async Task GodotRemoteClockWaitsForTheHostFrameAfterCoreStepsAreConsumed()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.BeginFrame("fixture");
+        runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(remote.GetVersion().Capabilities, Does.Contain("virtual_clock_v1"));
+            GuaClockControls.InstallClock(remote, step: TimeSpan.FromMilliseconds(10));
+            GuaClockControls.PauseClock(remote);
+
+            var runFor = Task.Run(() => GuaClockControls.RunClockFor(remote, TimeSpan.FromMilliseconds(25)));
+            Assert.That(SpinWait.SpinUntil(() => runtime.Clock.Status.PendingMilliseconds > 0, TimeSpan.FromSeconds(2)), Is.True);
+            runtime.Clock.Advance(TimeSpan.Zero);
+            await Task.Delay(50);
+            Assert.That(runFor.IsCompleted, Is.False, "Core pendingMs=0 must not complete run_for before the adapter publishes its frame.");
+
+            runtime.BeginFrame("fixture");
+            runtime.EndFrame();
+            var status = await runFor.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(status.NowMilliseconds, Is.EqualTo(25));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
         }
     }
 

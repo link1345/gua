@@ -30,6 +30,8 @@ int main()
 {
     gua_runtime_t* runtime = gua_runtime_create();
     assert(runtime != nullptr);
+    assert(version(runtime).find("virtual_clock_v1") == std::string::npos);
+    gua_runtime_set_virtual_clock_enabled(runtime, 1);
     gua_runtime_set_adapter_version(runtime, "unity", "0.5.0-preview.3");
     gua_runtime_set_adapter_version(runtime, "Unity", "invalid");
     gua_runtime_set_adapter_version(runtime, "ui-toolkit", "invalid");
@@ -39,6 +41,7 @@ int main()
     assert(version_json.find("\"godotPluginVersion\":\"0.4.0\"") != std::string::npos);
     assert(version_json.find("Unity") == std::string::npos);
     assert(version_json.find("ui-toolkit") == std::string::npos);
+    assert(version_json.find("virtual_clock_v1") != std::string::npos);
     std::thread version_writer([runtime] {
         for (int index = 0; index < 1000; ++index)
             gua_runtime_set_adapter_version(runtime, "unity", index % 2 == 0 ? "0.5.0-preview.3" : "0.5.0-preview.4");

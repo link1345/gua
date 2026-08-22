@@ -123,7 +123,9 @@ public:
     void install_clock(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0)
     { check_clock(gua_clock_install(context_, initial_time_ms, step_ms)); }
     void pause_clock() { check_clock(gua_clock_pause(context_)); }
-    void run_clock_for(double duration_ms, double step_ms = 1000.0 / 60.0)
+    void run_clock_for(double duration_ms)
+    { run_clock_for(duration_ms, clock_status().default_step_ms); }
+    void run_clock_for(double duration_ms, double step_ms)
     { check_clock(gua_clock_run_for(context_, duration_ms, step_ms)); }
     void resume_clock() { check_clock(gua_clock_resume(context_)); }
     [[nodiscard]] gua_clock_status_t clock_status() const
