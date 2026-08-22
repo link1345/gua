@@ -376,7 +376,7 @@ bool prepare_clock_operation(
     double quotient = duration_ms / step_ms;
     const double nearest = std::round(quotient);
     const double quotient_tolerance = std::numeric_limits<double>::epsilon() * 8.0 * std::max(1.0, std::abs(quotient));
-    if (std::abs(quotient - nearest) <= quotient_tolerance) quotient = nearest;
+    if (nearest >= 1.0 && std::abs(quotient - nearest) <= quotient_tolerance) quotient = nearest;
     step_count = static_cast<unsigned long long>(std::ceil(quotient));
     while (step_count > 1) {
         const double previous_elapsed_ms = std::min(duration_ms, step_ms * static_cast<double>(step_count - 1));

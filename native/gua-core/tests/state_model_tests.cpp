@@ -151,6 +151,7 @@ int main()
     };
     assert(count_clock_steps(1.0, 0.1) == 10);
     assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
+    assert(count_clock_steps(1e-16, 1.0) == 1);
 
     gua_context_t* magnitude_context = gua_create_context();
     assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);

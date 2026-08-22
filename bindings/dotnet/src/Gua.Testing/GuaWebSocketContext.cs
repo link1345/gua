@@ -26,7 +26,17 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
     public GuaClockStatus GetClockStatus() => ToClockStatus(Request<RemoteClockStatus>(new { type = "get_clock" }));
     public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
     { Request<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step)); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
     public GuaClockResult PauseClock() { Request<RemoteClockStatus>(new { type = "clock_pause" }); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
     {
         var status = Request<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step));
@@ -63,6 +73,11 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         throw new TimeoutException("Timed out waiting for Gua clock run_for host completion.");
     }
     public GuaClockResult ResumeClock() { Request<RemoteClockStatus>(new { type = "clock_resume" }); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> ResumeClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_resume" }, cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
     private static GuaClockStatus ToClockStatus(RemoteClockStatus value) => new(value.Installed,
         string.Equals(value.State, "paused", StringComparison.Ordinal), value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
     private static Dictionary<string, object> ClockCommand(string type, string valueName, double value, TimeSpan? step)

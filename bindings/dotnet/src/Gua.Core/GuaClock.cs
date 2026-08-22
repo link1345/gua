@@ -21,7 +21,10 @@ public interface IGuaClockContext
 
 public interface IGuaAsyncClockContext
 {
+    Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default);
+    Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default);
     Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default);
+    Task<GuaClockResult> ResumeClockAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class GuaClock

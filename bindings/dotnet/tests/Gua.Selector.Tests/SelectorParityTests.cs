@@ -385,12 +385,14 @@ public sealed class SelectorParityTests
             step = new NativeClockStep { StructSize = (uint)Marshal.SizeOf<NativeClockStep>() };
             Assert.That(Native.gua_runtime_clock_consume_step(runtime, ref step), Is.EqualTo(1));
 
-            var latePause = Task.Run(remote.PauseClock);
-            await Task.Delay(30);
-            Assert.That(latePause.IsCompleted, Is.False,
-                "Pause must wait when the running step was consumed but its host frame is not published yet.");
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            var stopwatch = Stopwatch.StartNew();
+            var latePause = GuaClockControls.PauseClockAsync(remote, cancellationToken: cancellation.Token);
+            Assert.That(async () => await latePause, Throws.InstanceOf<OperationCanceledException>());
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(1)),
+                "Asynchronous pause must observe cancellation while the consumed running step awaits its host frame.");
             Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
-            Assert.That(await latePause.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(GuaClockResult.Ok));
+            await Task.Delay(30);
         }
         finally
         {

@@ -50,9 +50,21 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
         return GuaClockResult.Ok;
     }
 
+    public async Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
+
     public GuaClockResult PauseClock()
     {
         Request<RemoteClockStatus>(new { type = "clock_pause" });
+        return GuaClockResult.Ok;
+    }
+
+    public async Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken).ConfigureAwait(false);
         return GuaClockResult.Ok;
     }
 
@@ -96,6 +108,12 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
     public GuaClockResult ResumeClock()
     {
         Request<RemoteClockStatus>(new { type = "clock_resume" });
+        return GuaClockResult.Ok;
+    }
+
+    public async Task<GuaClockResult> ResumeClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_resume" }, cancellationToken).ConfigureAwait(false);
         return GuaClockResult.Ok;
     }
 

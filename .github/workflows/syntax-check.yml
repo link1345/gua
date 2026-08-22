@@ -7,6 +7,32 @@ on:
       - main
 
 jobs:
+  remote-clock:
+    name: .NET remote clock
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build native runtime
+        run: |
+          cmake -S . -B build/dotnet-clock -DGUA_BUILD_EXAMPLES=OFF -DGUA_BUILD_GODOT=OFF
+          cmake --build build/dotnet-clock --config Release --target gua gua-runtime --parallel
+
+      - name: Restore selector tests
+        run: dotnet restore bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj
+
+      - name: Test remote clock and selector contracts
+        run: dotnet test bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj --configuration Release --no-restore
+        env:
+          GUA_NATIVE_DIR: ${{ github.workspace }}\build\dotnet-clock\native\gua-core\Release
+          GUA_RUNTIME_NATIVE_DIR: ${{ github.workspace }}\build\dotnet-clock\native\gua-runtime\Release
+
   cpp:
     name: C++ / CMake
     runs-on: ubuntu-latest
@@ -92,7 +118,8 @@ jobs:
       - name: Check
         run: bun run check
 
-      - name: Test MCP automation
+      - name: Test TypeScript packages
         run: |
+          bun run --filter @gua/bridge-ws test
           bun run --filter gui-mcp test
           bun run --filter @gua/inspector test

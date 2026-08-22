@@ -69,7 +69,7 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
   return { id, ok: true, result };
 }
 
-class DemoRuntime {
+export class DemoRuntime {
   private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0, completedOperationSequence: 0 };
   private nextClockOperationSequence = 1;
   private screen: "title" | "loading" = "title";
@@ -123,7 +123,7 @@ class DemoRuntime {
     };
   }
   getClock() { return this.clock; }
-  installClock(initial = 0, step = 1000 / 60) { if (step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) { if (this.clock.installed) throw new Error("invalid_state"); if (step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
   pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
@@ -234,31 +234,33 @@ function node(
 
 const runtime = new DemoRuntime();
 
-const server = Bun.serve({
-  port,
-  fetch(request, server) {
-    if (server.upgrade(request)) {
-      return undefined;
-    }
+if (import.meta.main) {
+  const server = Bun.serve({
+    port,
+    fetch(request, server) {
+      if (server.upgrade(request)) {
+        return undefined;
+      }
 
-    return Response.json({
-      name: "Gua WebSocket bridge",
-      websocket: `ws://127.0.0.1:${port}`,
-      commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node", "press_key"],
-    });
-  },
-  websocket: {
-    open() {
-      runtime.log("info", "Inspector connected.");
+      return Response.json({
+        name: "Gua WebSocket bridge",
+        websocket: `ws://127.0.0.1:${port}`,
+        commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node", "press_key"],
+      });
     },
-    message(socket, message) {
-      const response = handleMessage(message);
-      socket.send(JSON.stringify(response));
+    websocket: {
+      open() {
+        runtime.log("info", "Inspector connected.");
+      },
+      message(socket, message) {
+        const response = handleMessage(message);
+        socket.send(JSON.stringify(response));
+      },
+      close() {
+        runtime.log("info", "Inspector disconnected.");
+      },
     },
-    close() {
-      runtime.log("info", "Inspector disconnected.");
-    },
-  },
-});
+  });
 
-console.log(`Gua WebSocket bridge listening on ws://127.0.0.1:${server.port}`);
+  console.log(`Gua WebSocket bridge listening on ws://127.0.0.1:${server.port}`);
+}
