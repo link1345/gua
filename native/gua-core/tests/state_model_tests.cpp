@@ -131,6 +131,23 @@ int main()
     assert(number_after("\"pendingMs\":") == 2e-7);
     gua_destroy_context(precision_context);
 
+    const auto count_clock_steps = [](double duration, double step) {
+        gua_context_t* rounding_context = gua_create_context();
+        assert(gua_clock_install(rounding_context, 0.0, step) == GUA_CLOCK_OK);
+        assert(gua_clock_pause(rounding_context) == GUA_CLOCK_OK);
+        assert(gua_clock_run_for(rounding_context, duration, step) == GUA_CLOCK_OK);
+        int count = 0;
+        gua_clock_step_t rounding_step { sizeof(gua_clock_step_t) };
+        while (gua_clock_consume_step(rounding_context, &rounding_step) == 1) ++count;
+        gua_clock_status_t rounding_status { sizeof(gua_clock_status_t) };
+        assert(gua_clock_get_status(rounding_context, &rounding_status) == 1);
+        assert(rounding_status.now_ms == duration && rounding_status.pending_ms == 0.0);
+        gua_destroy_context(rounding_context);
+        return count;
+    };
+    assert(count_clock_steps(1.0, 0.1) == 10);
+    assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
+
     gua::Context cpp_context;
     cpp_context.install_clock(0.0, 10.0);
     cpp_context.pause_clock();

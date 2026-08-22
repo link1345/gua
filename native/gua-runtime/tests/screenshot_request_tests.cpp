@@ -24,6 +24,14 @@ std::string version(gua_runtime_t* runtime)
     return buffer.data();
 }
 
+std::string diagnostics(gua_runtime_t* runtime)
+{
+    const int size = gua_runtime_copy_diagnostics_json(runtime, nullptr, 0);
+    std::vector<char> buffer(static_cast<std::size_t>(size));
+    assert(gua_runtime_copy_diagnostics_json(runtime, buffer.data(), size) == size);
+    return buffer.data();
+}
+
 } // namespace
 
 int main()
@@ -31,6 +39,15 @@ int main()
     gua_runtime_t* runtime = gua_runtime_create();
     assert(runtime != nullptr);
     assert(version(runtime).find("virtual_clock_v1") == std::string::npos);
+    assert(gua_runtime_set_diagnostics_environment_json(
+        runtime, "{\"tags\":[\"test\",\"virtual_clock_v1\"]}") == 1);
+    const std::string diagnostics_json = diagnostics(runtime);
+    assert(diagnostics_json.find("\"tags\":[\"test\",\"virtual_clock_v1\"]") != std::string::npos);
+    const auto version_position = diagnostics_json.find("\"version\":");
+    const auto ui_tree_position = diagnostics_json.find(",\"uiTree\":", version_position);
+    assert(version_position != std::string::npos && ui_tree_position != std::string::npos);
+    assert(diagnostics_json.substr(version_position, ui_tree_position - version_position)
+        .find("virtual_clock_v1") == std::string::npos);
     gua_runtime_set_virtual_clock_enabled(runtime, 1);
     gua_runtime_set_adapter_version(runtime, "unity", "0.5.0-preview.3");
     gua_runtime_set_adapter_version(runtime, "Unity", "invalid");

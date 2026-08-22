@@ -62,9 +62,56 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 void filter_runtime_capabilities(std::string& json, bool virtual_clock_enabled)
 {
     if (virtual_clock_enabled) return;
-    const std::string capability = ",\"virtual_clock_v1\"";
-    const auto position = json.find(capability);
-    if (position != std::string::npos) json.erase(position, capability.size());
+    constexpr std::string_view key = "\"capabilities\":[";
+    constexpr std::string_view capability = "\"virtual_clock_v1\"";
+    const auto key_position = json.find(key);
+    if (key_position == std::string::npos) return;
+    const auto array_begin = key_position + key.size();
+    const auto array_end = json.find(']', array_begin);
+    auto position = json.find(capability, array_begin);
+    if (array_end == std::string::npos || position == std::string::npos || position >= array_end) return;
+    auto size = capability.size();
+    if (position > array_begin && json[position - 1] == ',') {
+        --position;
+        ++size;
+    } else if (position + size < array_end && json[position + size] == ',') {
+        ++size;
+    }
+    json.erase(position, size);
+}
+
+std::string core_version_json()
+{
+    const int size = gua_copy_version_json(nullptr, 0);
+    std::string json(static_cast<std::size_t>(size), '\0');
+    gua_copy_version_json(json.data(), size);
+    json.resize(static_cast<std::size_t>(size - 1));
+    return json;
+}
+
+std::string decorate_version_json(gua_runtime_t* runtime, std::string json)
+{
+    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
+    if (!runtime->godot_plugin_version.empty()) {
+        const std::string marker = "\"godotPluginVersion\":null";
+        const auto position = json.find(marker);
+        if (position != std::string::npos)
+            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
+    }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
+    }
+    return json;
 }
 
 std::string copy_ui_tree_json(gua_runtime_t* runtime)
@@ -97,26 +144,13 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     std::string json = gua_get_diagnostics_json(runtime->context);
-    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
-    if (!runtime->godot_plugin_version.empty()) {
-        const std::string marker = "\"godotPluginVersion\":null";
-        const auto position = json.find(marker);
-        if (position != std::string::npos) {
-            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
-        }
-    }
-    const std::string adapter_marker = "\"adapterVersions\":{}";
-    const auto adapter_position = json.find(adapter_marker);
-    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
-        std::string adapters = "\"adapterVersions\":{";
-        bool first = true;
-        for (const auto& [name, version] : runtime->adapter_versions) {
-            if (!first) adapters += ',';
-            first = false;
-            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
-        }
-        adapters += '}';
-        json.replace(adapter_position, adapter_marker.size(), adapters);
+    const std::string unfiltered_version = core_version_json();
+    const std::string decorated_version = decorate_version_json(runtime, unfiltered_version);
+    const std::string marker = ",\"version\":" + unfiltered_version + ",\"uiTree\":";
+    const auto marker_position = json.rfind(marker);
+    if (marker_position != std::string::npos) {
+        const auto version_position = marker_position + std::string_view(",\"version\":").size();
+        json.replace(version_position, unfiltered_version.size(), decorated_version);
     }
     return json;
 }
@@ -133,31 +167,7 @@ bool valid_adapter_name(std::string_view adapter)
 std::string copy_version_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
-    char buffer[2048] {};
-    gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
-    std::string json = buffer;
-    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
-    if (!runtime->godot_plugin_version.empty()) {
-        const std::string marker = "\"godotPluginVersion\":null";
-        const auto position = json.find(marker);
-        if (position != std::string::npos) {
-            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
-        }
-    }
-    const std::string adapter_marker = "\"adapterVersions\":{}";
-    const auto adapter_position = json.find(adapter_marker);
-    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
-        std::string adapters = "\"adapterVersions\":{";
-        bool first = true;
-        for (const auto& [name, version] : runtime->adapter_versions) {
-            if (!first) adapters += ',';
-            first = false;
-            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
-        }
-        adapters += '}';
-        json.replace(adapter_position, adapter_marker.size(), adapters);
-    }
-    return json;
+    return decorate_version_json(runtime, core_version_json());
 }
 
 std::string status_json(gua_runtime_t* runtime)

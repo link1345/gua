@@ -349,6 +349,7 @@ struct gua_context_t {
     double clock_default_step_ms = 1000.0 / 60.0;
     double clock_pending_ms = 0.0;
     double clock_pending_step_ms = 1000.0 / 60.0;
+    double clock_pending_total_ms = 0.0;
     unsigned long long clock_generation = 0;
 };
 
@@ -899,6 +900,7 @@ extern "C" int gua_clock_install(gua_context_t* ctx, double initial_time_ms, dou
     ctx->clock_default_step_ms = step_ms;
     ctx->clock_pending_ms = 0.0;
     ctx->clock_pending_step_ms = step_ms;
+    ctx->clock_pending_total_ms = 0.0;
     ++ctx->clock_generation;
     return GUA_CLOCK_OK;
 }
@@ -924,6 +926,7 @@ extern "C" int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double 
     if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = step_ms;
+    ctx->clock_pending_total_ms = duration_ms;
     return GUA_CLOCK_OK;
 }
 
@@ -947,6 +950,7 @@ extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
     if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
+    ctx->clock_pending_total_ms = duration_ms;
     return GUA_CLOCK_OK;
 }
 
@@ -981,10 +985,15 @@ extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_
     if (ctx == nullptr || out_step == nullptr || out_step->struct_size < sizeof(gua_clock_step_t)) return 0;
     const std::lock_guard lock(ctx->mutex);
     if (!ctx->clock_installed || ctx->clock_pending_ms <= 0.0) return 0;
-    const double delta = std::min(ctx->clock_pending_ms, ctx->clock_pending_step_ms);
-    ctx->clock_pending_ms = std::max(0.0, ctx->clock_pending_ms - delta);
+    const double tolerance = std::numeric_limits<double>::epsilon() * 8.0 *
+        std::max(ctx->clock_pending_total_ms, ctx->clock_pending_step_ms);
+    const bool final_step = ctx->clock_pending_ms <= ctx->clock_pending_step_ms ||
+        ctx->clock_pending_ms - ctx->clock_pending_step_ms <= tolerance;
+    const double delta = final_step ? ctx->clock_pending_ms : ctx->clock_pending_step_ms;
+    ctx->clock_pending_ms = final_step ? 0.0 : ctx->clock_pending_ms - delta;
     ctx->clock_now_ms += delta;
-    *out_step = gua_clock_step_t { sizeof(gua_clock_step_t), delta, ctx->clock_pending_ms <= 0.0 ? 1 : 0, ctx->clock_generation };
+    if (final_step) ctx->clock_pending_total_ms = 0.0;
+    *out_step = gua_clock_step_t { sizeof(gua_clock_step_t), delta, final_step ? 1 : 0, ctx->clock_generation };
     return 1;
 }
 
@@ -1442,7 +1451,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     }
     if ((options->flags & GUA_RESET_CLOCK) != 0U) {
         ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
-        ctx->clock_pending_ms = 0.0; ++ctx->clock_generation;
+        ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ++ctx->clock_generation;
     }
     ctx->frame_sequence = 0;
     ctx->revision = 0;
