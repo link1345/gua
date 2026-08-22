@@ -27,10 +27,14 @@ public sealed class GuaRuntimeClock
         if (callback is null) throw new ArgumentNullException(nameof(callback));
         if (delay < TimeSpan.Zero || interval is { } repeat && repeat <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
         var status = Status;
-        var item = new Scheduled(++sequence, status.Generation, status.NowMilliseconds + delay.TotalMilliseconds, interval?.TotalMilliseconds, callback); scheduled.Add(item); return new Cancel(item);
+        var bindOnInstall = !status.Installed;
+        var item = new Scheduled(++sequence, status.Generation,
+            bindOnInstall ? delay.TotalMilliseconds : status.NowMilliseconds + delay.TotalMilliseconds,
+            interval?.TotalMilliseconds, callback, bindOnInstall); scheduled.Add(item); return new Cancel(item);
     }
     public void Drain()
     {
+        BindPendingSchedules();
         var callbackCount = 0;
         var step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         while (Native.gua_runtime_clock_consume_step(runtime.Handle, ref step) != 0)
@@ -45,8 +49,20 @@ public sealed class GuaRuntimeClock
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }
     }
+    private void BindPendingSchedules()
+    {
+        var status = Status;
+        if (!status.Installed) return;
+        scheduled.RemoveAll(item => item.BindOnInstall && status.Generation != item.Generation + 1);
+        foreach (var item in scheduled.Where(item => item.BindOnInstall))
+        {
+            item.Generation = status.Generation;
+            item.Due = status.NowMilliseconds + item.Due;
+            item.BindOnInstall = false;
+        }
+    }
     private static void Check(int result) { if (result != 1) throw new InvalidOperationException($"Gua clock operation failed: {(GuaClockResult)result}."); }
-    private sealed class Scheduled(long sequence, ulong generation, double due, double? interval, Action callback)
-    { public long Sequence { get; } = sequence; public ulong Generation { get; } = generation; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action Callback { get; } = callback; public bool Cancelled { get; set; } }
+    private sealed class Scheduled(long sequence, ulong generation, double due, double? interval, Action callback, bool bindOnInstall)
+    { public long Sequence { get; } = sequence; public ulong Generation { get; set; } = generation; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action Callback { get; } = callback; public bool BindOnInstall { get; set; } = bindOnInstall; public bool Cancelled { get; set; } }
     private sealed class Cancel(Scheduled item) : IDisposable { public void Dispose() => item.Cancelled = true; }
 }

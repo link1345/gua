@@ -264,7 +264,7 @@ func _bind_pending_clock_schedules(status: Dictionary) -> void:
 	var generation := int(status.get("generation", 0))
 	var now_ms := float(status.get("now_ms", 0.0))
 	for item: Dictionary in clock_schedules:
-		if bool(item.get("bind_on_install", false)):
+		if bool(item.get("bind_on_install", false)) and generation == int(item.get("generation", 0)) + 1:
 			item.generation = generation
 			item.due_ms = now_ms + float(item.get("due_ms", 0.0))
 			item.bind_on_install = false

@@ -17,6 +17,43 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void SchedulesCreatedBeforeInstallationBindToTheFirstClockGeneration()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        var coreCallbackCount = 0;
+        clock.Schedule(TimeSpan.FromMilliseconds(20), () => coreCallbackCount++);
+        clock.Install(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        clock.RunFor(TimeSpan.FromMilliseconds(25));
+
+        using var runtime = new GuaRuntime();
+        var runtimeCallbackCount = 0;
+        runtime.Clock.Schedule(TimeSpan.FromMilliseconds(20), () => runtimeCallbackCount++);
+        runtime.Clock.Install(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(10));
+        runtime.Clock.Pause();
+        runtime.Clock.RunFor(TimeSpan.FromMilliseconds(25));
+
+        using var resetContext = new GuaContext();
+        var resetClock = new GuaClock(resetContext);
+        var staleCallbackCount = 0;
+        resetClock.Schedule(TimeSpan.FromMilliseconds(20), () => staleCallbackCount++);
+        Assert.That(resetContext.Reset().Result, Is.EqualTo(GuaResetResult.Succeeded));
+        resetClock.Install(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(10));
+        resetClock.Pause();
+        resetClock.RunFor(TimeSpan.FromMilliseconds(25));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(coreCallbackCount, Is.EqualTo(1));
+            Assert.That(clock.Status.NowMilliseconds, Is.EqualTo(125));
+            Assert.That(runtimeCallbackCount, Is.EqualTo(1));
+            Assert.That(runtime.Clock.Status.NowMilliseconds, Is.EqualTo(125));
+            Assert.That(staleCallbackCount, Is.Zero);
+        });
+    }
+
+    [Test]
     public void ClockCallbacksCanRunNestedAdvancesWithoutReenteringTheSameSchedule()
     {
         using var context = new GuaContext();
