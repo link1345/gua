@@ -328,6 +328,8 @@ func _run() -> void:
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
 		return
 
+	var preinstall_schedule_count := [0]
+	ui.clock_schedule(20.0, func(): preinstall_schedule_count[0] += 1)
 	ui.clock_install(0.0, 10.0)
 	ui.clock_pause()
 	var clock_order: Array[String] = []
@@ -337,6 +339,9 @@ func _run() -> void:
 	ui.update("title")
 	if clock_order != ["tick:10", "schedule:20", "tick:20", "tick:25"]:
 		_fail("Gua clock did not process schedules and ticks at each step boundary: %s" % [clock_order])
+		return
+	if preinstall_schedule_count[0] != 1:
+		_fail("Gua dropped a game schedule that was registered before clock installation.")
 		return
 	var nested_schedule_order: Array[String] = []
 	var later_schedule_id := ui.clock_schedule(20.0, func(): nested_schedule_order.append("later"))
@@ -362,6 +367,16 @@ func _run() -> void:
 	if interval_count[0] != 1:
 		_fail("Gua clock rescheduled a running interval after it cancelled itself: %d" % interval_count[0])
 		return
+
+	var limited_interval_count := [0]
+	ui.clock_schedule(1.0, func(): limited_interval_count[0] += 1, 1.0)
+	var limit_status := ui.get_clock()
+	var limited_callbacks := ui._drain_clock_schedules(
+		float(limit_status.get("now_ms", 0.0)) + 4.0, int(limit_status.get("generation", 0)), 2)
+	if limited_callbacks != 2 or limited_interval_count[0] != 2 or not ui.clock_schedules.is_empty() or not ui.clock_execution_limit_reached:
+		_fail("Gua clock callback budget did not cancel remaining interval work across the run.")
+		return
+	ui.clock_execution_limit_reached = false
 
 	var stale_schedule_count := [0]
 	ui.clock_schedule(100.0, func(): stale_schedule_count[0] += 1)

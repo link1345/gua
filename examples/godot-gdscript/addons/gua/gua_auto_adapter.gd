@@ -7,6 +7,7 @@ const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
 const RESET_CLOCK_FLAG := 1 << 6
 const RESET_DEFAULT_FLAGS := 79
+const CLOCK_CALLBACK_LIMIT := 1000000
 const CONTEXT_CLASS := "GuaContext"
 const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
 const REBUILD_COMMAND := "cmake --build --preset windows-msvc-debug --target gua-godot"
@@ -59,6 +60,10 @@ var clock_schedules: Array[Dictionary] = []
 var next_clock_schedule_id := 1
 var active_clock_schedule_id := 0
 var active_clock_schedule_cancelled := false
+var clock_run_active := false
+var clock_run_callbacks_remaining := CLOCK_CALLBACK_LIMIT
+var clock_run_generation := -1
+var clock_execution_limit_reached := false
 
 
 func attach(root_control: Control) -> void:
@@ -71,6 +76,7 @@ func update(screen: String) -> void:
 		return
 	var ticks_ms := Time.get_ticks_msec()
 	var clock_status: Dictionary = context.get_clock()
+	_bind_pending_clock_schedules(clock_status)
 	if clock_status.get("installed", false) and clock_status.get("state", "running") == "running":
 		context.clock_advance(maxi(0, ticks_ms - last_clock_ticks_ms))
 	last_clock_ticks_ms = ticks_ms
@@ -78,8 +84,21 @@ func update(screen: String) -> void:
 		var step: Dictionary = context.consume_clock_step()
 		if step.is_empty():
 			break
-		_drain_clock_schedules(float(context.get_clock().get("now_ms", 0.0)), int(step.get("generation", 0)))
+		var step_generation := int(step.get("generation", 0))
+		if not clock_run_active or clock_run_generation != step_generation:
+			clock_run_active = true
+			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
+			clock_run_generation = step_generation
+		clock_run_callbacks_remaining -= _drain_clock_schedules(
+			float(context.get_clock().get("now_ms", 0.0)), step_generation, clock_run_callbacks_remaining)
+		if clock_execution_limit_reached:
+			push_error("Gua clock execution_limit")
+			clock_execution_limit_reached = false
 		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
+		if bool(step.get("final", false)):
+			clock_run_active = false
+			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
+			clock_run_generation = -1
 
 	if root == null:
 		push_error("GuaAutoAdapter.update called before attach.")
@@ -223,7 +242,15 @@ func clock_schedule(delay_ms: float, callback: Callable, interval_ms: float = 0.
 	var schedule_id := next_clock_schedule_id
 	next_clock_schedule_id += 1
 	var status := get_clock()
-	clock_schedules.append({"id": schedule_id, "generation": int(status.get("generation", 0)), "due_ms": float(status.get("now_ms", 0.0)) + delay_ms, "interval_ms": interval_ms, "callback": callback})
+	var bind_on_install := not bool(status.get("installed", false))
+	clock_schedules.append({
+		"id": schedule_id,
+		"generation": int(status.get("generation", 0)),
+		"due_ms": delay_ms if bind_on_install else float(status.get("now_ms", 0.0)) + delay_ms,
+		"bind_on_install": bind_on_install,
+		"interval_ms": interval_ms,
+		"callback": callback,
+	})
 	return schedule_id
 
 func clock_cancel(schedule_id: int) -> void:
@@ -231,16 +258,30 @@ func clock_cancel(schedule_id: int) -> void:
 	if active_clock_schedule_id == schedule_id:
 		active_clock_schedule_cancelled = true
 
-func _drain_clock_schedules(now_ms: float, generation: int) -> void:
+func _bind_pending_clock_schedules(status: Dictionary) -> void:
+	if not bool(status.get("installed", false)):
+		return
+	var generation := int(status.get("generation", 0))
+	var now_ms := float(status.get("now_ms", 0.0))
+	for item: Dictionary in clock_schedules:
+		if bool(item.get("bind_on_install", false)):
+			item.generation = generation
+			item.due_ms = now_ms + float(item.get("due_ms", 0.0))
+			item.bind_on_install = false
+
+func _drain_clock_schedules(now_ms: float, generation: int, callback_budget: int) -> int:
 	clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool: return int(item.get("generation", 0)) == generation)
 	clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 	var callbacks := 0
 	while not clock_schedules.is_empty() and float(clock_schedules[0].due_ms) <= now_ms:
+		if callbacks >= callback_budget:
+			clock_execution_limit_reached = true
+			clock_schedules.clear()
+			active_clock_schedule_id = 0
+			active_clock_schedule_cancelled = false
+			return callbacks
 		callbacks += 1
-		if callbacks > 1000000:
-			push_error("Gua clock execution_limit")
-			return
 		var item: Dictionary = clock_schedules.pop_front()
 		active_clock_schedule_id = int(item.id)
 		active_clock_schedule_cancelled = false
@@ -252,6 +293,7 @@ func _drain_clock_schedules(now_ms: float, generation: int) -> void:
 			return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 		active_clock_schedule_id = 0
 		active_clock_schedule_cancelled = false
+	return callbacks
 
 
 func reset_context(options: Dictionary = {}) -> Dictionary:
@@ -271,6 +313,10 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 			clock_schedules.clear()
 			active_clock_schedule_id = 0
 			active_clock_schedule_cancelled = false
+			clock_run_active = false
+			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
+			clock_run_generation = -1
+			clock_execution_limit_reached = false
 	return report
 
 
