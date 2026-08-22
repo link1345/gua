@@ -45,7 +45,9 @@ struct Command {
     unsigned int reset_flags = 79;
     bool strict = false;
     double initial_time_ms = 0;
+    bool initial_time_ms_valid = true;
     double duration_ms = 0;
+    bool duration_ms_valid = false;
     double step_ms = 0;
     bool step_ms_present = false;
 };
@@ -631,8 +633,12 @@ Command parse_command(std::string_view json)
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
     command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
     command.strict = json_bool_field(json, "strict");
-    command.initial_time_ms = json_number_field(json, "initialTimeMs").value_or(0);
-    command.duration_ms = json_number_field(json, "durationMs").value_or(0);
+    const auto initial_time_ms = json_number_field(json, "initialTimeMs");
+    command.initial_time_ms = initial_time_ms.value_or(0);
+    command.initial_time_ms_valid = !json_has_field(json, "initialTimeMs") || initial_time_ms.has_value();
+    const auto duration_ms = json_number_field(json, "durationMs");
+    command.duration_ms = duration_ms.value_or(0);
+    command.duration_ms_valid = duration_ms.has_value();
     command.step_ms = json_number_field(json, "stepMs").value_or(0);
     command.step_ms_present = json_has_field(json, "stepMs");
     return command;
@@ -957,6 +963,10 @@ private:
                 command.type == "clock_run_for" || command.type == "clock_resume") {
                 if (!handlers_.clock_supported || !handlers_.clock_supported() || !handlers_.control_clock)
                     return error_response(command.id, "unsupported");
+                if (command.type == "clock_install" && !command.initial_time_ms_valid)
+                    return error_response(command.id, "invalid_duration");
+                if (command.type == "clock_run_for" && !command.duration_ms_valid)
+                    return error_response(command.id, "invalid_duration");
                 const auto result = handlers_.control_clock(command.type,
                     command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
                     command.step_ms, command.step_ms_present);

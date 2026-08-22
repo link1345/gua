@@ -248,8 +248,8 @@ func _drain_clock_schedules(now_ms: float, generation: int) -> void:
 		if float(item.interval_ms) > 0.0 and not active_clock_schedule_cancelled:
 			item.due_ms = float(item.due_ms) + float(item.interval_ms)
 			clock_schedules.append(item)
-			clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-				return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
+		clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 		active_clock_schedule_id = 0
 		active_clock_schedule_cancelled = false
 

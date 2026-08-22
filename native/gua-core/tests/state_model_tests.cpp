@@ -148,6 +148,20 @@ int main()
     assert(count_clock_steps(1.0, 0.1) == 10);
     assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
 
+    gua_context_t* magnitude_context = gua_create_context();
+    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(magnitude_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(magnitude_context, 100.0, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    gua_clock_status_t magnitude_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
+    assert(magnitude_status.now_ms == 1e16 && magnitude_status.pending_ms == 0.0);
+    gua_destroy_context(magnitude_context);
+
+    magnitude_context = gua_create_context();
+    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(magnitude_context, 100.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    gua_destroy_context(magnitude_context);
+
     gua::Context cpp_context;
     cpp_context.install_clock(0.0, 10.0);
     cpp_context.pause_clock();

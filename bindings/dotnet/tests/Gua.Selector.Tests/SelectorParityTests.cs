@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
 using Gua.Core;
@@ -375,6 +377,42 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public async Task RemoteClockRejectsMissingDurationAndNonnumericFields()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+        runtime.Clock.Pause();
+        runtime.BeginFrame("fixture");
+        runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+            var missing = await SendRawCommandAsync(socket, "{\"id\":1,\"type\":\"clock_run_for\"}");
+            var nonnumeric = await SendRawCommandAsync(socket,
+                "{\"id\":2,\"type\":\"clock_run_for\",\"durationMs\":\"10\"}");
+            var invalidInitialTime = await SendRawCommandAsync(socket,
+                "{\"id\":3,\"type\":\"clock_install\",\"initialTimeMs\":\"0\"}");
+            Assert.Multiple(() =>
+            {
+                Assert.That(missing.GetProperty("ok").GetBoolean(), Is.False);
+                Assert.That(missing.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(nonnumeric.GetProperty("ok").GetBoolean(), Is.False);
+                Assert.That(nonnumeric.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(invalidInitialTime.GetProperty("ok").GetBoolean(), Is.False);
+                Assert.That(invalidInitialTime.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+            });
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public void RemoteResetRejectsStaleEpochAndKeepsTheConnection()
     {
         var port = ReservePort();
@@ -478,6 +516,29 @@ public sealed class SelectorParityTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static async Task<JsonElement> SendRawCommandAsync(ClientWebSocket socket, string json)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var requestDocument = JsonDocument.Parse(json);
+        var expectedId = requestDocument.RootElement.GetProperty("id").GetInt32();
+        var request = Encoding.UTF8.GetBytes(json);
+        await socket.SendAsync(new ArraySegment<byte>(request), WebSocketMessageType.Text, true, timeout.Token);
+        var buffer = new byte[4096];
+        while (true)
+        {
+            using var response = new MemoryStream();
+            WebSocketReceiveResult received;
+            do
+            {
+                received = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token);
+                response.Write(buffer, 0, received.Count);
+            } while (!received.EndOfMessage);
+            using var document = JsonDocument.Parse(response.ToArray());
+            if (document.RootElement.TryGetProperty("id", out var id) && id.GetInt32() == expectedId)
+                return document.RootElement.Clone();
+        }
     }
 
     private static class Native

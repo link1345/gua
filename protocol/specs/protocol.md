@@ -254,7 +254,9 @@ queued. Consumers wait for both `pendingMs` to reach zero and a semantic frame
 whose sequence is greater than that correlated boundary, because consuming the
 final core step precedes adapter callbacks, tick delivery, and frame publication.
 An explicitly supplied `stepMs` must be positive; only an absent field selects
-the installed default. A remote `clock_pause` is acknowledged only after any
+the installed default. A positive duration or step that cannot advance the
+clock's finite-precision timeline is rejected with `invalid_duration` rather
+than consuming work without changing `nowMs`. A remote `clock_pause` is acknowledged only after any
 already queued running advance has been consumed and its host frame published;
 the lower-level C ABI reports `invalid_state` if pause is attempted while such
 work is still pending.

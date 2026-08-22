@@ -338,6 +338,18 @@ func _run() -> void:
 	if clock_order != ["tick:10", "schedule:20", "tick:20", "tick:25"]:
 		_fail("Gua clock did not process schedules and ticks at each step boundary: %s" % [clock_order])
 		return
+	var nested_schedule_order: Array[String] = []
+	var later_schedule_id := ui.clock_schedule(20.0, func(): nested_schedule_order.append("later"))
+	ui.clock_schedule(10.0, func():
+		nested_schedule_order.append("parent")
+		ui.clock_schedule(0.0, func(): nested_schedule_order.append("nested"))
+	)
+	ui.clock_run_for(10.0)
+	ui.update("title")
+	ui.clock_cancel(later_schedule_id)
+	if nested_schedule_order != ["parent", "nested"]:
+		_fail("Gua clock deferred a due schedule created by a running callback: %s" % [nested_schedule_order])
+		return
 
 	var interval_count := [0]
 	var interval_id := [0]

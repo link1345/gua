@@ -45,6 +45,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [visualResult, setVisualResult] = useState<BrowserVisualResult | null>(null);
   const [secretsJson, setSecretsJson] = useState("{}");
   const [clock, setClock] = useState<GuaClockStatus | null>(null);
+  const clockRequestSequence = useRef(0);
 
   useEffect(() => {
     if (client !== undefined) {
@@ -53,19 +54,29 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
     }
   }, [client]);
 
+  const refreshClock = useCallback(async () => {
+    const sequence = ++clockRequestSequence.current;
+    try {
+      const nextClock = await inspectorClient.getClock();
+      if (sequence === clockRequestSequence.current) setClock(nextClock);
+    } catch {
+      if (sequence === clockRequestSequence.current) setClock(null);
+    }
+  }, [inspectorClient]);
+
   const refresh = useCallback(async () => {
     setStatus("refreshing");
     setError(null);
     try {
       const snapshot = await readSnapshot(inspectorClient);
       setState((current) => updateInspectorState(current, snapshot));
-      try { setClock(await inspectorClient.getClock()); } catch { setClock(null); }
+      await refreshClock();
       setStatus("idle");
     } catch (caught) {
       setError((caught as Error).message);
       setStatus("error");
     }
-  }, [inspectorClient]);
+  }, [inspectorClient, refreshClock]);
 
   useEffect(() => {
     void refresh();
@@ -78,14 +89,16 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
 
     const unsubscribe = maybeSubscribable.subscribeSnapshots?.((snapshot) => {
       setState((current) => updateInspectorState(current, snapshot));
+      void refreshClock();
       setStatus("idle");
       setError(null);
     });
 
     return () => {
+      ++clockRequestSequence.current;
       unsubscribe?.();
     };
-  }, [inspectorClient]);
+  }, [inspectorClient, refreshClock]);
 
   useEffect(() => {
     if (!autoRefresh) {
@@ -102,6 +115,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const connectMock = () => {
     closeClient(inspectorClient);
     setState(createInspectorState());
+    setClock(null);
     setError(null);
     setClientLabel("Mock runtime");
     setInspectorClient(new MockInspectorClient());
@@ -111,6 +125,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
     closeClient(inspectorClient);
     window.localStorage.setItem("gua.inspector.wsUrl", webSocketUrl);
     setState(createInspectorState());
+    setClock(null);
     setError(null);
     setClientLabel(webSocketUrl);
     setInspectorClient(new WebSocketInspectorClient(webSocketUrl));

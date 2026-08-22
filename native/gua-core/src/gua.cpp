@@ -350,10 +350,21 @@ struct gua_context_t {
     double clock_pending_ms = 0.0;
     double clock_pending_step_ms = 1000.0 / 60.0;
     double clock_pending_total_ms = 0.0;
+    double clock_pending_target_ms = 0.0;
     unsigned long long clock_generation = 0;
 };
 
 namespace {
+
+bool clock_operation_representable(double now_ms, double duration_ms, double step_ms, double& target_ms)
+{
+    target_ms = now_ms + duration_ms;
+    if (!std::isfinite(target_ms)) return false;
+    if (duration_ms == 0.0) return true;
+    const double emitted_step_ms = std::min(duration_ms, step_ms);
+    return target_ms > now_ms && now_ms + emitted_step_ms > now_ms &&
+        target_ms - emitted_step_ms < target_ms;
+}
 
 int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 {
@@ -901,6 +912,7 @@ extern "C" int gua_clock_install(gua_context_t* ctx, double initial_time_ms, dou
     ctx->clock_pending_ms = 0.0;
     ctx->clock_pending_step_ms = step_ms;
     ctx->clock_pending_total_ms = 0.0;
+    ctx->clock_pending_target_ms = initial_time_ms;
     ++ctx->clock_generation;
     return GUA_CLOCK_OK;
 }
@@ -923,10 +935,13 @@ extern "C" int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double 
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
     if (!ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
     if (duration_ms / step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
-    if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    double target_ms = 0.0;
+    if (!clock_operation_representable(ctx->clock_now_ms, duration_ms, step_ms, target_ms))
+        return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = step_ms;
     ctx->clock_pending_total_ms = duration_ms;
+    ctx->clock_pending_target_ms = target_ms;
     return GUA_CLOCK_OK;
 }
 
@@ -947,10 +962,13 @@ extern "C" int gua_clock_advance(gua_context_t* ctx, double duration_ms)
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
     if (ctx->clock_paused || ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
     if (duration_ms / ctx->clock_default_step_ms > 1000000.0) return GUA_CLOCK_ERROR_EXECUTION_LIMIT;
-    if (!std::isfinite(ctx->clock_now_ms + duration_ms)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    double target_ms = 0.0;
+    if (!clock_operation_representable(ctx->clock_now_ms, duration_ms, ctx->clock_default_step_ms, target_ms))
+        return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     ctx->clock_pending_ms = duration_ms;
     ctx->clock_pending_step_ms = ctx->clock_default_step_ms;
     ctx->clock_pending_total_ms = duration_ms;
+    ctx->clock_pending_target_ms = target_ms;
     return GUA_CLOCK_OK;
 }
 
@@ -991,7 +1009,7 @@ extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_
         ctx->clock_pending_ms - ctx->clock_pending_step_ms <= tolerance;
     const double delta = final_step ? ctx->clock_pending_ms : ctx->clock_pending_step_ms;
     ctx->clock_pending_ms = final_step ? 0.0 : ctx->clock_pending_ms - delta;
-    ctx->clock_now_ms += delta;
+    ctx->clock_now_ms = final_step ? ctx->clock_pending_target_ms : ctx->clock_now_ms + delta;
     if (final_step) ctx->clock_pending_total_ms = 0.0;
     *out_step = gua_clock_step_t { sizeof(gua_clock_step_t), delta, final_step ? 1 : 0, ctx->clock_generation };
     return 1;
@@ -1451,7 +1469,8 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     }
     if ((options->flags & GUA_RESET_CLOCK) != 0U) {
         ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
-        ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ++ctx->clock_generation;
+        ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ctx->clock_pending_target_ms = 0.0;
+        ++ctx->clock_generation;
     }
     ctx->frame_sequence = 0;
     ctx->revision = 0;
