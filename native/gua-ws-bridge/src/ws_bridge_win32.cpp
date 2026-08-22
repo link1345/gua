@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -552,7 +553,8 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
     if (end == start) {
         return std::nullopt;
     }
-    return std::stoi(std::string(json.substr(start, end - start)));
+    try { return std::stoi(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<unsigned long long> json_uint64_field(std::string_view json, std::string_view field)
@@ -567,7 +569,8 @@ std::optional<unsigned long long> json_uint64_field(std::string_view json, std::
     std::size_t end = start;
     while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
     if (end == start) return std::nullopt;
-    return std::stoull(std::string(json.substr(start, end - start)));
+    try { return std::stoull(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<double> json_number_field(std::string_view json, std::string_view field)
@@ -582,7 +585,14 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
     std::size_t end = start;
     while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.' || json[end] == 'e' || json[end] == 'E')) ++end;
     if (end == start) return std::nullopt;
-    return std::stod(std::string(json.substr(start, end - start)));
+    try {
+        std::size_t parsed = 0;
+        const std::string token(json.substr(start, end - start));
+        const double value = std::stod(token, &parsed);
+        return parsed == token.size() && std::isfinite(value) ? std::optional<double>(value) : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 bool json_has_field(std::string_view json, std::string_view field)

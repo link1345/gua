@@ -105,12 +105,16 @@ int main()
     assert(gua_clock_consume_step(pause_context, &clock_step) == 1);
     assert(gua_clock_pause(pause_context) == GUA_CLOCK_OK);
     assert(gua_clock_run_for(pause_context, 10.0, 10.0) == GUA_CLOCK_OK);
+    gua_reset_options_t clock_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
+    gua_reset_report_t clock_reset_report { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(pause_context, &clock_reset, &clock_reset_report) == GUA_RESET_SUCCEEDED);
+    gua_clock_operation_status_t reset_operation_status { sizeof(gua_clock_operation_status_t) };
+    assert(gua_clock_get_operation_status(pause_context, &reset_operation_status) == 1);
+    assert(reset_operation_status.latest_operation_sequence == reset_operation_status.completed_operation_sequence);
     gua_destroy_context(pause_context);
 
     gua_context_t* overflow_context = gua_create_context();
-    assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_OK);
-    assert(gua_clock_pause(overflow_context) == GUA_CLOCK_OK);
-    assert(gua_clock_run_for(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
     assert(gua_clock_get_status(overflow_context, &clock_status) == 1 &&
         std::isfinite(clock_status.now_ms) && clock_status.pending_ms == 0.0);
     gua_destroy_context(overflow_context);
@@ -149,17 +153,38 @@ int main()
     assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
 
     gua_context_t* magnitude_context = gua_create_context();
-    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_OK);
+    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_install(magnitude_context, 1e16, 3.0) == GUA_CLOCK_OK);
     assert(gua_clock_pause(magnitude_context) == GUA_CLOCK_OK);
-    assert(gua_clock_run_for(magnitude_context, 100.0, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_run_for(magnitude_context, 100.0, 3.0) == GUA_CLOCK_OK);
     gua_clock_status_t magnitude_status { sizeof(gua_clock_status_t) };
+    double previous_now = 1e16;
+    int magnitude_steps = 0;
+    gua_clock_step_t magnitude_step { sizeof(gua_clock_step_t) };
+    while (gua_clock_consume_step(magnitude_context, &magnitude_step) == 1) {
+        assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
+        assert(magnitude_status.now_ms > previous_now);
+        previous_now = magnitude_status.now_ms;
+        ++magnitude_steps;
+        magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    }
     assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
-    assert(magnitude_status.now_ms == 1e16 && magnitude_status.pending_ms == 0.0);
+    assert(magnitude_steps == 33 && magnitude_status.now_ms == 1e16 + 100.0 && magnitude_status.pending_ms == 0.0);
+    gua_clock_operation_status_t operation_status { sizeof(gua_clock_operation_status_t) };
+    assert(gua_clock_get_operation_status(magnitude_context, &operation_status) == 1);
+    assert(operation_status.latest_operation_sequence == 1 && operation_status.completed_operation_sequence == 0);
+    gua_begin_frame(magnitude_context, "clock-complete"); gua_end_frame(magnitude_context);
+    assert(gua_clock_get_operation_status(magnitude_context, &operation_status) == 1);
+    assert(operation_status.completed_operation_sequence == 1);
     gua_destroy_context(magnitude_context);
 
     magnitude_context = gua_create_context();
-    assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_OK);
-    assert(gua_clock_advance(magnitude_context, 100.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_clock_install(magnitude_context, 1e16, 3.0) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(magnitude_context, 100.0) == GUA_CLOCK_OK);
+    magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    while (gua_clock_consume_step(magnitude_context, &magnitude_step) == 1)
+        magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1 && magnitude_status.now_ms == 1e16 + 100.0);
     gua_destroy_context(magnitude_context);
 
     gua::Context cpp_context;

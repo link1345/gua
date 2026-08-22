@@ -248,11 +248,13 @@ subsystem that needs to be controlled. Adapters must continue their unscaled
 bridge pump while the Gua clock is paused. An adapter must opt in to capability
 `virtual_clock_v1` only after it implements that pump and consumes every clock
 step; a bare runtime bridge does not advertise the capability. Remote
-`clock_run_for` responses include `completionSessionEpoch` and
-`completionAfterFrameSequence`, captured atomically when the operation is
-queued. Consumers wait for both `pendingMs` to reach zero and a semantic frame
-whose sequence is greater than that correlated boundary, because consuming the
-final core step precedes adapter callbacks, tick delivery, and frame publication.
+`clock_run_for` responses include `operationSequence`, `completionSessionEpoch`,
+and `completionAfterFrameSequence`, captured atomically when the operation is
+queued. After consuming the final step, the core acknowledges that operation
+sequence on the adapter's next successfully published semantic frame. Consumers
+wait for `completedOperationSequence` to reach their own operation sequence and
+for the semantic frame to pass the correlated boundary. They do not use global
+`pendingMs` as completion evidence because it may belong to a later client run.
 An explicitly supplied `stepMs` must be positive; only an absent field selects
 the installed default. A positive duration or step that cannot advance the
 clock's finite-precision timeline is rejected with `invalid_duration` rather

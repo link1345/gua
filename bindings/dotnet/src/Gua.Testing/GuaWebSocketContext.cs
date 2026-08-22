@@ -30,14 +30,15 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
     {
         var status = Request<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step));
-        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame)
+        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame ||
+            status.OperationSequence is not { } operationSequence)
             throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
         var deadline = DateTime.UtcNow + requestTimeout;
         while (DateTime.UtcNow < deadline)
         {
             var context = GetContextStatus();
             if (context.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
-            if (status.PendingMs <= 0 && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            if (status.CompletedOperationSequence >= operationSequence && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
             Thread.Sleep(5);
             status = Request<RemoteClockStatus>(new { type = "get_clock" });
         }
@@ -46,7 +47,8 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
     public async Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default)
     {
         var status = await RequestAsync<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
-        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame)
+        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame ||
+            status.OperationSequence is not { } operationSequence)
             throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
         var deadline = DateTime.UtcNow + requestTimeout;
         while (DateTime.UtcNow < deadline)
@@ -54,7 +56,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
             cancellationToken.ThrowIfCancellationRequested();
             var context = await RequestAsync<Status>(new { type = "get_context_status" }, cancellationToken).ConfigureAwait(false);
             if (context.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
-            if (status.PendingMs <= 0 && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            if (status.CompletedOperationSequence >= operationSequence && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
             await Task.Delay(5, cancellationToken).ConfigureAwait(false);
             status = await RequestAsync<RemoteClockStatus>(new { type = "get_clock" }, cancellationToken).ConfigureAwait(false);
         }
@@ -216,6 +218,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
 
     private sealed record ActionResult(ulong RequestId);
     private sealed record RemoteClockStatus(bool Installed, string State, double NowMs, double DefaultStepMs, double PendingMs, ulong Generation,
+        ulong CompletedOperationSequence = 0, ulong? OperationSequence = null,
         ulong? CompletionSessionEpoch = null, ulong? CompletionAfterFrameSequence = null);
     private sealed record EventResult(ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive, ulong SessionEpoch, ulong FrameSequence, ulong Revision);
     private sealed record Status(ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);

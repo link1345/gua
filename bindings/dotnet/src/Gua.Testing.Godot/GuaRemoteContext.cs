@@ -59,14 +59,15 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
     {
         var clock = Request<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step));
-        if (clock.CompletionSessionEpoch is not { } completionEpoch || clock.CompletionAfterFrameSequence is not { } completionFrame)
+        if (clock.CompletionSessionEpoch is not { } completionEpoch || clock.CompletionAfterFrameSequence is not { } completionFrame ||
+            clock.OperationSequence is not { } operationSequence)
             throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
         var deadline = DateTime.UtcNow + _requestTimeout;
         while (DateTime.UtcNow < deadline)
         {
             var context = GetContextStatus();
             if (context.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
-            if (clock.PendingMs <= 0 && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            if (clock.CompletedOperationSequence >= operationSequence && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
             Thread.Sleep(5);
             clock = Request<RemoteClockStatus>(new { type = "get_clock" });
         }
@@ -76,7 +77,8 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
     public async Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default)
     {
         var clock = await RequestAsync<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
-        if (clock.CompletionSessionEpoch is not { } completionEpoch || clock.CompletionAfterFrameSequence is not { } completionFrame)
+        if (clock.CompletionSessionEpoch is not { } completionEpoch || clock.CompletionAfterFrameSequence is not { } completionFrame ||
+            clock.OperationSequence is not { } operationSequence)
             throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
         var deadline = DateTime.UtcNow + _requestTimeout;
         while (DateTime.UtcNow < deadline)
@@ -84,7 +86,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             cancellationToken.ThrowIfCancellationRequested();
             var status = await RequestAsync<ContextStatusResult>(new { type = "get_context_status" }, cancellationToken).ConfigureAwait(false);
             if (status.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
-            if (clock.PendingMs <= 0 && status.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            if (clock.CompletedOperationSequence >= operationSequence && status.FrameSequence > completionFrame) return GuaClockResult.Ok;
             await Task.Delay(5, cancellationToken).ConfigureAwait(false);
             clock = await RequestAsync<RemoteClockStatus>(new { type = "get_clock" }, cancellationToken).ConfigureAwait(false);
         }
@@ -607,6 +609,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
 
     private sealed record ActionRequestResult(ulong RequestId);
     private sealed record RemoteClockStatus(bool Installed, string State, double NowMs, double DefaultStepMs, double PendingMs, ulong Generation,
+        ulong CompletedOperationSequence = 0, ulong? OperationSequence = null,
         ulong? CompletionSessionEpoch = null, ulong? CompletionAfterFrameSequence = null);
     private sealed record ActionEventResult(
         ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive,

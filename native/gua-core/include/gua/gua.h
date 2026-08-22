@@ -55,6 +55,13 @@ typedef struct gua_clock_step_t {
     uint64_t generation;
 } gua_clock_step_t;
 
+typedef struct gua_clock_operation_status_t {
+    uint32_t struct_size;
+    uint64_t latest_operation_sequence;
+    uint64_t pending_operation_sequence;
+    uint64_t completed_operation_sequence;
+} gua_clock_operation_status_t;
+
 enum {
     GUA_ACTION_ACCEPTED = 1,
     GUA_ACTION_ERROR_INVALID_ARGUMENT = -1,
@@ -353,6 +360,7 @@ int gua_clock_run_for(gua_context_t* ctx, double duration_ms, double step_ms);
 int gua_clock_advance(gua_context_t* ctx, double duration_ms);
 int gua_clock_resume(gua_context_t* ctx);
 int gua_clock_get_status(gua_context_t* ctx, gua_clock_status_t* out_status);
+int gua_clock_get_operation_status(gua_context_t* ctx, gua_clock_operation_status_t* out_status);
 int gua_clock_copy_status_json(gua_context_t* ctx, char* out_json, int out_json_size);
 int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);

@@ -70,7 +70,8 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
 }
 
 class DemoRuntime {
-  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0 };
+  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0, completedOperationSequence: 0 };
+  private nextClockOperationSequence = 1;
   private screen: "title" | "loading" = "title";
   private focusedNodeId = "start";
   private frameSequence = 1;
@@ -127,9 +128,14 @@ class DemoRuntime {
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
     if (step !== undefined && step <= 0) throw new Error("invalid_duration");
+    const operationSequence = this.nextClockOperationSequence++;
     this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration };
-    const result = { ...this.clock, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
-    setTimeout(() => { this.frameSequence += 1; this.revision += 1; }, 0);
+    const result = { ...this.clock, operationSequence, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
+    setTimeout(() => {
+      this.clock = { ...this.clock, completedOperationSequence: operationSequence };
+      this.frameSequence += 1;
+      this.revision += 1;
+    }, 0);
     return result;
   }
   resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }

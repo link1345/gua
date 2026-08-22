@@ -772,16 +772,17 @@ class GuaBridgeClient {
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
   {
-    let result = await this.request<{ pendingMs?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command);
+    let result = await this.request<{ pendingMs?: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command);
     if (command.type !== "clock_run_for") return result;
     const completionEpoch = result.completionSessionEpoch;
     const completionFrame = result.completionAfterFrameSequence;
-    if (completionEpoch === undefined || completionFrame === undefined) throw new Error("unsupported");
+    const operationSequence = result.operationSequence;
+    if (completionEpoch === undefined || completionFrame === undefined || operationSequence === undefined) throw new Error("unsupported");
     const started = Date.now();
     while (Date.now() - started < 10000) {
       const tree = await this.getUiTree();
       if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
-      if ((result.pendingMs ?? 0) <= 0 && (tree.frameSequence ?? 0) > completionFrame) return result;
+      if ((result.completedOperationSequence ?? 0) >= operationSequence && (tree.frameSequence ?? 0) > completionFrame) return result;
       await sleep(5);
       const status = await this.request<{
         schemaVersion: number;
@@ -791,6 +792,7 @@ class GuaBridgeClient {
         defaultStepMs: number;
         pendingMs: number;
         generation: number;
+        completedOperationSequence?: number;
       }>({ type: "get_clock" });
       result = { ...result, ...status };
     }

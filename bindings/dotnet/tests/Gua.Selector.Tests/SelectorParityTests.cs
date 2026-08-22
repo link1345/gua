@@ -286,7 +286,9 @@ public sealed class SelectorParityTests
         try
         {
             using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            using var secondRemote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
             remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            secondRemote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
             Assert.That(remote.GetVersion().Capabilities, Does.Contain("virtual_clock_v1"));
             GuaClockControls.InstallClock(remote, step: TimeSpan.FromMilliseconds(10));
             GuaClockControls.PauseClock(remote);
@@ -297,17 +299,26 @@ public sealed class SelectorParityTests
             await Task.Delay(50);
             Assert.That(runFor.IsCompleted, Is.False, "Core pendingMs=0 must not complete run_for before the adapter publishes its frame.");
 
+            var secondRunFor = Task.Run(() => GuaClockControls.RunClockFor(secondRemote, TimeSpan.FromMilliseconds(100)));
+            Assert.That(SpinWait.SpinUntil(() => runtime.Clock.Status.PendingMilliseconds > 0, TimeSpan.FromSeconds(2)), Is.True);
             runtime.BeginFrame("fixture");
             runtime.EndFrame();
             var status = await runFor.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.That(status.NowMilliseconds, Is.EqualTo(25));
+            Assert.That(secondRunFor.IsCompleted, Is.False,
+                "Run A must complete from its own operation sequence without waiting for run B, while run B remains pending.");
+
+            runtime.Clock.Advance(TimeSpan.Zero);
+            runtime.BeginFrame("fixture"); runtime.EndFrame();
+            var secondStatus = await secondRunFor.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(secondStatus.NowMilliseconds, Is.EqualTo(125));
 
             var fastRunFor = Task.Run(() => GuaClockControls.RunClockFor(remote, TimeSpan.FromMilliseconds(5)));
             Assert.That(SpinWait.SpinUntil(() => runtime.Clock.Status.PendingMilliseconds > 0, TimeSpan.FromSeconds(2)), Is.True);
             runtime.Clock.Advance(TimeSpan.Zero);
             runtime.BeginFrame("fixture"); runtime.EndFrame();
             var fastStatus = await fastRunFor.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.That(fastStatus.NowMilliseconds, Is.EqualTo(30),
+            Assert.That(fastStatus.NowMilliseconds, Is.EqualTo(130),
                 "The correlated completion frame may be published before the client receives clock_run_for's response.");
         }
         finally
@@ -368,6 +379,18 @@ public sealed class SelectorParityTests
             Assert.That(pause.IsCompleted, Is.False, "Pause must wait for host frame publication, not only core step consumption.");
             Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
             Assert.That(await pause.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(GuaClockResult.Ok));
+
+            Assert.That(Native.gua_runtime_clock_resume(runtime), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_clock_advance(runtime, 10), Is.EqualTo(1));
+            step = new NativeClockStep { StructSize = (uint)Marshal.SizeOf<NativeClockStep>() };
+            Assert.That(Native.gua_runtime_clock_consume_step(runtime, ref step), Is.EqualTo(1));
+
+            var latePause = Task.Run(remote.PauseClock);
+            await Task.Delay(30);
+            Assert.That(latePause.IsCompleted, Is.False,
+                "Pause must wait when the running step was consumed but its host frame is not published yet.");
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(await latePause.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(GuaClockResult.Ok));
         }
         finally
         {
@@ -396,6 +419,9 @@ public sealed class SelectorParityTests
                 "{\"id\":2,\"type\":\"clock_run_for\",\"durationMs\":\"10\"}");
             var invalidInitialTime = await SendRawCommandAsync(socket,
                 "{\"id\":3,\"type\":\"clock_install\",\"initialTimeMs\":\"0\"}");
+            var outOfRange = await SendRawCommandAsync(socket,
+                "{\"id\":4,\"type\":\"clock_run_for\",\"durationMs\":1e999}");
+            var statusAfterError = await SendRawCommandAsync(socket, "{\"id\":5,\"type\":\"get_clock\"}");
             Assert.Multiple(() =>
             {
                 Assert.That(missing.GetProperty("ok").GetBoolean(), Is.False);
@@ -404,6 +430,10 @@ public sealed class SelectorParityTests
                 Assert.That(nonnumeric.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(invalidInitialTime.GetProperty("ok").GetBoolean(), Is.False);
                 Assert.That(invalidInitialTime.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(outOfRange.GetProperty("ok").GetBoolean(), Is.False);
+                Assert.That(outOfRange.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(statusAfterError.GetProperty("ok").GetBoolean(), Is.True,
+                    "An out-of-range number must not close the WebSocket connection.");
             });
         }
         finally
@@ -569,6 +599,8 @@ public sealed class SelectorParityTests
         internal static extern int gua_runtime_clock_install(nint runtime, double initialTimeMs, double stepMs);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int gua_runtime_clock_advance(nint runtime, double durationMs);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_clock_resume(nint runtime);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern int gua_runtime_clock_consume_step(nint runtime, ref NativeClockStep step);
     }
