@@ -52,6 +52,7 @@ public:
     Dictionary get_clock() const;
     Dictionary consume_clock_step();
     Array consume_clock_steps();
+    void enable_virtual_clock_adapter();
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

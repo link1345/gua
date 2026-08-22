@@ -39,7 +39,8 @@ public sealed class GuaRuntimeClock
             var now = Status.NowMilliseconds;
             while (scheduled.Where(x => !x.Cancelled && x.Due <= now).OrderBy(x => x.Due).ThenBy(x => x.Sequence).FirstOrDefault() is { } item)
             { if (++callbackCount > 1_000_000) throw new InvalidOperationException("Gua clock execution_limit.");
-              if (item.Cancelled) continue; item.Callback(); if (item.Interval is { } interval) item.Due += interval; else item.Cancelled = true; }
+              if (item.Cancelled) continue; scheduled.Remove(item); item.Callback();
+              if (item.Interval is { } interval && !item.Cancelled) { item.Due += interval; scheduled.Add(item); } else item.Cancelled = true; }
             scheduled.RemoveAll(x => x.Cancelled); Tick?.Invoke(TimeSpan.FromMilliseconds(step.DeltaMs));
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }

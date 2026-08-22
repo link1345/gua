@@ -18,8 +18,16 @@ public static class GuaClockControls
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(InstallClock(context, initialTime, step)); }
     public static Task<GuaClockStatus> PauseClockAsync(IGuaContext context, CancellationToken cancellationToken = default)
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(PauseClock(context)); }
-    public static Task<GuaClockStatus> RunClockForAsync(IGuaContext context, TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default)
-    { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(RunClockFor(context, duration, step)); }
+    public static async Task<GuaClockStatus> RunClockForAsync(IGuaContext context, TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (context is IGuaAsyncClockContext asyncClock)
+        {
+            Ensure(await asyncClock.RunClockForAsync(duration, step, cancellationToken).ConfigureAwait(false));
+            return Require(context).GetClockStatus();
+        }
+        return RunClockFor(context, duration, step);
+    }
     public static Task<GuaClockStatus> ResumeClockAsync(IGuaContext context, CancellationToken cancellationToken = default)
     { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(ResumeClock(context)); }
 

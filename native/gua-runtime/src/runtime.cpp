@@ -561,11 +561,6 @@ extern "C" int gua_runtime_clock_run_for(gua_runtime_t* runtime, double duration
 {
     if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(runtime->context_mutex);
-    if (step_ms == 0.0) {
-        gua_clock_status_t status { sizeof(gua_clock_status_t) };
-        if (gua_clock_get_status(runtime->context, &status) == 0) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
-        step_ms = status.default_step_ms;
-    }
     return gua_clock_run_for(runtime->context, duration_ms, step_ms);
 }
 
@@ -875,22 +870,72 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
         },
-        .control_clock = [runtime](std::string_view command, double value_ms, double step_ms) {
-            int result = GUA_CLOCK_ERROR_INVALID_ARGUMENT;
-            if (command == "clock_install") result = gua_runtime_clock_install(runtime, value_ms, step_ms == 0.0 ? 1000.0 / 60.0 : step_ms);
-            else if (command == "clock_pause") result = gua_runtime_clock_pause(runtime);
-            else if (command == "clock_run_for") result = gua_runtime_clock_run_for(runtime, value_ms, step_ms);
-            else if (command == "clock_resume") result = gua_runtime_clock_resume(runtime);
-            if (result != GUA_CLOCK_OK) {
-                const char* error = result == GUA_CLOCK_ERROR_NOT_INSTALLED ? "not_installed" :
+        .control_clock = [runtime](std::string_view command, double value_ms, double step_ms, bool step_ms_present) {
+            const auto clock_error = [](int result) {
+                return result == GUA_CLOCK_ERROR_NOT_INSTALLED ? "not_installed" :
                     result == GUA_CLOCK_ERROR_INVALID_STATE ? "invalid_state" :
                     result == GUA_CLOCK_ERROR_EXECUTION_LIMIT ? "execution_limit" : "invalid_duration";
-                return gua::ws::CommandResult { false, {}, error };
+            };
+            const auto copy_clock = [runtime] {
+                const int size = gua_clock_copy_status_json(runtime->context, nullptr, 0);
+                std::string json(static_cast<std::size_t>(size), '\0');
+                gua_clock_copy_status_json(runtime->context, json.data(), size);
+                json.resize(static_cast<std::size_t>(size - 1));
+                return json;
+            };
+
+            if (command == "clock_pause") {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                bool waiting_for_frame = false;
+                unsigned long long completion_after_frame = 0;
+                unsigned long long session_epoch = 0;
+                while (std::chrono::steady_clock::now() < deadline) {
+                    {
+                        const std::lock_guard lock(runtime->context_mutex);
+                        gua_clock_status_t clock { sizeof(gua_clock_status_t) };
+                        gua_context_status_t context { sizeof(gua_context_status_t) };
+                        if (gua_clock_get_status(runtime->context, &clock) == 0 ||
+                            gua_get_context_status(runtime->context, &context) == 0)
+                            return gua::ws::CommandResult { false, {}, "invalid_state" };
+                        if (waiting_for_frame && context.session_epoch != session_epoch)
+                            return gua::ws::CommandResult { false, {}, "stale_session" };
+                        if (clock.pending_ms > 0.0) {
+                            waiting_for_frame = true;
+                            completion_after_frame = context.frame_sequence;
+                            session_epoch = context.session_epoch;
+                        } else if (!waiting_for_frame || context.frame_sequence > completion_after_frame) {
+                            const int result = gua_clock_pause(runtime->context);
+                            if (result == GUA_CLOCK_OK)
+                                return gua::ws::CommandResult { true, copy_clock(), {} };
+                            if (result != GUA_CLOCK_ERROR_INVALID_STATE)
+                                return gua::ws::CommandResult { false, {}, clock_error(result) };
+                        }
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                return gua::ws::CommandResult { false, {}, "invalid_state" };
             }
-            const int size = gua_runtime_clock_copy_status_json(runtime, nullptr, 0);
-            std::string json(static_cast<std::size_t>(size), '\0');
-            gua_runtime_clock_copy_status_json(runtime, json.data(), size);
-            json.resize(static_cast<std::size_t>(size - 1));
+
+            const std::lock_guard lock(runtime->context_mutex);
+            int result = GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+            gua_context_status_t completion_context { sizeof(gua_context_status_t) };
+            if (command == "clock_install")
+                result = gua_clock_install(runtime->context, value_ms, step_ms_present ? step_ms : 1000.0 / 60.0);
+            else if (command == "clock_run_for") {
+                gua_clock_status_t clock { sizeof(gua_clock_status_t) };
+                if (gua_clock_get_status(runtime->context, &clock) != 0 &&
+                    gua_get_context_status(runtime->context, &completion_context) != 0)
+                    result = gua_clock_run_for(runtime->context, value_ms, step_ms_present ? step_ms : clock.default_step_ms);
+            } else if (command == "clock_resume") result = gua_clock_resume(runtime->context);
+            if (result != GUA_CLOCK_OK) {
+                return gua::ws::CommandResult { false, {}, clock_error(result) };
+            }
+            std::string json = copy_clock();
+            if (command == "clock_run_for") {
+                json.pop_back();
+                json += ",\"completionSessionEpoch\":" + std::to_string(completion_context.session_epoch) +
+                    ",\"completionAfterFrameSequence\":" + std::to_string(completion_context.frame_sequence) + '}';
+            }
             return gua::ws::CommandResult { true, std::move(json), {} };
         },
         .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {

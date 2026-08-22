@@ -97,6 +97,16 @@ int main()
     assert(gua_clock_advance(context, 10000001.0) == GUA_CLOCK_ERROR_EXECUTION_LIMIT);
     assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.pending_ms == 0.0);
 
+    gua_context_t* pause_context = gua_create_context();
+    assert(gua_clock_install(pause_context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_advance(pause_context, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(pause_context) == GUA_CLOCK_ERROR_INVALID_STATE);
+    clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(pause_context, &clock_step) == 1);
+    assert(gua_clock_pause(pause_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(pause_context, 10.0, 10.0) == GUA_CLOCK_OK);
+    gua_destroy_context(pause_context);
+
     gua_context_t* overflow_context = gua_create_context();
     assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_OK);
     assert(gua_clock_pause(overflow_context) == GUA_CLOCK_OK);

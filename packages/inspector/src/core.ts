@@ -45,7 +45,7 @@ export interface GuaScreenshot {
   width: number;
   height: number;
 }
-export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; }
+export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
 
 export interface InspectorPanel {
   id: "tree" | "node" | "screenshot" | "logs";
@@ -401,12 +401,14 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   async pauseClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_pause" }); }
   async runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus> {
     let status = await this.request<GuaClockStatus>({ type: "clock_run_for", durationMs, stepMs });
-    const before = await this.getUiTree();
+    const completionEpoch = status.completionSessionEpoch;
+    const completionFrame = status.completionAfterFrameSequence;
+    if (completionEpoch === undefined || completionFrame === undefined) throw new Error("unsupported");
     const started = Date.now();
     while (Date.now() - started < this.requestTimeoutMs) {
       const tree = await this.getUiTree();
-      if (tree.sessionEpoch !== before.sessionEpoch) throw new Error("stale_session");
-      if (status.pendingMs <= 0 && tree.frameSequence > before.frameSequence) return status;
+      if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
+      if (status.pendingMs <= 0 && tree.frameSequence > completionFrame) return status;
       await new Promise((resolve) => window.setTimeout(resolve, 5));
       status = await this.getClock();
     }

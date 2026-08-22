@@ -15,6 +15,39 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void ClockCallbacksCanRunNestedAdvancesWithoutReenteringTheSameSchedule()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        var callbacks = 0;
+        clock.Schedule(TimeSpan.FromMilliseconds(10), () =>
+        {
+            callbacks++;
+            clock.RunFor(TimeSpan.FromMilliseconds(10));
+        });
+        clock.RunFor(TimeSpan.FromMilliseconds(10));
+        Assert.Multiple(() =>
+        {
+            Assert.That(callbacks, Is.EqualTo(1));
+            Assert.That(clock.Status.NowMilliseconds, Is.EqualTo(20));
+        });
+
+        using var runtime = new GuaRuntime();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+        runtime.Clock.Pause();
+        var runtimeCallbacks = 0;
+        runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () =>
+        {
+            runtimeCallbacks++;
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
+        });
+        runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
+        Assert.That(runtimeCallbacks, Is.EqualTo(1));
+    }
+
+    [Test]
     public void RemoteTreeDeserializesProtocolBoundsAndNestedState()
     {
         const string json = """
@@ -262,10 +295,78 @@ public sealed class SelectorParityTests
             runtime.EndFrame();
             var status = await runFor.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.That(status.NowMilliseconds, Is.EqualTo(25));
+
+            var fastRunFor = Task.Run(() => GuaClockControls.RunClockFor(remote, TimeSpan.FromMilliseconds(5)));
+            Assert.That(SpinWait.SpinUntil(() => runtime.Clock.Status.PendingMilliseconds > 0, TimeSpan.FromSeconds(2)), Is.True);
+            runtime.Clock.Advance(TimeSpan.Zero);
+            runtime.BeginFrame("fixture"); runtime.EndFrame();
+            var fastStatus = await fastRunFor.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(fastStatus.NowMilliseconds, Is.EqualTo(30),
+                "The correlated completion frame may be published before the client receives clock_run_for's response.");
         }
         finally
         {
             runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public async Task RemoteRunForRejectsExplicitZeroStepsAndHonorsCancellation()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(() => remote.InstallClock(step: TimeSpan.Zero), Throws.InvalidOperationException);
+            remote.InstallClock(step: TimeSpan.FromMilliseconds(10));
+            remote.PauseClock();
+            Assert.That(() => remote.RunClockFor(TimeSpan.FromMilliseconds(10), TimeSpan.Zero), Throws.InvalidOperationException);
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            var stopwatch = Stopwatch.StartNew();
+            Assert.That(async () =>
+                await GuaClockControls.RunClockForAsync(remote, TimeSpan.FromMilliseconds(25), cancellationToken: cancellation.Token),
+                Throws.InstanceOf<OperationCanceledException>());
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(1)));
+        }
+        finally { runtime.StopInspectorBridge(); }
+    }
+
+    [Test]
+    public async Task RemotePauseWaitsForAnInFlightRunningStepAndItsHostFrame()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Native.gua_runtime_set_virtual_clock_enabled(runtime, 1);
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(Native.gua_runtime_clock_install(runtime, 0, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_clock_advance(runtime, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+
+            var pause = Task.Run(remote.PauseClock);
+            await Task.Delay(30);
+            Assert.That(pause.IsCompleted, Is.False);
+            var step = new NativeClockStep { StructSize = (uint)Marshal.SizeOf<NativeClockStep>() };
+            Assert.That(Native.gua_runtime_clock_consume_step(runtime, ref step), Is.EqualTo(1));
+            await Task.Delay(30);
+            Assert.That(pause.IsCompleted, Is.False, "Pause must wait for host frame publication, not only core step consumption.");
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(await pause.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(GuaClockResult.Ok));
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
         }
     }
 
@@ -397,5 +498,22 @@ public sealed class SelectorParityTests
         internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void gua_runtime_stop_inspector_bridge(nint runtime);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void gua_runtime_set_virtual_clock_enabled(nint runtime, int enabled);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_clock_install(nint runtime, double initialTimeMs, double stepMs);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_clock_advance(nint runtime, double durationMs);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int gua_runtime_clock_consume_step(nint runtime, ref NativeClockStep step);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeClockStep
+    {
+        public uint StructSize;
+        public double DeltaMs;
+        public int FinalStep;
+        public ulong Generation;
     }
 }

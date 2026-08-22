@@ -12,6 +12,8 @@
     "nowMs": { "type": "number", "minimum": 0 },
     "defaultStepMs": { "type": "number", "exclusiveMinimum": 0 },
     "pendingMs": { "type": "number", "minimum": 0 },
-    "generation": { "type": "integer", "minimum": 0 }
+    "generation": { "type": "integer", "minimum": 0 },
+    "completionSessionEpoch": { "type": "integer", "minimum": 1 },
+    "completionAfterFrameSequence": { "type": "integer", "minimum": 0 }
   }
 }

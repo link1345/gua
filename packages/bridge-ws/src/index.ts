@@ -122,13 +122,15 @@ class DemoRuntime {
     };
   }
   getClock() { return this.clock; }
-  installClock(initial = 0, step = 1000 / 60) { this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) { if (step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
   pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
+    if (step !== undefined && step <= 0) throw new Error("invalid_duration");
     this.clock = { ...this.clock, nowMs: this.clock.nowMs + duration, defaultStepMs: step ?? this.clock.defaultStepMs };
+    const result = { ...this.clock, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
     setTimeout(() => { this.frameSequence += 1; this.revision += 1; }, 0);
-    return this.clock;
+    return result;
   }
   resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
 

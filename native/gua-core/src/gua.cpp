@@ -908,6 +908,7 @@ extern "C" int gua_clock_pause(gua_context_t* ctx)
     if (ctx == nullptr) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(ctx->mutex);
     if (!ctx->clock_installed) return GUA_CLOCK_ERROR_NOT_INSTALLED;
+    if (ctx->clock_pending_ms > 0.0) return GUA_CLOCK_ERROR_INVALID_STATE;
     ctx->clock_paused = true;
     return GUA_CLOCK_OK;
 }

@@ -772,17 +772,19 @@ class GuaBridgeClient {
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
   {
-    let result = await this.request<{ pendingMs?: number }>(command);
+    let result = await this.request<{ pendingMs?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command);
     if (command.type !== "clock_run_for") return result;
-    const before = await this.getUiTree();
-    const beforeFrameSequence = before.frameSequence ?? 0;
+    const completionEpoch = result.completionSessionEpoch;
+    const completionFrame = result.completionAfterFrameSequence;
+    if (completionEpoch === undefined || completionFrame === undefined) throw new Error("unsupported");
     const started = Date.now();
     while (Date.now() - started < 10000) {
       const tree = await this.getUiTree();
-      if (tree.sessionEpoch !== before.sessionEpoch) throw new Error("stale_session");
-      if ((result.pendingMs ?? 0) <= 0 && (tree.frameSequence ?? 0) > beforeFrameSequence) return result;
+      if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
+      if ((result.pendingMs ?? 0) <= 0 && (tree.frameSequence ?? 0) > completionFrame) return result;
       await sleep(5);
-      result = await this.request<{ pendingMs: number }>({ type: "get_clock" });
+      const status = await this.request<{ pendingMs: number }>({ type: "get_clock" });
+      result = { ...result, pendingMs: status.pendingMs };
     }
     throw new Error("Timed out waiting for Gua clock run_for host completion.");
   }

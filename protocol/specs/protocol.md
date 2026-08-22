@@ -248,9 +248,16 @@ subsystem that needs to be controlled. Adapters must continue their unscaled
 bridge pump while the Gua clock is paused. An adapter must opt in to capability
 `virtual_clock_v1` only after it implements that pump and consumes every clock
 step; a bare runtime bridge does not advertise the capability. Remote
-`clock_run_for` consumers wait for both `pendingMs` to reach zero and a semantic
-frame published after the command response, because consuming the final core
-step precedes adapter callbacks, tick delivery, and frame publication.
+`clock_run_for` responses include `completionSessionEpoch` and
+`completionAfterFrameSequence`, captured atomically when the operation is
+queued. Consumers wait for both `pendingMs` to reach zero and a semantic frame
+whose sequence is greater than that correlated boundary, because consuming the
+final core step precedes adapter callbacks, tick delivery, and frame publication.
+An explicitly supplied `stepMs` must be positive; only an absent field selects
+the installed default. A remote `clock_pause` is acknowledged only after any
+already queued running advance has been consumed and its host frame published;
+the lower-level C ABI reports `invalid_state` if pause is attempted while such
+work is still pending.
 
 Initial command types:
 

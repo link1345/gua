@@ -47,6 +47,7 @@ struct Command {
     double initial_time_ms = 0;
     double duration_ms = 0;
     double step_ms = 0;
+    bool step_ms_present = false;
 };
 
 struct ClientConnection {
@@ -582,6 +583,11 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
     return std::stod(std::string(json.substr(start, end - start)));
 }
 
+bool json_has_field(std::string_view json, std::string_view field)
+{
+    return json.find("\"" + std::string(field) + "\"") != std::string_view::npos;
+}
+
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
 {
     const std::string key = "\"" + std::string(field) + "\"";
@@ -628,6 +634,7 @@ Command parse_command(std::string_view json)
     command.initial_time_ms = json_number_field(json, "initialTimeMs").value_or(0);
     command.duration_ms = json_number_field(json, "durationMs").value_or(0);
     command.step_ms = json_number_field(json, "stepMs").value_or(0);
+    command.step_ms_present = json_has_field(json, "stepMs");
     return command;
 }
 
@@ -951,7 +958,7 @@ private:
                 if (!handlers_.control_clock) return error_response(command.id, "unsupported");
                 const auto result = handlers_.control_clock(command.type,
                     command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
-                    command.step_ms);
+                    command.step_ms, command.step_ms_present);
                 return result.ok ? ok_response(command.id, result.json) : error_response(command.id, result.error);
             }
             if (command.type == "query_nodes") {

@@ -19,6 +19,11 @@ public interface IGuaClockContext
     GuaClockStatus GetClockStatus();
 }
 
+public interface IGuaAsyncClockContext
+{
+    Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default);
+}
+
 public sealed class GuaClock
 {
     private const int CallbackLimit = 1_000_000;
@@ -61,8 +66,13 @@ public sealed class GuaClock
             {
                 if (++callbacks > CallbackLimit) throw new InvalidOperationException("Gua clock execution_limit.");
                 if (item.Cancelled) continue;
+                scheduled.Remove(item);
                 item.Callback();
-                if (item.IntervalMs is { } interval) item.DueMs += interval;
+                if (item.IntervalMs is { } interval && !item.Cancelled)
+                {
+                    item.DueMs += interval;
+                    scheduled.Add(item);
+                }
                 else item.Cancelled = true;
             }
             scheduled.RemoveAll(item => item.Cancelled);

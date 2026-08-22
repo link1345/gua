@@ -104,7 +104,6 @@ GuaContext::GuaContext()
     : runtime_(gua_runtime_create())
 {
     gua_runtime_set_godot_plugin_version(runtime_, GUA_GODOT_PLUGIN_VERSION);
-    gua_runtime_set_virtual_clock_enabled(runtime_, 1);
     if (runtime_ == nullptr) {
         UtilityFunctions::push_error(
             "GuaContext failed to create a Gua runtime. Check that the Gua native library and dependent DLLs are available.");
@@ -388,7 +387,7 @@ Dictionary GuaContext::get_clock() const
 Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { return clock_result(runtime_, gua_runtime_clock_install(runtime_, initial_time_ms, step_ms)); }
 Dictionary GuaContext::clock_pause() { return clock_result(runtime_, gua_runtime_clock_pause(runtime_)); }
 Dictionary GuaContext::clock_run_for(double duration_ms, double step_ms)
-{ return clock_result(runtime_, gua_runtime_clock_run_for(runtime_, duration_ms, step_ms)); }
+{ const Dictionary status = get_clock(); const double actual = step_ms == 0.0 ? static_cast<double>(status["default_step_ms"]) : step_ms; return clock_result(runtime_, gua_runtime_clock_run_for(runtime_, duration_ms, actual)); }
 Dictionary GuaContext::clock_resume() { return clock_result(runtime_, gua_runtime_clock_resume(runtime_)); }
 Dictionary GuaContext::clock_advance(double duration_ms) { return clock_result(runtime_, gua_runtime_clock_advance(runtime_, duration_ms)); }
 Dictionary GuaContext::consume_clock_step()
@@ -403,6 +402,11 @@ Array GuaContext::consume_clock_steps()
     Array result; gua_clock_step_t step { sizeof(gua_clock_step_t) };
     while (gua_runtime_clock_consume_step(runtime_, &step) != 0) { Dictionary item; item["delta_ms"] = step.delta_ms; item["final"] = step.final_step != 0; item["generation"] = step.generation; result.push_back(item); step = gua_clock_step_t { sizeof(gua_clock_step_t) }; }
     return result;
+}
+
+void GuaContext::enable_virtual_clock_adapter()
+{
+    gua_runtime_set_virtual_clock_enabled(runtime_, 1);
 }
 
 Dictionary GuaContext::get_context_status() const
@@ -515,6 +519,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_clock"), &GuaContext::get_clock);
     ClassDB::bind_method(D_METHOD("consume_clock_step"), &GuaContext::consume_clock_step);
     ClassDB::bind_method(D_METHOD("consume_clock_steps"), &GuaContext::consume_clock_steps);
+    ClassDB::bind_method(D_METHOD("enable_virtual_clock_adapter"), &GuaContext::enable_virtual_clock_adapter);
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);
     ClassDB::bind_method(D_METHOD("inspector_bridge_running"), &GuaContext::inspector_bridge_running);

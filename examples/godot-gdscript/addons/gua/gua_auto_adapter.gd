@@ -38,6 +38,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"get_clock",
 	"consume_clock_step",
 	"consume_clock_steps",
+	"enable_virtual_clock_adapter",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -310,6 +311,8 @@ func _ensure_context() -> bool:
 			% [CONTEXT_CLASS, missing_methods[0], REBUILD_COMMAND]
 		)
 		return false
+
+	context.enable_virtual_clock_adapter()
 
 	return true
 

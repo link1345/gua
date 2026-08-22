@@ -116,6 +116,12 @@ func _run() -> void:
 	screen.add_child(scroll)
 
 	await process_frame
+	var extension := load("res://addons/gua/gua.gdextension")
+	var bare_context: Object = ClassDB.instantiate("GuaContext")
+	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1"):
+		_fail("A bare Godot GuaContext advertised the virtual clock without an adapter pump.")
+		return
+	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
 	adapter = ui
@@ -126,6 +132,9 @@ func _run() -> void:
 
 	ui.attach(screen)
 	ui.update("title")
+	if not ui.context.get_version_json().contains("virtual_clock_v1"):
+		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
+		return
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))

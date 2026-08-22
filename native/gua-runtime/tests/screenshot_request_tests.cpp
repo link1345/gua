@@ -57,7 +57,8 @@ int main()
 
     assert(gua_runtime_clock_install(runtime, 0.0, 10.0) == GUA_CLOCK_OK);
     assert(gua_runtime_clock_pause(runtime) == GUA_CLOCK_OK);
-    assert(gua_runtime_clock_run_for(runtime, 25.0, 0.0) == GUA_CLOCK_OK);
+    assert(gua_runtime_clock_run_for(runtime, 25.0, 0.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
+    assert(gua_runtime_clock_run_for(runtime, 25.0, 10.0) == GUA_CLOCK_OK);
     gua_clock_step_t clock_step { sizeof(gua_clock_step_t) };
     assert(gua_runtime_clock_consume_step(runtime, &clock_step) == 1 && clock_step.delta_ms == 10.0);
     clock_step = { sizeof(gua_clock_step_t) };
