@@ -10,6 +10,13 @@ public sealed record GuaClockStatus(bool Installed, bool Paused, double NowMilli
 
 public readonly record struct GuaClockStep(TimeSpan Delta, bool FinalStep, ulong Generation);
 
+public readonly record struct GuaClockDelta(double TotalMilliseconds)
+{
+    public double TotalSeconds => TotalMilliseconds / 1000.0;
+    public TimeSpan TimeSpan => TimeSpan.FromMilliseconds(TotalMilliseconds);
+    public static implicit operator TimeSpan(GuaClockDelta value) => value.TimeSpan;
+}
+
 public interface IGuaClockContext
 {
     GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null);
@@ -34,7 +41,7 @@ public sealed class GuaClock
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
     public GuaClock(GuaContext context) => this.context = context ?? throw new ArgumentNullException(nameof(context));
-    public event Action<TimeSpan>? Tick;
+    public event Action<GuaClockDelta>? Tick;
     public GuaClockStatus Status => context.GetClockStatus();
 
     public void Install(TimeSpan? initialTime = null, TimeSpan? step = null) => Ensure(context.InstallClock(initialTime, step));
@@ -56,7 +63,7 @@ public sealed class GuaClock
             bindOnInstall ? delay.TotalMilliseconds : status.NowMilliseconds + delay.TotalMilliseconds,
             interval?.TotalMilliseconds, callback, bindOnInstall);
         scheduled.Add(item);
-        return new Cancellation(item);
+        return new Cancellation(this, item);
     }
 
     public void DrainPendingSteps()
@@ -78,7 +85,7 @@ public sealed class GuaClock
                 }
                 if (item.Cancelled) continue;
                 scheduled.Remove(item);
-                item.Callback();
+                item.Callback?.Invoke();
                 var generation = context.GetClockStatus().Generation;
                 if (generation != step.Generation)
                 {
@@ -94,7 +101,7 @@ public sealed class GuaClock
                 else item.Cancelled = true;
             }
             scheduled.RemoveAll(item => item.Cancelled);
-            Tick?.Invoke(step.Delta);
+            Tick?.Invoke(new GuaClockDelta(step.Delta.TotalMilliseconds));
         }
     }
 
@@ -115,7 +122,14 @@ public sealed class GuaClock
     {
         if (result != GuaClockResult.Ok) throw new InvalidOperationException($"Gua clock operation failed: {result}.");
     }
+    private void Cancel(Scheduled item)
+    {
+        item.Cancelled = true;
+        item.Callback = null;
+        scheduled.Remove(item);
+    }
     private sealed class Scheduled(long sequence, ulong generation, double dueMs, double? intervalMs, Action callback, bool bindOnInstall)
-    { public long Sequence { get; } = sequence; public ulong Generation { get; set; } = generation; public double DueMs { get; set; } = dueMs; public double? IntervalMs { get; } = intervalMs; public Action Callback { get; } = callback; public bool BindOnInstall { get; set; } = bindOnInstall; public bool Cancelled { get; set; } }
-    private sealed class Cancellation(Scheduled item) : IDisposable { public void Dispose() => item.Cancelled = true; }
+    { public long Sequence { get; } = sequence; public ulong Generation { get; set; } = generation; public double DueMs { get; set; } = dueMs; public double? IntervalMs { get; } = intervalMs; public Action? Callback { get; set; } = callback; public bool BindOnInstall { get; set; } = bindOnInstall; public bool Cancelled { get; set; } }
+    private sealed class Cancellation(GuaClock owner, Scheduled item) : IDisposable
+    { private GuaClock? Owner { get; set; } = owner; public void Dispose() { Owner?.Cancel(item); Owner = null; } }
 }

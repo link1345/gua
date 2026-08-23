@@ -165,6 +165,83 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void RuntimeClockIsolatesCallbackFailuresAndPurgesInactiveSchedules()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+        runtime.Clock.Pause();
+        var callbacks = new List<string>();
+        Exception? callbackFailure = null;
+        runtime.Clock.CallbackFailed += error => callbackFailure = error;
+        runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () => throw new InvalidOperationException("boom"));
+        runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () => callbacks.Add("second"));
+        runtime.Clock.Tick += _ => callbacks.Add("tick");
+
+        Assert.That(() => runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10)), Throws.Nothing);
+        Assert.Multiple(() =>
+        {
+            Assert.That(callbackFailure, Is.TypeOf<InvalidOperationException>());
+            Assert.That(callbacks, Is.EqualTo(new[] { "second", "tick" }));
+            Assert.That(ScheduledCount(runtime.Clock), Is.Zero);
+        });
+
+        var cancelled = runtime.Clock.Schedule(TimeSpan.FromSeconds(1), () => callbacks.Add("cancelled"));
+        Assert.That(ScheduledCount(runtime.Clock), Is.EqualTo(1));
+        cancelled.Dispose();
+        Assert.That(ScheduledCount(runtime.Clock), Is.Zero,
+            "Disposal must release the callback without waiting for another clock step.");
+
+        var port = ReservePort();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            runtime.Clock.Schedule(TimeSpan.FromSeconds(1), () => callbacks.Add("stale"));
+            remote.Reset();
+            runtime.Clock.Advance(TimeSpan.Zero);
+            Assert.That(ScheduledCount(runtime.Clock), Is.Zero,
+                "An uninstalled clock must purge schedules from the reset generation.");
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public async Task RuntimeClockPublishesSubTimeSpanTickPrecision()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            var preciseTicks = new List<double>();
+            runtime.Clock.Tick += tick => preciseTicks.Add(tick.TotalMilliseconds);
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+            await SendRawCommandAsync(socket,
+                "{\"id\":1,\"type\":\"clock_install\",\"initialTimeMs\":0,\"stepMs\":0.00001}");
+            await SendRawCommandAsync(socket, "{\"id\":2,\"type\":\"clock_pause\"}");
+            await SendRawCommandAsync(socket,
+                "{\"id\":3,\"type\":\"clock_run_for\",\"durationMs\":0.00002,\"stepMs\":0.00001}");
+
+            runtime.Clock.Drain();
+
+            Assert.That(preciseTicks, Is.EqualTo(new[] { 0.00001, 0.00001 }));
+            Assert.That(runtime.Clock.Status.NowMilliseconds, Is.EqualTo(0.00002).Within(1e-12));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public void RemoteTreeDeserializesProtocolBoundsAndNestedState()
     {
         const string json = """
@@ -710,6 +787,14 @@ public sealed class SelectorParityTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static int ScheduledCount(object clock)
+    {
+        var field = clock.GetType().GetField("scheduled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Clock scheduler storage was not found.");
+        return ((System.Collections.ICollection)(field.GetValue(clock)
+            ?? throw new InvalidOperationException("Clock scheduler storage was null."))).Count;
     }
 
     private static async Task<JsonElement> SendRawCommandAsync(ClientWebSocket socket, string json, int? expectedResponseId = null)

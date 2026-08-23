@@ -286,6 +286,13 @@ func _drain_clock_schedules(now_ms: float, generation: int, callback_budget: int
 		active_clock_schedule_id = int(item.id)
 		active_clock_schedule_cancelled = false
 		(item.callback as Callable).call()
+		var current_generation := int(context.get_clock().get("generation", -1))
+		if current_generation != generation:
+			clock_schedules = clock_schedules.filter(func(candidate: Dictionary) -> bool:
+				return int(candidate.get("generation", -1)) == current_generation)
+			active_clock_schedule_id = 0
+			active_clock_schedule_cancelled = false
+			return callbacks
 		if float(item.interval_ms) > 0.0 and not active_clock_schedule_cancelled:
 			item.due_ms = float(item.due_ms) + float(item.interval_ms)
 			clock_schedules.append(item)

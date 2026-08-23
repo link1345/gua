@@ -10,6 +10,7 @@ public partial class Main : Control
     private Button? _settingsButton;
     private Label? _loadingLabel;
     private bool _loading;
+    private ulong _lastClockTicksUsec;
 
     [Export]
     public bool StartInspectorBridgeOnReady { get; set; } = true;
@@ -23,6 +24,7 @@ public partial class Main : Control
         BuildUi();
         _gua.Attach(this);
         _gua.SyncAttachedTree(CurrentScreen);
+        _lastClockTicksUsec = Time.GetTicksUsec();
 
         if (StartInspectorBridgeOnReady)
         {
@@ -31,9 +33,12 @@ public partial class Main : Control
 
     }
 
-    public override void _Process(double delta)
+    public override void _Process(double _delta)
     {
-        _gua.AdvanceClock(TimeSpan.FromSeconds(delta));
+        var ticksUsec = Time.GetTicksUsec();
+        var elapsedUsec = ticksUsec >= _lastClockTicksUsec ? ticksUsec - _lastClockTicksUsec : 0;
+        _lastClockTicksUsec = ticksUsec;
+        _gua.AdvanceClock(TimeSpan.FromMilliseconds(elapsedUsec / 1000.0));
         _gua.SyncAttachedTree(CurrentScreen);
     }
 

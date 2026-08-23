@@ -106,10 +106,20 @@ public sealed class GuaGodotRuntime : IDisposable
         ScheduleScreenshotCapture();
     }
 
+    /// <summary>Clock used by game logic that participates in Gua virtual-time control.</summary>
+    public GuaRuntimeClock Clock
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _runtime!.Clock;
+        }
+    }
+
     public void AdvanceClock(TimeSpan unscaledDelta)
     {
         ThrowIfDisposed();
-        _runtime!.Clock.Advance(unscaledDelta);
+        Clock.Advance(unscaledDelta);
     }
 
     public bool EnqueueClick(string id)

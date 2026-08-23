@@ -10,7 +10,8 @@ public sealed class GuaRuntimeClock
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
     internal GuaRuntimeClock(GuaRuntime runtime) => this.runtime = runtime;
-    public event Action<TimeSpan>? Tick;
+    public event Action<GuaClockDelta>? Tick;
+    public event Action<Exception>? CallbackFailed;
     public GuaClockStatus Status { get { var value = new Native.ClockStatus { StructSize = (uint)Marshal.SizeOf<Native.ClockStatus>() };
         if (Native.gua_runtime_clock_get_status(runtime.Handle, ref value) == 0) throw new InvalidOperationException("Failed to inspect Gua clock.");
         return new(value.Installed != 0, value.Paused != 0, value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation); } }
@@ -21,7 +22,7 @@ public sealed class GuaRuntimeClock
     public void RunFor(TimeSpan duration, TimeSpan? step = null)
     { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(Status.DefaultStepMilliseconds)).TotalMilliseconds)); Drain(); }
     public void Advance(TimeSpan unscaledDelta)
-    { var status = Status; if (!status.Installed) return; if (status.PendingMilliseconds > 0) { Drain(); return; }
+    { var status = Status; PurgeInactive(status); if (!status.Installed) return; if (status.PendingMilliseconds > 0) { Drain(); return; }
       if (status.Paused || unscaledDelta <= TimeSpan.Zero) return; Check(Native.gua_runtime_clock_advance(runtime.Handle, unscaledDelta.TotalMilliseconds)); Drain(); }
     public IDisposable Schedule(TimeSpan delay, Action callback, TimeSpan? interval = null)
     {
@@ -31,7 +32,7 @@ public sealed class GuaRuntimeClock
         var bindOnInstall = !status.Installed;
         var item = new Scheduled(++sequence, status.Generation,
             bindOnInstall ? delay.TotalMilliseconds : status.NowMilliseconds + delay.TotalMilliseconds,
-            interval?.TotalMilliseconds, callback, bindOnInstall); scheduled.Add(item); return new Cancel(item);
+            interval?.TotalMilliseconds, callback, bindOnInstall); scheduled.Add(item); return new Cancel(this, item);
     }
     public void Drain()
     {
@@ -46,12 +47,15 @@ public sealed class GuaRuntimeClock
             { if (++callbackCount > CallbackLimit)
               { scheduled.ForEach(candidate => candidate.Cancelled = true); scheduled.Clear();
                 throw new InvalidOperationException("Gua clock execution_limit."); }
-              if (item.Cancelled) continue; scheduled.Remove(item); item.Callback();
+              if (item.Cancelled) continue; scheduled.Remove(item);
+              try { item.Callback?.Invoke(); }
+              catch (Exception error) { ReportCallbackFailure(error); }
               var generation = Status.Generation;
               if (generation != step.Generation)
               { item.Cancelled = true; scheduled.RemoveAll(candidate => candidate.Generation != generation); break; }
               if (item.Interval is { } interval && !item.Cancelled) { item.Due += interval; scheduled.Add(item); } else item.Cancelled = true; }
-            scheduled.RemoveAll(x => x.Cancelled); Tick?.Invoke(TimeSpan.FromMilliseconds(step.DeltaMs));
+            scheduled.RemoveAll(x => x.Cancelled);
+            Tick?.Invoke(new GuaClockDelta(step.DeltaMs));
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }
     }
@@ -67,8 +71,28 @@ public sealed class GuaRuntimeClock
             item.BindOnInstall = false;
         }
     }
+    private void PurgeInactive(GuaClockStatus status)
+    {
+        scheduled.RemoveAll(item => item.Cancelled || !status.Installed && item.Generation != status.Generation);
+    }
+    private void CancelSchedule(Scheduled item)
+    {
+        item.Cancelled = true;
+        item.Callback = null;
+        scheduled.Remove(item);
+    }
+    private void ReportCallbackFailure(Exception error)
+    {
+        if (CallbackFailed is null) return;
+        foreach (Action<Exception> handler in CallbackFailed.GetInvocationList())
+        {
+            try { handler(error); }
+            catch { }
+        }
+    }
     private static void Check(int result) { if (result != 1) throw new InvalidOperationException($"Gua clock operation failed: {(GuaClockResult)result}."); }
     private sealed class Scheduled(long sequence, ulong generation, double due, double? interval, Action callback, bool bindOnInstall)
-    { public long Sequence { get; } = sequence; public ulong Generation { get; set; } = generation; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action Callback { get; } = callback; public bool BindOnInstall { get; set; } = bindOnInstall; public bool Cancelled { get; set; } }
-    private sealed class Cancel(Scheduled item) : IDisposable { public void Dispose() => item.Cancelled = true; }
+    { public long Sequence { get; } = sequence; public ulong Generation { get; set; } = generation; public double Due { get; set; } = due; public double? Interval { get; } = interval; public Action? Callback { get; set; } = callback; public bool BindOnInstall { get; set; } = bindOnInstall; public bool Cancelled { get; set; } }
+    private sealed class Cancel(GuaRuntimeClock owner, Scheduled item) : IDisposable
+    { private GuaRuntimeClock? Owner { get; set; } = owner; public void Dispose() { Owner?.CancelSchedule(item); Owner = null; } }
 }

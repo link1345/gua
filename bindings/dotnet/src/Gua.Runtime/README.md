@@ -12,6 +12,13 @@ clock does not intercept `Time.deltaTime`, coroutines, or engine timers; each
 game subsystem that should be controllable must explicitly use this clock as
 its time source.
 
+`Tick` receives `GuaClockDelta`, which retains the native double-precision
+millisecond value even below `TimeSpan`'s 100 ns resolution. It exposes
+`TotalMilliseconds`, `TotalSeconds`, and a rounded `TimeSpan` conversion.
+Adapter callback failures are reported by `CallbackFailed` after the scheduler
+isolates the failure and continues the remaining due callbacks and tick
+notification.
+
 The native `gua_runtime` library must be deployed for the current platform.
 
 Screenshot adapters should use `TryCompleteScreenshot`. It returns `false`

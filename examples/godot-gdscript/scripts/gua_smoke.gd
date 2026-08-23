@@ -368,6 +368,21 @@ func _run() -> void:
 		_fail("Gua clock rescheduled a running interval after it cancelled itself: %d" % interval_count[0])
 		return
 
+	var reset_interval_count := [0]
+	ui.clock_schedule(1.0, func():
+		reset_interval_count[0] += 1
+		ui.reset_context()
+	, 1.0)
+	ui.clock_run_for(10.0, 10.0)
+	ui.update("title")
+	ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+	ui.clock_run_for(10.0, 10.0)
+	ui.update("title")
+	if reset_interval_count[0] != 1:
+		_fail("Gua clock rescheduled an interval from a reset generation: %d" % reset_interval_count[0])
+		return
+
 	var limited_interval_count := [0]
 	ui.clock_schedule(1.0, func(): limited_interval_count[0] += 1, 1.0)
 	var limit_status := ui.get_clock()

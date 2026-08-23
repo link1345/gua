@@ -18,7 +18,7 @@ using Toggle = UnityEngine.UI.Toggle;
 namespace Gua.Unity
 {
 
-[DefaultExecutionOrder(32000)]
+[DefaultExecutionOrder(-32000)]
 public sealed class GuaUnityRuntime : MonoBehaviour
 {
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
@@ -46,6 +46,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         try
         {
             runtime = new GuaRuntime();
+            runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
             var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");

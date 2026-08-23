@@ -13,5 +13,8 @@ Use `GuaUnityRuntime.Clock.Schedule(...)` or subscribe to
 does not rewrite existing `Time.deltaTime`, `WaitForSeconds`, coroutines,
 physics, animation, or audio behavior.
 
+The `Tick` callback receives a `GuaClockDelta`; use `TotalMilliseconds` or
+`TotalSeconds` to retain steps below the 100 ns resolution of `TimeSpan`.
+
 The package targets Windows x64, Unity 6000.0 or newer, and the Mono scripting
 backend. Import TextMeshPro Essential Resources before building a Player.
