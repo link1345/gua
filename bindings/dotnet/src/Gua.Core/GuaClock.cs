@@ -70,7 +70,12 @@ public sealed class GuaClock
             while (scheduled.Where(item => !item.Cancelled && item.DueMs <= now)
                        .OrderBy(item => item.DueMs).ThenBy(item => item.Sequence).FirstOrDefault() is { } item)
             {
-                if (++callbacks > CallbackLimit) throw new InvalidOperationException("Gua clock execution_limit.");
+                if (++callbacks > CallbackLimit)
+                {
+                    scheduled.ForEach(candidate => candidate.Cancelled = true);
+                    scheduled.Clear();
+                    throw new InvalidOperationException("Gua clock execution_limit.");
+                }
                 if (item.Cancelled) continue;
                 scheduled.Remove(item);
                 item.Callback();

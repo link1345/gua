@@ -580,11 +580,39 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
     if (key_position == std::string_view::npos) return std::nullopt;
     const std::size_t colon = json.find(':', key_position + key.size());
     if (colon == std::string_view::npos) return std::nullopt;
-    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
+    std::size_t start = json.find_first_not_of(" \t\r\n", colon + 1U);
     if (start == std::string_view::npos) return std::nullopt;
+
     std::size_t end = start;
-    while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.' || json[end] == 'e' || json[end] == 'E')) ++end;
-    if (end == start) return std::nullopt;
+    if (json[end] == '-') {
+        if (++end == json.size()) return std::nullopt;
+    }
+    if (json[end] == '0') {
+        ++end;
+        if (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) return std::nullopt;
+    } else if (json[end] >= '1' && json[end] <= '9') {
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+    } else {
+        return std::nullopt;
+    }
+    if (end < json.size() && json[end] == '.') {
+        ++end;
+        const std::size_t fraction_start = end;
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+        if (end == fraction_start) return std::nullopt;
+    }
+    if (end < json.size() && (json[end] == 'e' || json[end] == 'E')) {
+        ++end;
+        if (end < json.size() && (json[end] == '+' || json[end] == '-')) ++end;
+        const std::size_t exponent_start = end;
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+        if (end == exponent_start) return std::nullopt;
+    }
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
     try {
         std::size_t parsed = 0;
         const std::string token(json.substr(start, end - start));

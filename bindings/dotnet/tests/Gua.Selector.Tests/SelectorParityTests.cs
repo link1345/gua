@@ -87,6 +87,33 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void ClockExecutionLimitRetiresRemainingSchedules()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        clock.Install(step: TimeSpan.FromMilliseconds(101));
+        clock.Pause();
+        var callbacks = 0;
+        clock.Schedule(TimeSpan.Zero, () => callbacks++, TimeSpan.FromTicks(1));
+        Assert.That(() => clock.RunFor(TimeSpan.FromMilliseconds(101)),
+            Throws.InvalidOperationException.With.Message.Contains("execution_limit"));
+        Assert.That(callbacks, Is.EqualTo(1_000_000));
+        Assert.That(() => clock.RunFor(TimeSpan.FromMilliseconds(1)), Throws.Nothing);
+        Assert.That(callbacks, Is.EqualTo(1_000_000));
+
+        using var runtime = new GuaRuntime();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(101));
+        runtime.Clock.Pause();
+        var runtimeCallbacks = 0;
+        runtime.Clock.Schedule(TimeSpan.Zero, () => runtimeCallbacks++, TimeSpan.FromTicks(1));
+        Assert.That(() => runtime.Clock.RunFor(TimeSpan.FromMilliseconds(101)),
+            Throws.InvalidOperationException.With.Message.Contains("execution_limit"));
+        Assert.That(runtimeCallbacks, Is.EqualTo(1_000_000));
+        Assert.That(() => runtime.Clock.RunFor(TimeSpan.FromMilliseconds(1)), Throws.Nothing);
+        Assert.That(runtimeCallbacks, Is.EqualTo(1_000_000));
+    }
+
+    [Test]
     public void RemoteTreeDeserializesProtocolBoundsAndNestedState()
     {
         const string json = """
@@ -490,7 +517,15 @@ public sealed class SelectorParityTests
                 "{\"id\":3,\"type\":\"clock_install\",\"initialTimeMs\":\"0\"}");
             var outOfRange = await SendRawCommandAsync(socket,
                 "{\"id\":4,\"type\":\"clock_run_for\",\"durationMs\":1e999}");
-            var statusAfterError = await SendRawCommandAsync(socket, "{\"id\":5,\"type\":\"get_clock\"}");
+            var leadingPlus = await SendRawCommandAsync(socket,
+                "{\"id\":5,\"type\":\"clock_run_for\",\"durationMs\":+25}", 5);
+            var missingInteger = await SendRawCommandAsync(socket,
+                "{\"id\":6,\"type\":\"clock_run_for\",\"durationMs\":.5}", 6);
+            var invalidSuffix = await SendRawCommandAsync(socket,
+                "{\"id\":7,\"type\":\"clock_run_for\",\"durationMs\":25x}", 7);
+            var invalidSuffixAfterWhitespace = await SendRawCommandAsync(socket,
+                "{\"id\":8,\"type\":\"clock_run_for\",\"durationMs\":25 x}", 8);
+            var statusAfterError = await SendRawCommandAsync(socket, "{\"id\":9,\"type\":\"get_clock\"}");
             Assert.Multiple(() =>
             {
                 Assert.That(missing.GetProperty("ok").GetBoolean(), Is.False);
@@ -501,8 +536,14 @@ public sealed class SelectorParityTests
                 Assert.That(invalidInitialTime.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(outOfRange.GetProperty("ok").GetBoolean(), Is.False);
                 Assert.That(outOfRange.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(leadingPlus.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(missingInteger.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(invalidSuffix.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(invalidSuffixAfterWhitespace.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(statusAfterError.GetProperty("ok").GetBoolean(), Is.True,
                     "An out-of-range number must not close the WebSocket connection.");
+                Assert.That(statusAfterError.GetProperty("result").GetProperty("nowMs").GetDouble(), Is.Zero,
+                    "Invalid JSON number spellings must not mutate the clock timeline.");
             });
         }
         finally
@@ -617,11 +658,15 @@ public sealed class SelectorParityTests
         return port;
     }
 
-    private static async Task<JsonElement> SendRawCommandAsync(ClientWebSocket socket, string json)
+    private static async Task<JsonElement> SendRawCommandAsync(ClientWebSocket socket, string json, int? expectedResponseId = null)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        using var requestDocument = JsonDocument.Parse(json);
-        var expectedId = requestDocument.RootElement.GetProperty("id").GetInt32();
+        var expectedId = expectedResponseId;
+        if (!expectedId.HasValue)
+        {
+            using var requestDocument = JsonDocument.Parse(json);
+            expectedId = requestDocument.RootElement.GetProperty("id").GetInt32();
+        }
         var request = Encoding.UTF8.GetBytes(json);
         await socket.SendAsync(new ArraySegment<byte>(request), WebSocketMessageType.Text, true, timeout.Token);
         var buffer = new byte[4096];
@@ -635,7 +680,7 @@ public sealed class SelectorParityTests
                 response.Write(buffer, 0, received.Count);
             } while (!received.EndOfMessage);
             using var document = JsonDocument.Parse(response.ToArray());
-            if (document.RootElement.TryGetProperty("id", out var id) && id.GetInt32() == expectedId)
+            if (document.RootElement.TryGetProperty("id", out var id) && id.GetInt32() == expectedId.Value)
                 return document.RootElement.Clone();
         }
     }

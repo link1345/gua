@@ -5,6 +5,7 @@ namespace Gua.Runtime;
 
 public sealed class GuaRuntimeClock
 {
+    private const int CallbackLimit = 1_000_000;
     private readonly GuaRuntime runtime;
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
@@ -42,7 +43,9 @@ public sealed class GuaRuntimeClock
             scheduled.RemoveAll(x => x.Generation != step.Generation);
             var now = Status.NowMilliseconds;
             while (scheduled.Where(x => !x.Cancelled && x.Due <= now).OrderBy(x => x.Due).ThenBy(x => x.Sequence).FirstOrDefault() is { } item)
-            { if (++callbackCount > 1_000_000) throw new InvalidOperationException("Gua clock execution_limit.");
+            { if (++callbackCount > CallbackLimit)
+              { scheduled.ForEach(candidate => candidate.Cancelled = true); scheduled.Clear();
+                throw new InvalidOperationException("Gua clock execution_limit."); }
               if (item.Cancelled) continue; scheduled.Remove(item); item.Callback();
               if (item.Interval is { } interval && !item.Cancelled) { item.Due += interval; scheduled.Add(item); } else item.Cancelled = true; }
             scheduled.RemoveAll(x => x.Cancelled); Tick?.Invoke(TimeSpan.FromMilliseconds(step.DeltaMs));
