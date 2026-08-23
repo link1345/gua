@@ -20,4 +20,19 @@ describe("DemoRuntime virtual clock", () => {
     expect(() => runtime.runClockFor(Number.POSITIVE_INFINITY)).toThrow("invalid_duration");
     expect(runtime.getClock().nowMs).toBe(100);
   });
+
+  test("advances the completion frame without inventing a semantic revision", async () => {
+    const runtime = new DemoRuntime();
+    runtime.installClock(0, 10);
+    runtime.pauseClock();
+    const before = runtime.getUiTree();
+    const operation = runtime.runClockFor(10);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const after = runtime.getUiTree();
+    expect(after.frameSequence).toBe(before.frameSequence + 1);
+    expect(after.revision).toBe(before.revision);
+    expect(runtime.getClock().completedOperationSequence).toBe(operation.operationSequence);
+  });
 });

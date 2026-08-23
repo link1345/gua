@@ -136,7 +136,6 @@ export class DemoRuntime {
     setTimeout(() => {
       this.clock = { ...this.clock, completedOperationSequence: operationSequence };
       this.frameSequence += 1;
-      this.revision += 1;
     }, 0);
     return result;
   }

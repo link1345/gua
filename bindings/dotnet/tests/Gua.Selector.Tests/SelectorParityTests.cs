@@ -87,6 +87,57 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void ClockResetInsideRepeatingCallbackDropsTheStaleGeneration()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        var callbacks = 0;
+        clock.Schedule(TimeSpan.FromMilliseconds(1), () =>
+        {
+            callbacks++;
+            context.Reset();
+        }, TimeSpan.FromMilliseconds(1));
+
+        clock.RunFor(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10));
+        Assert.That(callbacks, Is.EqualTo(1));
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        clock.RunFor(TimeSpan.FromMilliseconds(10));
+        Assert.That(callbacks, Is.EqualTo(1));
+
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+            runtime.Clock.Pause();
+            var runtimeCallbacks = 0;
+            runtime.Clock.Schedule(TimeSpan.FromMilliseconds(1), () =>
+            {
+                runtimeCallbacks++;
+                remote.Reset();
+            }, TimeSpan.FromMilliseconds(1));
+
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10));
+            Assert.That(runtimeCallbacks, Is.EqualTo(1));
+            runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+            runtime.Clock.Pause();
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
+            Assert.That(runtimeCallbacks, Is.EqualTo(1));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public void ClockExecutionLimitRetiresRemainingSchedules()
     {
         using var context = new GuaContext();

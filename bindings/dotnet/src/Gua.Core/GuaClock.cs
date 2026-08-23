@@ -79,6 +79,13 @@ public sealed class GuaClock
                 if (item.Cancelled) continue;
                 scheduled.Remove(item);
                 item.Callback();
+                var generation = context.GetClockStatus().Generation;
+                if (generation != step.Generation)
+                {
+                    item.Cancelled = true;
+                    scheduled.RemoveAll(candidate => candidate.Generation != generation);
+                    break;
+                }
                 if (item.IntervalMs is { } interval && !item.Cancelled)
                 {
                     item.DueMs += interval;
