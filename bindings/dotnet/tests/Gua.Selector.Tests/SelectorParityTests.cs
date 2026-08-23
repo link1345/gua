@@ -576,7 +576,9 @@ public sealed class SelectorParityTests
                 "{\"id\":7,\"type\":\"clock_run_for\",\"durationMs\":25x}", 7);
             var invalidSuffixAfterWhitespace = await SendRawCommandAsync(socket,
                 "{\"id\":8,\"type\":\"clock_run_for\",\"durationMs\":25 x}", 8);
-            var statusAfterError = await SendRawCommandAsync(socket, "{\"id\":9,\"type\":\"get_clock\"}");
+            var nestedDuration = await SendRawCommandAsync(socket,
+                "{\"id\":9,\"type\":\"clock_run_for\",\"meta\":{\"durationMs\":25}}");
+            var statusAfterError = await SendRawCommandAsync(socket, "{\"id\":10,\"type\":\"get_clock\"}");
             Assert.Multiple(() =>
             {
                 Assert.That(missing.GetProperty("ok").GetBoolean(), Is.False);
@@ -591,6 +593,7 @@ public sealed class SelectorParityTests
                 Assert.That(missingInteger.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(invalidSuffix.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(invalidSuffixAfterWhitespace.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
+                Assert.That(nestedDuration.GetProperty("error").GetString(), Is.EqualTo("invalid_duration"));
                 Assert.That(statusAfterError.GetProperty("ok").GetBoolean(), Is.True,
                     "An out-of-range number must not close the WebSocket connection.");
                 Assert.That(statusAfterError.GetProperty("result").GetProperty("nowMs").GetDouble(), Is.Zero,

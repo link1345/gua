@@ -435,21 +435,64 @@ void send_text_frame(SOCKET socket, std::string_view text)
     send_all(socket, frame.data(), frame.size());
 }
 
+std::optional<std::size_t> json_top_level_field_start(std::string_view json, std::string_view field)
+{
+    const std::size_t root = json.find_first_not_of(" \t\r\n");
+    if (root == std::string_view::npos || json[root] != '{') return std::nullopt;
+
+    int object_depth = 0;
+    int array_depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (std::size_t index = root; index < json.size(); ++index) {
+        const char ch = json[index];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') in_string = false;
+            continue;
+        }
+        if (ch == '"') {
+            std::size_t previous = index;
+            while (previous > root && (json[previous - 1U] == ' ' || json[previous - 1U] == '\t' ||
+                json[previous - 1U] == '\r' || json[previous - 1U] == '\n')) --previous;
+            const bool top_level_key = object_depth == 1 && array_depth == 0 && previous > root &&
+                (json[previous - 1U] == '{' || json[previous - 1U] == ',');
+            if (!top_level_key) {
+                in_string = true;
+                continue;
+            }
+
+            std::size_t end = index + 1U;
+            bool key_escaped = false;
+            for (; end < json.size(); ++end) {
+                if (key_escaped) key_escaped = false;
+                else if (json[end] == '\\') key_escaped = true;
+                else if (json[end] == '"') break;
+            }
+            if (end == json.size()) return std::nullopt;
+            std::size_t colon = json.find_first_not_of(" \t\r\n", end + 1U);
+            if (colon == std::string_view::npos || json[colon] != ':') return std::nullopt;
+            const bool matches = json.substr(index + 1U, end - index - 1U) == field;
+            std::size_t value = json.find_first_not_of(" \t\r\n", colon + 1U);
+            if (matches) return value == std::string_view::npos ? std::nullopt : std::optional<std::size_t>(value);
+            index = end;
+            continue;
+        }
+        if (ch == '{') ++object_depth;
+        else if (ch == '}') {
+            if (--object_depth == 0) break;
+        } else if (ch == '[') ++array_depth;
+        else if (ch == ']') --array_depth;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> json_string_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) {
-        return std::nullopt;
-    }
-    std::size_t quote = colon + 1U;
-    while (quote < json.size() && json[quote] == ' ') {
-        ++quote;
-    }
+    const auto start = json_top_level_field_start(json, field);
+    if (!start.has_value()) return std::nullopt;
+    const std::size_t quote = *start;
     if (quote >= json.size() || json[quote] != '"') {
         return std::nullopt;
     }
@@ -532,20 +575,9 @@ std::optional<std::string> json_string_field(std::string_view json, std::string_
 
 std::optional<int> json_int_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) {
-        return std::nullopt;
-    }
-
-    std::size_t start = colon + 1U;
-    while (start < json.size() && json[start] == ' ') {
-        ++start;
-    }
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
     std::size_t end = start;
     while (end < json.size() && json[end] >= '0' && json[end] <= '9') {
         ++end;
@@ -559,13 +591,9 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
 
 std::optional<unsigned long long> json_uint64_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return std::nullopt;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return std::nullopt;
-    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
-    if (start == std::string_view::npos) return std::nullopt;
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
     std::size_t end = start;
     while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
     if (end == start) return std::nullopt;
@@ -575,13 +603,9 @@ std::optional<unsigned long long> json_uint64_field(std::string_view json, std::
 
 std::optional<double> json_number_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return std::nullopt;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return std::nullopt;
-    std::size_t start = json.find_first_not_of(" \t\r\n", colon + 1U);
-    if (start == std::string_view::npos) return std::nullopt;
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
 
     std::size_t end = start;
     if (json[end] == '-') {
@@ -625,18 +649,13 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
 
 bool json_has_field(std::string_view json, std::string_view field)
 {
-    return json.find("\"" + std::string(field) + "\"") != std::string_view::npos;
+    return json_top_level_field_start(json, field).has_value();
 }
 
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return fallback;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return fallback;
-    const std::size_t start = json.find_first_not_of(" \t", colon + 1U);
-    return start != std::string_view::npos && json.substr(start, 4) == "true";
+    const auto start = json_top_level_field_start(json, field);
+    return start.has_value() ? json.substr(*start, 4) == "true" : fallback;
 }
 
 Command parse_command(std::string_view json)
