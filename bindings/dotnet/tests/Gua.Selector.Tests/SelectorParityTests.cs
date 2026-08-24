@@ -612,6 +612,39 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public async Task SharedRemotePauseUsesTheBridgeResponseDeadline()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Native.gua_runtime_set_virtual_clock_enabled(runtime, 1);
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(Native.gua_runtime_clock_install(runtime, 0, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_clock_advance(runtime, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromMilliseconds(500));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+
+            var pause = Task.Run(remote.PauseClock);
+            await Task.Delay(600);
+            Assert.That(pause.IsCompleted, Is.False,
+                "Pause must use the bridge's response deadline instead of the shorter general request timeout.");
+
+            var step = new NativeClockStep { StructSize = (uint)Marshal.SizeOf<NativeClockStep>() };
+            Assert.That(Native.gua_runtime_clock_consume_step(runtime, ref step), Is.EqualTo(1));
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(await pause.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(GuaClockResult.Ok));
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
+        }
+    }
+
+    [Test]
     public async Task StoppingBridgeCancelsAnInFlightRemotePauseWait()
     {
         var port = ReservePort();

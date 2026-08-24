@@ -371,6 +371,28 @@ interface PendingRequest {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+const clockPauseResponseTimeoutMs = 11_000;
+
+export function createCoalescedAsyncRunner(task: () => Promise<void>): () => Promise<void> {
+  let active: Promise<void> | null = null;
+  let rerunRequested = false;
+
+  return () => {
+    rerunRequested = true;
+    if (active !== null) return active;
+
+    active = (async () => {
+      do {
+        rerunRequested = false;
+        await task();
+      } while (rerunRequested);
+    })().finally(() => {
+      active = null;
+    });
+    return active;
+  };
+}
+
 export class WebSocketInspectorClient implements GuaInspectorClient {
   private socket: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
@@ -398,7 +420,9 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
 
   async getClock(): Promise<GuaClockStatus> { return this.request({ type: "get_clock" }); }
   async installClock(initialTimeMs = 0, stepMs?: number): Promise<GuaClockStatus> { return this.request({ type: "clock_install", initialTimeMs, stepMs }); }
-  async pauseClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_pause" }); }
+  async pauseClock(): Promise<GuaClockStatus> {
+    return this.request({ type: "clock_pause" }, Math.max(this.requestTimeoutMs, clockPauseResponseTimeoutMs));
+  }
   async runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus> {
     let status = await this.request<GuaClockStatus>({ type: "clock_run_for", durationMs, stepMs });
     const completionEpoch = status.completionSessionEpoch;
@@ -459,7 +483,7 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     };
   }
 
-  private async request<T>(command: GuaInspectorCommandInput): Promise<T> {
+  private async request<T>(command: GuaInspectorCommandInput, timeoutMs = this.requestTimeoutMs): Promise<T> {
     const socket = await this.connect();
     const id = this.nextId++;
     const payload = { ...command, id } as GuaInspectorCommand;
@@ -468,7 +492,7 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
       const timeoutId = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timed out waiting for ${command.type}.`));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
 
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),

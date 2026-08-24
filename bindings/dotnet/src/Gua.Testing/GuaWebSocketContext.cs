@@ -7,6 +7,7 @@ namespace Gua.Testing;
 
 public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IDisposable
 {
+    private static readonly TimeSpan MinimumClockPauseResponseTimeout = TimeSpan.FromSeconds(11);
     private readonly Uri uri;
     private readonly TimeSpan requestTimeout;
     private readonly SemaphoreSlim requestGate = new(1, 1);
@@ -32,10 +33,10 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         await RequestAsync<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
         return GuaClockResult.Ok;
     }
-    public GuaClockResult PauseClock() { Request<RemoteClockStatus>(new { type = "clock_pause" }); return GuaClockResult.Ok; }
+    public GuaClockResult PauseClock() { Request<RemoteClockStatus>(new { type = "clock_pause" }, responseTimeout: ClockPauseResponseTimeout); return GuaClockResult.Ok; }
     public async Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
     {
-        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken).ConfigureAwait(false);
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken, responseTimeout: ClockPauseResponseTimeout).ConfigureAwait(false);
         return GuaClockResult.Ok;
     }
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
@@ -168,7 +169,9 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
     private static GuaActionType? Action(int value) => value == 0 ? null : (GuaActionType)value;
     private GuaRemoteTree Tree() => GetRemoteTree();
 
-    private T Request<T>(object command, bool allowNull = false)
+    private TimeSpan ClockPauseResponseTimeout => requestTimeout > MinimumClockPauseResponseTimeout ? requestTimeout : MinimumClockPauseResponseTimeout;
+
+    private T Request<T>(object command, bool allowNull = false, TimeSpan? responseTimeout = null)
     {
         requestGate.Wait();
         try
@@ -176,7 +179,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
             EnsureConnected(); var id = nextId++; var bytes = Envelope(id, command); Send(bytes);
             while (true)
             {
-                using var document = JsonDocument.Parse(Receive()); var root = document.RootElement;
+                using var document = JsonDocument.Parse(Receive(responseTimeout)); var root = document.RootElement;
                 if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
                 if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString());
                 var result = root.GetProperty("result").Deserialize<T>(JsonOptions); if (result == null && !allowNull) throw new InvalidOperationException("Gua bridge returned an empty result."); return result!;
@@ -184,7 +187,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         }
         finally { requestGate.Release(); }
     }
-    private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNull = false)
+    private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNull = false, TimeSpan? responseTimeout = null)
     {
         await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -197,7 +200,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
             }
             while (true)
             {
-                using var document = JsonDocument.Parse(await ReceiveAsync(cancellationToken).ConfigureAwait(false)); var root = document.RootElement;
+                using var document = JsonDocument.Parse(await ReceiveAsync(cancellationToken, responseTimeout).ConfigureAwait(false)); var root = document.RootElement;
                 if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
                 if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString());
                 var result = root.GetProperty("result").Deserialize<T>(JsonOptions); if (result == null && !allowNull) throw new InvalidOperationException("Gua bridge returned an empty result."); return result!;
@@ -239,9 +242,9 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         using var cts = new CancellationTokenSource(timeout ?? requestTimeout); var buffer = new byte[65536]; using var stream = new MemoryStream();
         while (true) { var result = socket!.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token).GetAwaiter().GetResult(); if (result.MessageType == WebSocketMessageType.Close) throw new InvalidOperationException("Gua bridge WebSocket closed."); stream.Write(buffer, 0, result.Count); if (result.EndOfMessage) return Encoding.UTF8.GetString(stream.ToArray()); }
     }
-    private async Task<string> ReceiveAsync(CancellationToken cancellationToken)
+    private async Task<string> ReceiveAsync(CancellationToken cancellationToken, TimeSpan? responseTimeout = null)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(requestTimeout); var buffer = new byte[65536]; using var stream = new MemoryStream();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(responseTimeout ?? requestTimeout); var buffer = new byte[65536]; using var stream = new MemoryStream();
         while (true) { var result = await socket!.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token).ConfigureAwait(false); if (result.MessageType == WebSocketMessageType.Close) throw new InvalidOperationException("Gua bridge WebSocket closed."); stream.Write(buffer, 0, result.Count); if (result.EndOfMessage) return Encoding.UTF8.GetString(stream.ToArray()); }
     }
     public void Dispose() { if (disposed) return; disposed = true; socket?.Dispose(); socket = null; }

@@ -114,6 +114,7 @@ export interface GuaMcpServerOptions {
 }
 
 const defaultBridgeUrl = "ws://127.0.0.1:8765";
+const clockPauseResponseTimeoutMs = 11_000;
 
 export const guaMcpTools = [
   "get_ui_tree",
@@ -510,7 +511,7 @@ async function executeTool(
     case "clock_pause":
       return bridge.controlClock({ type: "clock_pause" });
     case "clock_run_for":
-      return bridge.controlClock({ type: "clock_run_for", durationMs: readNumberArg(args, "durationMs", 0), stepMs: readOptionalNumberArg(args, "stepMs") });
+      return bridge.controlClock(parseClockRunForArguments(args));
     case "clock_resume":
       return bridge.controlClock({ type: "clock_resume" });
     case "start_recording":
@@ -772,7 +773,10 @@ class GuaBridgeClient {
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
   {
-    let result = await this.request<{ pendingMs?: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command);
+    const responseTimeoutMs = command.type === "clock_pause"
+      ? Math.max(this.requestTimeoutMs, clockPauseResponseTimeoutMs)
+      : this.requestTimeoutMs;
+    let result = await this.request<{ pendingMs?: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command, responseTimeoutMs);
     if (command.type !== "clock_run_for") return result;
     const completionEpoch = result.completionSessionEpoch;
     const completionFrame = result.completionAfterFrameSequence;
@@ -848,7 +852,7 @@ class GuaBridgeClient {
     this.connectPromise = null;
   }
 
-  private async request<T>(command: BridgeCommandInput): Promise<T> {
+  private async request<T>(command: BridgeCommandInput, timeoutMs = this.requestTimeoutMs): Promise<T> {
     const socket = await this.connect();
     const id = this.nextId++;
     const payload = { ...command, id } as BridgeCommand;
@@ -857,7 +861,7 @@ class GuaBridgeClient {
       const timeoutId = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timed out waiting for Gua bridge command: ${command.type}`));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
 
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
@@ -1046,6 +1050,19 @@ function readNumberArg(args: Record<string, unknown>, name: string, fallback: nu
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Expected finite number argument: ${name}`);
   return value;
+}
+
+export function parseClockRunForArguments(args: Record<string, unknown>): {
+  type: "clock_run_for";
+  durationMs: number;
+  stepMs?: number;
+} {
+  if (args.durationMs === undefined) throw new Error("Expected finite number argument: durationMs");
+  return {
+    type: "clock_run_for",
+    durationMs: readNumberArg(args, "durationMs", 0),
+    stepMs: readOptionalNumberArg(args, "stepMs"),
+  };
 }
 
 function readOptionalNumberArg(args: Record<string, unknown>, name: string): number | undefined {

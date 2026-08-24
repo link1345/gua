@@ -7,6 +7,7 @@ namespace Gua.Testing.Godot;
 
 public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IDisposable
 {
+    private static readonly TimeSpan MinimumClockPauseResponseTimeout = TimeSpan.FromSeconds(11);
     private readonly Uri _bridgeUri;
     private readonly TimeSpan _requestTimeout;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
@@ -59,13 +60,13 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
 
     public GuaClockResult PauseClock()
     {
-        Request<RemoteClockStatus>(new { type = "clock_pause" });
+        Request<RemoteClockStatus>(new { type = "clock_pause" }, responseTimeout: ClockPauseResponseTimeout);
         return GuaClockResult.Ok;
     }
 
     public async Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
     {
-        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken).ConfigureAwait(false);
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken, responseTimeout: ClockPauseResponseTimeout).ConfigureAwait(false);
         return GuaClockResult.Ok;
     }
 
@@ -423,7 +424,9 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
         return Request<GuaRemoteUiTree>(new { type = "get_ui_tree" });
     }
 
-    private T Request<T>(object command, bool allowNullResult = false)
+    private TimeSpan ClockPauseResponseTimeout => _requestTimeout > MinimumClockPauseResponseTimeout ? _requestTimeout : MinimumClockPauseResponseTimeout;
+
+    private T Request<T>(object command, bool allowNullResult = false, TimeSpan? responseTimeout = null)
     {
         _requestGate.Wait();
         try
@@ -447,7 +450,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             Send(output.ToArray());
             while (true)
             {
-                var responseJson = ReceiveString();
+                var responseJson = ReceiveString(responseTimeout);
                 using var response = JsonDocument.Parse(responseJson);
                 if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
                 {
@@ -471,7 +474,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
         finally { _requestGate.Release(); }
     }
 
-    private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNullResult = false)
+    private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNullResult = false, TimeSpan? responseTimeout = null)
     {
         await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -487,7 +490,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             }
             while (true)
             {
-                var responseJson = await ReceiveStringAsync(cancellationToken).ConfigureAwait(false);
+                var responseJson = await ReceiveStringAsync(cancellationToken, responseTimeout).ConfigureAwait(false);
                 using var response = JsonDocument.Parse(responseJson);
                 if (!response.RootElement.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
                 if (!response.RootElement.GetProperty("ok").GetBoolean())
@@ -526,10 +529,10 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
         catch { _socket.Dispose(); _socket = null; throw; }
     }
 
-    private async Task<string> ReceiveStringAsync(CancellationToken cancellationToken)
+    private async Task<string> ReceiveStringAsync(CancellationToken cancellationToken, TimeSpan? responseTimeout = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_requestTimeout);
+        timeout.CancelAfter(responseTimeout ?? _requestTimeout);
         var buffer = new byte[65536];
         using var stream = new MemoryStream();
         while (true)

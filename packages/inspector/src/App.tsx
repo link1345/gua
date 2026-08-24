@@ -8,6 +8,7 @@ import {
   type InspectorState,
   MockInspectorClient,
   WebSocketInspectorClient,
+  createCoalescedAsyncRunner,
   createInspectorState,
   getSelectedNode,
   readSnapshot,
@@ -45,7 +46,10 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [visualResult, setVisualResult] = useState<BrowserVisualResult | null>(null);
   const [secretsJson, setSecretsJson] = useState("{}");
   const [clock, setClock] = useState<GuaClockStatus | null>(null);
-  const clockRequestSequence = useRef(0);
+  const clockRefresh = useRef<{
+    client: GuaInspectorClient;
+    run: () => Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
     if (client !== undefined) {
@@ -54,14 +58,25 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
     }
   }, [client]);
 
-  const refreshClock = useCallback(async () => {
-    const sequence = ++clockRequestSequence.current;
-    try {
-      const nextClock = await inspectorClient.getClock();
-      if (sequence === clockRequestSequence.current) setClock(nextClock);
-    } catch {
-      if (sequence === clockRequestSequence.current) setClock(null);
+  const refreshClock = useCallback(() => {
+    let entry = clockRefresh.current;
+    if (entry?.client !== inspectorClient) {
+      const nextEntry: NonNullable<typeof clockRefresh.current> = {
+        client: inspectorClient,
+        run: async () => undefined,
+      };
+      nextEntry.run = createCoalescedAsyncRunner(async () => {
+        try {
+          const nextClock = await inspectorClient.getClock();
+          if (clockRefresh.current === nextEntry) setClock(nextClock);
+        } catch {
+          if (clockRefresh.current === nextEntry) setClock(null);
+        }
+      });
+      clockRefresh.current = nextEntry;
+      entry = nextEntry;
     }
+    return entry.run();
   }, [inspectorClient]);
 
   const refresh = useCallback(async () => {
@@ -95,7 +110,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
     });
 
     return () => {
-      ++clockRequestSequence.current;
+      if (clockRefresh.current?.client === inspectorClient) clockRefresh.current = null;
       unsubscribe?.();
     };
   }, [inspectorClient, refreshClock]);
