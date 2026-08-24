@@ -38,6 +38,16 @@ public sealed class SelectorParityTests
             Assert.That(ticks, Is.EqualTo(new[] { 10.0, 10.0, 5.0 }));
             Assert.That(context.Clock, Is.SameAs(clock));
         });
+
+        Assert.That(context.Reset().Result, Is.EqualTo(GuaResetResult.Succeeded));
+        var resetStatus = GuaClockControls.GetClockStatus(context);
+        Assert.Multiple(() =>
+        {
+            Assert.That(resetStatus.Installed, Is.False);
+            Assert.That(resetStatus.NowMilliseconds, Is.Zero);
+            Assert.That(resetStatus.PendingMilliseconds, Is.Zero);
+            Assert.That(resetStatus.DefaultStepMilliseconds, Is.EqualTo(1000.0 / 60.0));
+        });
     }
 
     [Test]

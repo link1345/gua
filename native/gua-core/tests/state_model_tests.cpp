@@ -98,7 +98,7 @@ int main()
     assert(gua_clock_get_status(context, &clock_status) == 1 && clock_status.pending_ms == 0.0);
 
     gua_context_t* pause_context = gua_create_context();
-    assert(gua_clock_install(pause_context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_install(pause_context, 0.0, 250.0) == GUA_CLOCK_OK);
     assert(gua_clock_advance(pause_context, 10.0) == GUA_CLOCK_OK);
     assert(gua_clock_pause(pause_context) == GUA_CLOCK_ERROR_INVALID_STATE);
     clock_step = gua_clock_step_t { sizeof(gua_clock_step_t) };
@@ -108,6 +108,11 @@ int main()
     gua_reset_options_t clock_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
     gua_reset_report_t clock_reset_report { sizeof(gua_reset_report_t) };
     assert(gua_reset_context(pause_context, &clock_reset, &clock_reset_report) == GUA_RESET_SUCCEEDED);
+    gua_clock_status_t reset_clock_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(pause_context, &reset_clock_status) == 1);
+    assert(reset_clock_status.installed == 0 && reset_clock_status.paused == 0);
+    assert(reset_clock_status.now_ms == 0.0 && reset_clock_status.pending_ms == 0.0);
+    assert(reset_clock_status.default_step_ms == 1000.0 / 60.0);
     gua_clock_operation_status_t reset_operation_status { sizeof(gua_clock_operation_status_t) };
     assert(gua_clock_get_operation_status(pause_context, &reset_operation_status) == 1);
     assert(reset_operation_status.latest_operation_sequence == reset_operation_status.completed_operation_sequence);

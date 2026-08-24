@@ -20,6 +20,7 @@
 namespace {
 
 std::string escape_json(const std::string& value);
+constexpr double default_clock_step_ms = 1000.0 / 60.0;
 
 #ifndef GUA_VERSION
 #define GUA_VERSION "0.0.0-development"
@@ -346,7 +347,7 @@ struct gua_context_t {
     bool clock_installed = false;
     bool clock_paused = false;
     double clock_now_ms = 0.0;
-    double clock_default_step_ms = 1000.0 / 60.0;
+    double clock_default_step_ms = default_clock_step_ms;
     double clock_pending_ms = 0.0;
     double clock_pending_step_ms = 1000.0 / 60.0;
     double clock_pending_total_ms = 0.0;
@@ -1551,6 +1552,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     }
     if ((options->flags & GUA_RESET_CLOCK) != 0U) {
         ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
+        ctx->clock_default_step_ms = default_clock_step_ms;
         ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ctx->clock_pending_elapsed_ms = 0.0;
         ctx->clock_pending_target_ms = 0.0; ctx->clock_pending_step_count = 0; ctx->clock_pending_step_index = 0;
         ctx->clock_pending_operation_sequence = 0; ctx->clock_awaiting_frame_operation_sequence = 0;
