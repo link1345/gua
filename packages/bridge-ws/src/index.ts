@@ -123,12 +123,19 @@ export class DemoRuntime {
     };
   }
   getClock() { return this.clock; }
-  installClock(initial = 0, step = 1000 / 60) { if (this.clock.installed) throw new Error("invalid_state"); if (!Number.isFinite(initial) || initial < 0 || !Number.isFinite(step) || step <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 }; return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) {
+    if (this.clock.installed) throw new Error("invalid_state");
+    const nextTime = initial + step;
+    if (!Number.isFinite(initial) || initial < 0 || !Number.isFinite(step) || step <= 0 ||
+        !Number.isFinite(nextTime) || nextTime <= initial) throw new Error("invalid_duration");
+    this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 };
+    return this.clock;
+  }
   pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
     const nextTime = this.clock.nowMs + duration;
-    if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) ||
+    if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) || duration > 0 && nextTime <= this.clock.nowMs ||
         step !== undefined && (!Number.isFinite(step) || step <= 0)) throw new Error("invalid_duration");
     const operationSequence = this.nextClockOperationSequence++;
     this.clock = { ...this.clock, nowMs: nextTime };

@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/variant.hpp>
 
 namespace godot {
 
@@ -46,7 +47,7 @@ public:
     Dictionary reset_context(const Dictionary& options = Dictionary());
     Dictionary clock_install(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0);
     Dictionary clock_pause();
-    Dictionary clock_run_for(double duration_ms, double step_ms = 0.0);
+    Dictionary clock_run_for(double duration_ms, const Variant& step_ms = Variant());
     Dictionary clock_resume();
     Dictionary clock_advance(double duration_ms);
     Dictionary get_clock() const;

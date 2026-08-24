@@ -227,7 +227,7 @@ func clock_install(initial_time_ms: float = 0.0, step_ms: float = 1000.0 / 60.0)
 func clock_pause() -> Dictionary:
 	return context.clock_pause() if _ensure_context() else {}
 
-func clock_run_for(duration_ms: float, step_ms: float = 0.0) -> Dictionary:
+func clock_run_for(duration_ms: float, step_ms = null) -> Dictionary:
 	return context.clock_run_for(duration_ms, step_ms) if _ensure_context() else {}
 
 func clock_resume() -> Dictionary:

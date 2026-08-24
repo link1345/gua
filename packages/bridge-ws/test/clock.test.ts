@@ -21,6 +21,16 @@ describe("DemoRuntime virtual clock", () => {
     expect(runtime.getClock().nowMs).toBe(100);
   });
 
+  test("rejects steps and runs that cannot advance a large timeline", () => {
+    const runtime = new DemoRuntime();
+    expect(() => runtime.installClock(1e16, 1)).toThrow("invalid_duration");
+
+    runtime.installClock(1e16, 2);
+    runtime.pauseClock();
+    expect(() => runtime.runClockFor(1)).toThrow("invalid_duration");
+    expect(runtime.getClock().nowMs).toBe(1e16);
+  });
+
   test("advances the completion frame without inventing a semantic revision", async () => {
     const runtime = new DemoRuntime();
     runtime.installClock(0, 10);

@@ -386,8 +386,14 @@ Dictionary GuaContext::get_clock() const
 }
 Dictionary GuaContext::clock_install(double initial_time_ms, double step_ms) { return clock_result(runtime_, gua_runtime_clock_install(runtime_, initial_time_ms, step_ms)); }
 Dictionary GuaContext::clock_pause() { return clock_result(runtime_, gua_runtime_clock_pause(runtime_)); }
-Dictionary GuaContext::clock_run_for(double duration_ms, double step_ms)
-{ const Dictionary status = get_clock(); const double actual = step_ms == 0.0 ? static_cast<double>(status["default_step_ms"]) : step_ms; return clock_result(runtime_, gua_runtime_clock_run_for(runtime_, duration_ms, actual)); }
+Dictionary GuaContext::clock_run_for(double duration_ms, const Variant& step_ms)
+{
+    const Dictionary status = get_clock();
+    const double actual = step_ms.get_type() == Variant::NIL
+        ? static_cast<double>(status["default_step_ms"])
+        : static_cast<double>(step_ms);
+    return clock_result(runtime_, gua_runtime_clock_run_for(runtime_, duration_ms, actual));
+}
 Dictionary GuaContext::clock_resume() { return clock_result(runtime_, gua_runtime_clock_resume(runtime_)); }
 Dictionary GuaContext::clock_advance(double duration_ms) { return clock_result(runtime_, gua_runtime_clock_advance(runtime_, duration_ms)); }
 Dictionary GuaContext::consume_clock_step()
@@ -513,7 +519,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("reset_context", "options"), &GuaContext::reset_context, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("clock_install", "initial_time_ms", "step_ms"), &GuaContext::clock_install, DEFVAL(0.0), DEFVAL(1000.0 / 60.0));
     ClassDB::bind_method(D_METHOD("clock_pause"), &GuaContext::clock_pause);
-    ClassDB::bind_method(D_METHOD("clock_run_for", "duration_ms", "step_ms"), &GuaContext::clock_run_for, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("clock_run_for", "duration_ms", "step_ms"), &GuaContext::clock_run_for, DEFVAL(Variant()));
     ClassDB::bind_method(D_METHOD("clock_resume"), &GuaContext::clock_resume);
     ClassDB::bind_method(D_METHOD("clock_advance", "duration_ms"), &GuaContext::clock_advance);
     ClassDB::bind_method(D_METHOD("get_clock"), &GuaContext::get_clock);

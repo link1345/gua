@@ -171,16 +171,19 @@ public sealed class SelectorParityTests
         runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
         runtime.Clock.Pause();
         var callbacks = new List<string>();
-        Exception? callbackFailure = null;
-        runtime.Clock.CallbackFailed += error => callbackFailure = error;
+        var callbackFailures = new List<Exception>();
+        runtime.Clock.CallbackFailed += error => callbackFailures.Add(error);
         runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () => throw new InvalidOperationException("boom"));
         runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () => callbacks.Add("second"));
+        runtime.Clock.Tick += _ => throw new ApplicationException("tick-boom");
         runtime.Clock.Tick += _ => callbacks.Add("tick");
 
         Assert.That(() => runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10)), Throws.Nothing);
         Assert.Multiple(() =>
         {
-            Assert.That(callbackFailure, Is.TypeOf<InvalidOperationException>());
+            Assert.That(callbackFailures, Has.Count.EqualTo(2));
+            Assert.That(callbackFailures[0], Is.TypeOf<InvalidOperationException>());
+            Assert.That(callbackFailures[1], Is.TypeOf<ApplicationException>());
             Assert.That(callbacks, Is.EqualTo(new[] { "second", "tick" }));
             Assert.That(ScheduledCount(runtime.Clock), Is.Zero);
         });

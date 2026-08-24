@@ -23,7 +23,15 @@ public sealed class GuaRuntimeClock
     { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(Status.DefaultStepMilliseconds)).TotalMilliseconds)); Drain(); }
     public void Advance(TimeSpan unscaledDelta)
     { var status = Status; PurgeInactive(status); if (!status.Installed) return; if (status.PendingMilliseconds > 0) { Drain(); return; }
-      if (status.Paused || unscaledDelta <= TimeSpan.Zero) return; Check(Native.gua_runtime_clock_advance(runtime.Handle, unscaledDelta.TotalMilliseconds)); Drain(); }
+      if (status.Paused || unscaledDelta <= TimeSpan.Zero) return;
+      var result = Native.gua_runtime_clock_advance(runtime.Handle, unscaledDelta.TotalMilliseconds);
+      if (result != (int)GuaClockResult.Ok)
+      {
+          var latest = Status;
+          if ((GuaClockResult)result == GuaClockResult.InvalidState && latest.Installed && latest.Paused) return;
+          Check(result);
+      }
+      Drain(); }
     public IDisposable Schedule(TimeSpan delay, Action callback, TimeSpan? interval = null)
     {
         if (callback is null) throw new ArgumentNullException(nameof(callback));
@@ -55,7 +63,10 @@ public sealed class GuaRuntimeClock
               { item.Cancelled = true; scheduled.RemoveAll(candidate => candidate.Generation != generation); break; }
               if (item.Interval is { } interval && !item.Cancelled) { item.Due += interval; scheduled.Add(item); } else item.Cancelled = true; }
             scheduled.RemoveAll(x => x.Cancelled);
-            Tick?.Invoke(new GuaClockDelta(step.DeltaMs));
+            if (Tick is not null)
+                foreach (Action<GuaClockDelta> handler in Tick.GetInvocationList())
+                    try { handler(new GuaClockDelta(step.DeltaMs)); }
+                    catch (Exception error) { ReportCallbackFailure(error); }
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }
     }

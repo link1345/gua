@@ -332,6 +332,10 @@ func _run() -> void:
 	ui.clock_schedule(20.0, func(): preinstall_schedule_count[0] += 1)
 	ui.clock_install(0.0, 10.0)
 	ui.clock_pause()
+	var rejected_zero_step := ui.clock_run_for(10.0, 0.0)
+	if rejected_zero_step.get("result", 0) != -1 or rejected_zero_step.get("error", "") != "invalid_duration" or float(ui.get_clock().get("now_ms", -1.0)) != 0.0:
+		_fail("Gua Godot clock accepted an explicitly supplied zero step: %s" % rejected_zero_step)
+		return
 	var clock_order: Array[String] = []
 	ui.clock_tick.connect(func(_delta: float): clock_order.append("tick:%d" % int(ui.get_clock().get("now_ms", -1.0))))
 	ui.clock_schedule(20.0, func(): clock_order.append("schedule:%d" % int(ui.get_clock().get("now_ms", -1.0))))
