@@ -9,7 +9,7 @@ public sealed class GuaTestHost
     public GuaTestHost(GuaContext context)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
-        Clock = new GuaClock(_context);
+        Clock = _context.Clock;
     }
 
     public GuaClock Clock { get; }

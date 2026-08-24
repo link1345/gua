@@ -5,14 +5,26 @@ namespace Gua.Testing;
 public static class GuaClockControls
 {
     public static GuaClockStatus InstallClock(IGuaContext context, TimeSpan? initialTime = null, TimeSpan? step = null)
-    { var clock = Require(context); Ensure(clock.InstallClock(initialTime, step)); return clock.GetClockStatus(); }
+    {
+        if (context is GuaContext local) { local.Clock.Install(initialTime, step); return local.Clock.Status; }
+        var clock = Require(context); Ensure(clock.InstallClock(initialTime, step)); return clock.GetClockStatus();
+    }
     public static GuaClockStatus PauseClock(IGuaContext context)
-    { var clock = Require(context); Ensure(clock.PauseClock()); return clock.GetClockStatus(); }
+    {
+        if (context is GuaContext local) { local.Clock.Pause(); return local.Clock.Status; }
+        var clock = Require(context); Ensure(clock.PauseClock()); return clock.GetClockStatus();
+    }
     public static GuaClockStatus RunClockFor(IGuaContext context, TimeSpan duration, TimeSpan? step = null)
-    { var clock = Require(context); Ensure(clock.RunClockFor(duration, step)); return clock.GetClockStatus(); }
+    {
+        if (context is GuaContext local) { local.Clock.RunFor(duration, step); return local.Clock.Status; }
+        var clock = Require(context); Ensure(clock.RunClockFor(duration, step)); return clock.GetClockStatus();
+    }
     public static GuaClockStatus ResumeClock(IGuaContext context)
-    { var clock = Require(context); Ensure(clock.ResumeClock()); return clock.GetClockStatus(); }
-    public static GuaClockStatus GetClockStatus(IGuaContext context) => Require(context).GetClockStatus();
+    {
+        if (context is GuaContext local) { local.Clock.Resume(); return local.Clock.Status; }
+        var clock = Require(context); Ensure(clock.ResumeClock()); return clock.GetClockStatus();
+    }
+    public static GuaClockStatus GetClockStatus(IGuaContext context) => context is GuaContext local ? local.Clock.Status : Require(context).GetClockStatus();
 
     public static async Task<GuaClockStatus> InstallClockAsync(IGuaContext context, TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default)
     {

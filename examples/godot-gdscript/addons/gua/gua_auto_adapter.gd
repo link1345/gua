@@ -56,6 +56,7 @@ var gdextension_resource: Resource
 var unavailable := false
 var screenshot_capture_scheduled := false
 var last_clock_ticks_ms := Time.get_ticks_msec()
+var observed_clock_generation := -1
 var clock_schedules: Array[Dictionary] = []
 var next_clock_schedule_id := 1
 var active_clock_schedule_id := 0
@@ -68,6 +69,7 @@ var clock_execution_limit_reached := false
 
 func attach(root_control: Control) -> void:
 	root = root_control
+	last_clock_ticks_ms = Time.get_ticks_msec()
 	_ensure_context()
 
 
@@ -77,7 +79,12 @@ func update(screen: String) -> void:
 	var ticks_ms := Time.get_ticks_msec()
 	var clock_status: Dictionary = context.get_clock()
 	_bind_pending_clock_schedules(clock_status)
-	if clock_status.get("installed", false) and clock_status.get("state", "running") == "running":
+	var clock_installed := bool(clock_status.get("installed", false))
+	var clock_generation := int(clock_status.get("generation", -1))
+	if clock_installed and observed_clock_generation != clock_generation:
+		last_clock_ticks_ms = ticks_ms
+	observed_clock_generation = clock_generation if clock_installed else -1
+	if clock_installed and clock_status.get("state", "running") == "running":
 		context.clock_advance(maxi(0, ticks_ms - last_clock_ticks_ms))
 	last_clock_ticks_ms = ticks_ms
 	while true:
@@ -227,7 +234,13 @@ func get_context_status() -> Dictionary:
 
 
 func clock_install(initial_time_ms: float = 0.0, step_ms: float = 1000.0 / 60.0) -> Dictionary:
-	return context.clock_install(initial_time_ms, step_ms) if _ensure_context() else {}
+	if not _ensure_context():
+		return {}
+	var result: Dictionary = context.clock_install(initial_time_ms, step_ms)
+	if int(result.get("result", 0)) == 1:
+		last_clock_ticks_ms = Time.get_ticks_msec()
+		observed_clock_generation = int(result.get("generation", context.get_clock().get("generation", -1)))
+	return result
 
 func clock_pause() -> Dictionary:
 	return context.clock_pause() if _ensure_context() else {}
@@ -322,6 +335,8 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 		controls_by_id.clear()
 		suppressed_clicks.clear()
 		if (int(resolved.get("flags", RESET_DEFAULT_FLAGS)) & RESET_CLOCK_FLAG) != 0:
+			last_clock_ticks_ms = Time.get_ticks_msec()
+			observed_clock_generation = -1
 			clock_schedules.clear()
 			active_clock_schedule_id = 0
 			active_clock_schedule_cancelled = false
@@ -404,10 +419,10 @@ func _collect_control(control: Control, parent_id: String) -> void:
 	}
 	if not parent_id.is_empty():
 		descriptor["parent_id"] = parent_id
-	var text := _control_text(control)
+	var text: Variant = _control_text(control)
 	if text != null:
 		descriptor["text"] = text
-	var value := _control_value(control)
+	var value: Variant = _control_value(control)
 	if value != null:
 		descriptor["value"] = value
 	if control is CheckBox:

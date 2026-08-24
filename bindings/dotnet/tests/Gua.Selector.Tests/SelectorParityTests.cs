@@ -17,6 +17,30 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void LocalClockControlsDrainTheContextsOwnedClock()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        var callbacks = 0;
+        var ticks = new List<double>();
+        clock.Schedule(TimeSpan.FromMilliseconds(20), () => callbacks++);
+        clock.Tick += delta => ticks.Add(delta.TotalMilliseconds);
+
+        GuaClockControls.InstallClock(context, step: TimeSpan.FromMilliseconds(10));
+        GuaClockControls.PauseClock(context);
+        var status = GuaClockControls.RunClockFor(context, TimeSpan.FromMilliseconds(25));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(status.NowMilliseconds, Is.EqualTo(25));
+            Assert.That(status.PendingMilliseconds, Is.Zero);
+            Assert.That(callbacks, Is.EqualTo(1));
+            Assert.That(ticks, Is.EqualTo(new[] { 10.0, 10.0, 5.0 }));
+            Assert.That(context.Clock, Is.SameAs(clock));
+        });
+    }
+
+    [Test]
     public void SchedulesCreatedBeforeInstallationBindToTheFirstClockGeneration()
     {
         using var context = new GuaContext();

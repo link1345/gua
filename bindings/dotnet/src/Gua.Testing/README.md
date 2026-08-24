@@ -6,6 +6,9 @@ Contexts implementing `IGuaClockContext` can use
 `GuaClockControls.InstallClock`, `PauseClock`, `RunClockFor`, and `ResumeClock`
 with matching async methods. The clock advances explicitly connected GuaClock
 work; it is not a wall-clock sleep or an engine-global pause.
+For a local `GuaContext`, the controls use `context.Clock`; `RunClockFor`
+returns only after its queued steps, schedules, and Tick notifications are
+drained. Remote contexts retain their adapter-correlated completion behavior.
 
 `Gua.Testing` adds locator, assertion, wait, and test-host helpers on top of
 `Gua.Core`.

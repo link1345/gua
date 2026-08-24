@@ -5,6 +5,7 @@ namespace Gua.Core;
 public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private nint _handle;
+    private GuaClock? _clock;
 
     public GuaContext()
     {
@@ -143,6 +144,21 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
     {
         ThrowIfDisposed();
         return GuaVersion.Parse(ReadCopiedJson(JsonSource.Version, _handle));
+    }
+
+    public GuaClock Clock
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _clock ??= new GuaClock(this, registerWithContext: false);
+        }
+    }
+
+    internal void RegisterClock(GuaClock clock)
+    {
+        ThrowIfDisposed();
+        _clock = clock;
     }
 
     public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)

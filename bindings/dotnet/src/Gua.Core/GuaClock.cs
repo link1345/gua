@@ -41,7 +41,12 @@ public sealed class GuaClock
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
     private bool draining;
-    public GuaClock(GuaContext context) => this.context = context ?? throw new ArgumentNullException(nameof(context));
+    public GuaClock(GuaContext context) : this(context, registerWithContext: true) { }
+    internal GuaClock(GuaContext context, bool registerWithContext)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        if (registerWithContext) context.RegisterClock(this);
+    }
     public event Action<GuaClockDelta>? Tick;
     public GuaClockStatus Status => context.GetClockStatus();
 

@@ -330,7 +330,12 @@ func _run() -> void:
 
 	var preinstall_schedule_count := [0]
 	ui.clock_schedule(20.0, func(): preinstall_schedule_count[0] += 1)
-	ui.clock_install(0.0, 10.0)
+	ui.last_clock_ticks_ms = 0
+	var install_started_ticks := Time.get_ticks_msec()
+	var installed_clock := ui.clock_install(0.0, 10.0)
+	if installed_clock.get("result", 0) != 1 or ui.last_clock_ticks_ms < install_started_ticks:
+		_fail("Gua Godot clock retained elapsed time from before installation: %s" % [installed_clock])
+		return
 	ui.clock_pause()
 	var rejected_zero_step := ui.clock_run_for(10.0, 0.0)
 	if rejected_zero_step.get("result", 0) != -1 or rejected_zero_step.get("error", "") != "invalid_duration" or float(ui.get_clock().get("now_ms", -1.0)) != 0.0:
