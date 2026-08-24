@@ -94,6 +94,11 @@ func update(screen: String) -> void:
 		if clock_execution_limit_reached:
 			push_error("Gua clock execution_limit")
 			clock_execution_limit_reached = false
+		if int(context.get_clock().get("generation", -1)) != step_generation:
+			clock_run_active = false
+			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
+			clock_run_generation = -1
+			continue
 		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
 		if bool(step.get("final", false)):
 			clock_run_active = false

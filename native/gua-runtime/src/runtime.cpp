@@ -3,6 +3,7 @@
 #include "gua/ws_bridge.hpp"
 
 #include <cstdio>
+#include <atomic>
 #include <chrono>
 #include <algorithm>
 #include <deque>
@@ -35,6 +36,7 @@ struct gua_runtime_t {
     std::string godot_plugin_version;
     std::map<std::string, std::string> adapter_versions;
     bool virtual_clock_enabled = false;
+    std::atomic_bool bridge_stopping = false;
     uint64_t next_screenshot_request_id = 1;
     std::deque<gua_screenshot_request_t> screenshot_requests;
     std::unordered_map<uint64_t, ScreenshotBatch> screenshot_batches;
@@ -836,6 +838,7 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
     if (runtime->bridge != nullptr && runtime->bridge->running()) {
         return runtime->bridge->port() == static_cast<unsigned short>(port) ? 1 : 0;
     }
+    runtime->bridge_stopping.store(false);
 
     gua::ws::BridgeHandlers handlers {
         .get_ui_tree_json = [runtime] {
@@ -905,6 +908,8 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
                 unsigned long long completion_after_frame = 0;
                 unsigned long long session_epoch = 0;
                 while (std::chrono::steady_clock::now() < deadline) {
+                    if (runtime->bridge_stopping.load())
+                        return gua::ws::CommandResult { false, {}, "stale_session" };
                     {
                         const std::lock_guard lock(runtime->context_mutex);
                         gua_clock_status_t clock { sizeof(gua_clock_status_t) };
@@ -1076,6 +1081,7 @@ extern "C" void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime)
         return;
     }
 
+    runtime->bridge_stopping.store(true);
     std::unique_ptr<gua::ws::BridgeServer> bridge;
     {
         const std::lock_guard bridge_lock(runtime->bridge_mutex);

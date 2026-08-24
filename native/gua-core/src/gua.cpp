@@ -1082,10 +1082,11 @@ extern "C" int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_
     const double next_elapsed_ms = final_step ? ctx->clock_pending_total_ms :
         std::min(ctx->clock_pending_total_ms,
             ctx->clock_pending_step_ms * static_cast<double>(ctx->clock_pending_step_index));
-    const double delta = next_elapsed_ms - ctx->clock_pending_elapsed_ms;
+    const double next_now_ms = final_step ? ctx->clock_pending_target_ms : ctx->clock_pending_start_ms + next_elapsed_ms;
+    const double delta = next_now_ms - ctx->clock_now_ms;
     ctx->clock_pending_elapsed_ms = next_elapsed_ms;
     ctx->clock_pending_ms = final_step ? 0.0 : ctx->clock_pending_total_ms - next_elapsed_ms;
-    ctx->clock_now_ms = final_step ? ctx->clock_pending_target_ms : ctx->clock_pending_start_ms + next_elapsed_ms;
+    ctx->clock_now_ms = next_now_ms;
     if (final_step) {
         ctx->clock_pending_total_ms = 0.0;
         ctx->clock_awaiting_frame_operation_sequence = std::max(

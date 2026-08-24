@@ -40,6 +40,7 @@ public sealed class GuaClock
     private readonly GuaContext context;
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
+    private bool draining;
     public GuaClock(GuaContext context) => this.context = context ?? throw new ArgumentNullException(nameof(context));
     public event Action<GuaClockDelta>? Tick;
     public GuaClockStatus Status => context.GetClockStatus();
@@ -68,6 +69,10 @@ public sealed class GuaClock
 
     public void DrainPendingSteps()
     {
+        if (draining) return;
+        draining = true;
+        try
+        {
         BindPendingSchedules();
         var callbacks = 0;
         while (context.TryConsumeClockStep(out var step))
@@ -101,8 +106,11 @@ public sealed class GuaClock
                 else item.Cancelled = true;
             }
             scheduled.RemoveAll(item => item.Cancelled);
+            if (context.GetClockStatus().Generation != step.Generation) continue;
             Tick?.Invoke(new GuaClockDelta(step.Delta.TotalMilliseconds));
         }
+        }
+        finally { draining = false; }
     }
 
     private void BindPendingSchedules()

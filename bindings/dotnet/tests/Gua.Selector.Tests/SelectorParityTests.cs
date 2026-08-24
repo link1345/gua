@@ -61,29 +61,38 @@ public sealed class SelectorParityTests
         clock.Install(step: TimeSpan.FromMilliseconds(10));
         clock.Pause();
         var callbacks = 0;
+        var coreTicks = new List<double>();
+        clock.Tick += tick => coreTicks.Add(tick.TotalMilliseconds);
         clock.Schedule(TimeSpan.FromMilliseconds(10), () =>
         {
             callbacks++;
-            clock.RunFor(TimeSpan.FromMilliseconds(10));
+            clock.RunFor(TimeSpan.FromMilliseconds(5));
         });
         clock.RunFor(TimeSpan.FromMilliseconds(10));
         Assert.Multiple(() =>
         {
             Assert.That(callbacks, Is.EqualTo(1));
-            Assert.That(clock.Status.NowMilliseconds, Is.EqualTo(20));
+            Assert.That(clock.Status.NowMilliseconds, Is.EqualTo(15));
+            Assert.That(coreTicks, Is.EqualTo(new[] { 10.0, 5.0 }));
         });
 
         using var runtime = new GuaRuntime();
         runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
         runtime.Clock.Pause();
         var runtimeCallbacks = 0;
+        var runtimeTicks = new List<double>();
+        runtime.Clock.Tick += tick => runtimeTicks.Add(tick.TotalMilliseconds);
         runtime.Clock.Schedule(TimeSpan.FromMilliseconds(10), () =>
         {
             runtimeCallbacks++;
-            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(5));
         });
         runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
-        Assert.That(runtimeCallbacks, Is.EqualTo(1));
+        Assert.Multiple(() =>
+        {
+            Assert.That(runtimeCallbacks, Is.EqualTo(1));
+            Assert.That(runtimeTicks, Is.EqualTo(new[] { 10.0, 5.0 }));
+        });
     }
 
     [Test]
@@ -94,6 +103,8 @@ public sealed class SelectorParityTests
         clock.Install(step: TimeSpan.FromMilliseconds(10));
         clock.Pause();
         var callbacks = 0;
+        var coreTicks = 0;
+        clock.Tick += _ => coreTicks++;
         clock.Schedule(TimeSpan.FromMilliseconds(1), () =>
         {
             callbacks++;
@@ -102,6 +113,7 @@ public sealed class SelectorParityTests
 
         clock.RunFor(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10));
         Assert.That(callbacks, Is.EqualTo(1));
+        Assert.That(coreTicks, Is.Zero, "A reset callback must suppress the stale generation's tick.");
         clock.Install(step: TimeSpan.FromMilliseconds(10));
         clock.Pause();
         clock.RunFor(TimeSpan.FromMilliseconds(10));
@@ -118,6 +130,8 @@ public sealed class SelectorParityTests
             runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
             runtime.Clock.Pause();
             var runtimeCallbacks = 0;
+            var runtimeTicks = 0;
+            runtime.Clock.Tick += _ => runtimeTicks++;
             runtime.Clock.Schedule(TimeSpan.FromMilliseconds(1), () =>
             {
                 runtimeCallbacks++;
@@ -126,6 +140,7 @@ public sealed class SelectorParityTests
 
             runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(10));
             Assert.That(runtimeCallbacks, Is.EqualTo(1));
+            Assert.That(runtimeTicks, Is.Zero, "A remote reset callback must suppress the stale generation's tick.");
             runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
             runtime.Clock.Pause();
             runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
@@ -588,6 +603,44 @@ public sealed class SelectorParityTests
                 "Asynchronous pause must observe cancellation while the consumed running step awaits its host frame.");
             Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
             await Task.Delay(30);
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
+        }
+    }
+
+    [Test]
+    public async Task StoppingBridgeCancelsAnInFlightRemotePauseWait()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Native.gua_runtime_set_virtual_clock_enabled(runtime, 1);
+            Native.gua_runtime_begin_frame(runtime, "fixture"); Native.gua_runtime_end_frame(runtime);
+            Assert.That(Native.gua_runtime_clock_install(runtime, 0, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_clock_advance(runtime, 10), Is.EqualTo(1));
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var remote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(12));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+
+            var pause = Task.Run(() =>
+            {
+                try { remote.PauseClock(); }
+                catch (Exception) { }
+            });
+            await Task.Delay(50);
+            Assert.That(pause.IsCompleted, Is.False, "The fixture must enter the in-flight pause wait before shutdown.");
+
+            var stopwatch = Stopwatch.StartNew();
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            stopwatch.Stop();
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(2)),
+                "Bridge shutdown must cancel the pause handler instead of waiting for its 10-second deadline.");
+            await pause.WaitAsync(TimeSpan.FromSeconds(2));
         }
         finally
         {

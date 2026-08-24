@@ -165,6 +165,7 @@ int main()
     while (gua_clock_consume_step(magnitude_context, &magnitude_step) == 1) {
         assert(gua_clock_get_status(magnitude_context, &magnitude_status) == 1);
         assert(magnitude_status.now_ms > previous_now);
+        assert(magnitude_step.delta_ms == magnitude_status.now_ms - previous_now);
         previous_now = magnitude_status.now_ms;
         ++magnitude_steps;
         magnitude_step = gua_clock_step_t { sizeof(gua_clock_step_t) };

@@ -9,6 +9,7 @@ public sealed class GuaRuntimeClock
     private readonly GuaRuntime runtime;
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
+    private bool draining;
     internal GuaRuntimeClock(GuaRuntime runtime) => this.runtime = runtime;
     public event Action<GuaClockDelta>? Tick;
     public event Action<Exception>? CallbackFailed;
@@ -44,6 +45,10 @@ public sealed class GuaRuntimeClock
     }
     public void Drain()
     {
+        if (draining) return;
+        draining = true;
+        try
+        {
         BindPendingSchedules();
         var callbackCount = 0;
         var step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
@@ -63,12 +68,19 @@ public sealed class GuaRuntimeClock
               { item.Cancelled = true; scheduled.RemoveAll(candidate => candidate.Generation != generation); break; }
               if (item.Interval is { } interval && !item.Cancelled) { item.Due += interval; scheduled.Add(item); } else item.Cancelled = true; }
             scheduled.RemoveAll(x => x.Cancelled);
+            if (Status.Generation != step.Generation)
+            {
+                step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
+                continue;
+            }
             if (Tick is not null)
                 foreach (Action<GuaClockDelta> handler in Tick.GetInvocationList())
                     try { handler(new GuaClockDelta(step.DeltaMs)); }
                     catch (Exception error) { ReportCallbackFailure(error); }
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }
+        }
+        finally { draining = false; }
     }
     private void BindPendingSchedules()
     {

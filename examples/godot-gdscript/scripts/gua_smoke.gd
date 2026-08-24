@@ -373,12 +373,16 @@ func _run() -> void:
 		return
 
 	var reset_interval_count := [0]
+	var tick_count_before_reset := clock_order.size()
 	ui.clock_schedule(1.0, func():
 		reset_interval_count[0] += 1
 		ui.reset_context()
 	, 1.0)
 	ui.clock_run_for(10.0, 10.0)
 	ui.update("title")
+	if clock_order.size() != tick_count_before_reset:
+		_fail("Gua emitted a stale clock tick after a reset callback: %s" % [clock_order])
+		return
 	ui.clock_install(0.0, 10.0)
 	ui.clock_pause()
 	ui.clock_run_for(10.0, 10.0)
