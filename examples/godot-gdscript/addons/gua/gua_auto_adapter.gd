@@ -278,6 +278,9 @@ func clock_cancel(schedule_id: int) -> void:
 
 func _bind_pending_clock_schedules(status: Dictionary) -> void:
 	if not bool(status.get("installed", false)):
+		var generation := int(status.get("generation", 0))
+		clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool:
+			return int(item.get("generation", -1)) == generation)
 		return
 	var generation := int(status.get("generation", 0))
 	var now_ms := float(status.get("now_ms", 0.0))

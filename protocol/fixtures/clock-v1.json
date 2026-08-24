@@ -5,5 +5,6 @@
   "nowMs": 2000,
   "defaultStepMs": 16.666667,
   "pendingMs": 0,
-  "generation": 1
+  "generation": 1,
+  "completedOperationSequence": 0
 }

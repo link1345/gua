@@ -217,9 +217,10 @@ void invalidate_screenshot_requests(gua_runtime_t* runtime)
         result = stale_screenshot_json(request_id, status);
 }
 
-std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags, bool strict)
+std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags,
+    unsigned int flags_version, bool strict)
 {
-    gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch };
+    gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch, flags_version };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const std::lock_guard lock(runtime->context_mutex);
     const int result = gua_reset_context(runtime->context, &options, &report);
@@ -983,8 +984,8 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             return json;
         },
         .get_context_status_json = [runtime] { return status_json(runtime); },
-        .reset_context_json = [runtime](unsigned long long expected_epoch, unsigned int flags, bool strict) {
-            return reset_report_json(runtime, expected_epoch, flags, strict);
+        .reset_context_json = [runtime](unsigned long long expected_epoch, unsigned int flags, unsigned int flags_version, bool strict) {
+            return reset_report_json(runtime, expected_epoch, flags, flags_version, strict);
         },
         .click_node = [runtime](std::string_view node_id) {
             const std::string id(node_id);

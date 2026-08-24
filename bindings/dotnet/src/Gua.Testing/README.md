@@ -104,7 +104,10 @@ For high-level isolation, construct `GuaTestSession` with lifecycle options.
 `GuaTestSessionOptions.Strict` enables strict startup and teardown reset.
 Policies can also be selected independently with `GuaResetPolicy.Disabled`,
 `NonStrict`, or `Strict`; their default targets are nodes, requests, events,
-and retained history. Logs and screenshots remain preserved unless selected.
+retained history, and clock state. Logs and screenshots remain preserved unless
+selected. The published `GuaResetTargets.Default` (15) and `All` (63) values are
+retained for binary compatibility; new default behavior uses `SessionDefault`,
+and `AllWithClock` selects every target.
 
 ```csharp
 using var session = new GuaTestSession(context, new GuaTestSessionOptions

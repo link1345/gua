@@ -107,6 +107,7 @@
         "type": { "const": "reset_context" },
         "expectedSessionEpoch": { "type": "integer", "minimum": 1 },
         "flags": { "type": "integer", "minimum": 0, "maximum": 127, "default": 79 },
+        "flagsVersion": { "const": 1 },
         "strict": { "type": "boolean", "default": false }
       }
     },

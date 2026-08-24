@@ -440,9 +440,10 @@ Dictionary GuaContext::reset_context(const Dictionary& source)
 {
     const gua_reset_options_t options {
         sizeof(gua_reset_options_t),
-        static_cast<uint32_t>(static_cast<int64_t>(source.get("flags", GUA_RESET_DEFAULT))),
+        static_cast<uint32_t>(static_cast<int64_t>(source.get("flags", GUA_RESET_DEFAULT_V2))),
         source.get("strict", false) ? 1 : 0,
         static_cast<uint64_t>(static_cast<int64_t>(source.get("expected_session_epoch", 0))),
+        GUA_RESET_FLAGS_VERSION_CURRENT,
     };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const int code = gua_runtime_reset_context(runtime_, &options, &report);

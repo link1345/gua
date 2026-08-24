@@ -776,7 +776,7 @@ class GuaBridgeClient {
     const responseTimeoutMs = command.type === "clock_pause"
       ? Math.max(this.requestTimeoutMs, clockPauseResponseTimeoutMs)
       : this.requestTimeoutMs;
-    let result = await this.request<{ pendingMs?: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command, responseTimeoutMs);
+    let result = await this.request<{ pendingMs?: number; completedOperationSequence: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number }>(command, responseTimeoutMs);
     if (command.type !== "clock_run_for") return result;
     const completionEpoch = result.completionSessionEpoch;
     const completionFrame = result.completionAfterFrameSequence;
@@ -786,7 +786,7 @@ class GuaBridgeClient {
     while (Date.now() - started < 10000) {
       const tree = await this.getUiTree();
       if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
-      if ((result.completedOperationSequence ?? 0) >= operationSequence && (tree.frameSequence ?? 0) > completionFrame) return result;
+      if (result.completedOperationSequence >= operationSequence && (tree.frameSequence ?? 0) > completionFrame) return result;
       await sleep(5);
       const status = await this.request<{
         schemaVersion: number;
@@ -796,7 +796,7 @@ class GuaBridgeClient {
         defaultStepMs: number;
         pendingMs: number;
         generation: number;
-        completedOperationSequence?: number;
+        completedOperationSequence: number;
       }>({ type: "get_clock" });
       result = { ...result, ...status };
     }

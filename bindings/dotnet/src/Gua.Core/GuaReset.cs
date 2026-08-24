@@ -11,8 +11,10 @@ public enum GuaResetTargets : uint
     Logs = 1 << 4,
     Screenshot = 1 << 5,
     Clock = 1 << 6,
-    Default = Nodes | Requests | Events | History | Clock,
+    Default = Nodes | Requests | Events | History,
+    SessionDefault = Default | Clock,
     All = Default | Logs | Screenshot,
+    AllWithClock = All | Clock,
 }
 
 public enum GuaResetResult
@@ -24,7 +26,7 @@ public enum GuaResetResult
 }
 
 public sealed record GuaResetOptions(
-    GuaResetTargets Targets = GuaResetTargets.Default,
+    GuaResetTargets Targets = GuaResetTargets.SessionDefault,
     bool Strict = false,
     ulong? ExpectedSessionEpoch = null);
 

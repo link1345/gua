@@ -39,7 +39,11 @@ public sealed class SelectorParityTests
             Assert.That(context.Clock, Is.SameAs(clock));
         });
 
+        var captured = ScheduleCapturedCallback(clock);
         Assert.That(context.Reset().Result, Is.EqualTo(GuaResetResult.Succeeded));
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
         var resetStatus = GuaClockControls.GetClockStatus(context);
         Assert.Multiple(() =>
         {
@@ -47,7 +51,26 @@ public sealed class SelectorParityTests
             Assert.That(resetStatus.NowMilliseconds, Is.Zero);
             Assert.That(resetStatus.PendingMilliseconds, Is.Zero);
             Assert.That(resetStatus.DefaultStepMilliseconds, Is.EqualTo(1000.0 / 60.0));
+            Assert.That(captured.IsAlive, Is.False, "Clock reset must release stale callback closures immediately.");
+            Assert.That((uint)GuaResetTargets.Default, Is.EqualTo(15));
+            Assert.That((uint)GuaResetTargets.SessionDefault, Is.EqualTo(79));
+            Assert.That((uint)GuaResetTargets.All, Is.EqualTo(63));
+            Assert.That((uint)GuaResetTargets.AllWithClock, Is.EqualTo(127));
         });
+
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        var explicitGeneration = clock.Status.Generation;
+        Assert.That(context.Reset(new GuaResetOptions(GuaResetTargets.Default)).Result, Is.EqualTo(GuaResetResult.Succeeded));
+        Assert.That(clock.Status.Installed, Is.True);
+        Assert.That(clock.Status.Generation, Is.EqualTo(explicitGeneration));
+    }
+
+    private static WeakReference ScheduleCapturedCallback(GuaClock clock)
+    {
+        var captured = new object();
+        var reference = new WeakReference(captured);
+        clock.Schedule(TimeSpan.FromHours(1), () => GC.KeepAlive(captured));
+        return reference;
     }
 
     [Test]
@@ -910,6 +933,45 @@ public sealed class SelectorParityTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    [Test]
+    public async Task RemoteResetDistinguishesLegacyAggregateMasksFromCurrentExplicitMasks()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(250));
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+
+            var legacyDefault = await SendRawCommandAsync(socket,
+                "{\"id\":1,\"type\":\"reset_context\",\"expectedSessionEpoch\":1,\"flags\":15}");
+            var afterLegacyDefault = await SendRawCommandAsync(socket, "{\"id\":2,\"type\":\"get_clock\"}");
+            Assert.That(legacyDefault.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(afterLegacyDefault.GetProperty("result").GetProperty("installed").GetBoolean(), Is.False);
+
+            runtime.Clock.Install(step: TimeSpan.FromMilliseconds(250));
+            var currentExplicit = await SendRawCommandAsync(socket,
+                "{\"id\":3,\"type\":\"reset_context\",\"expectedSessionEpoch\":2,\"flags\":15,\"flagsVersion\":1}");
+            var afterCurrentExplicit = await SendRawCommandAsync(socket, "{\"id\":4,\"type\":\"get_clock\"}");
+            Assert.That(currentExplicit.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(afterCurrentExplicit.GetProperty("result").GetProperty("installed").GetBoolean(), Is.True);
+
+            var legacyAll = await SendRawCommandAsync(socket,
+                "{\"id\":5,\"type\":\"reset_context\",\"expectedSessionEpoch\":3,\"flags\":63}");
+            var afterLegacyAll = await SendRawCommandAsync(socket, "{\"id\":6,\"type\":\"get_clock\"}");
+            Assert.That(legacyAll.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(afterLegacyAll.GetProperty("result").GetProperty("installed").GetBoolean(), Is.False);
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
     }
 
     private static int ScheduledCount(object clock)

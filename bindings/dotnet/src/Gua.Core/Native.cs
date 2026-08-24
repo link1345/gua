@@ -78,6 +78,7 @@ internal static partial class Native
         public uint Flags;
         public int Strict;
         public ulong ExpectedSessionEpoch;
+        public uint FlagsVersion;
     }
 
     [StructLayout(LayoutKind.Sequential)]

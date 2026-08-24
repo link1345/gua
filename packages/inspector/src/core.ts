@@ -45,7 +45,7 @@ export interface GuaScreenshot {
   width: number;
   height: number;
 }
-export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completedOperationSequence?: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
+export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completedOperationSequence: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
 
 export interface InspectorPanel {
   id: "tree" | "node" | "screenshot" | "logs";
@@ -190,7 +190,7 @@ export async function readSnapshot(client: GuaInspectorClient): Promise<Inspecto
 }
 
 export class MockInspectorClient implements GuaInspectorClient {
-  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0 };
+  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0, completedOperationSequence: 0 };
   private logs: GuaLogEntry[] = [
     { sequence: 1, level: "info", message: "Inspector connected to mock runtime." },
     { sequence: 2, level: "debug", message: "Title screen snapshot received." },
@@ -433,7 +433,7 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     while (Date.now() - started < this.requestTimeoutMs) {
       const tree = await this.getUiTree();
       if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
-      if ((status.completedOperationSequence ?? 0) >= operationSequence && tree.frameSequence > completionFrame) return status;
+      if (status.completedOperationSequence >= operationSequence && tree.frameSequence > completionFrame) return status;
       await new Promise((resolve) => window.setTimeout(resolve, 5));
       status = await this.getClock();
     }

@@ -68,12 +68,22 @@ also advances its generation so language wrappers can discard old schedules.
 Bridge server, port, active WebSocket connections, and context configuration are
 never reset.
 
+The published C ABI constant `GUA_RESET_DEFAULT` retains its original value 15.
+Current native callers use `GUA_RESET_DEFAULT_V2` (79) and set
+`gua_reset_options_t.flags_version` to `GUA_RESET_FLAGS_VERSION_CURRENT`.
+For binary compatibility, the runtime recognizes an older reset-options struct
+or legacy flags version and upgrades the exact legacy Default (15) and All (63)
+masks to include the clock. Current-version explicit masks are never upgraded.
+
 Strict reset checks selected request/event queues before mutation. If pending,
 in-flight, or unconsumed state exists, it returns `dirty` with counts and a
 redacted first-item summary and changes nothing. Non-strict reset reports how
 many selected items it discarded. Every successful reset increments
 `sessionEpoch`; local callers may pass zero to use the current epoch, but remote
-`reset_context` commands must provide `expectedSessionEpoch`. A stale remote
+`reset_context` commands must provide `expectedSessionEpoch`. Current clients
+that provide `flags` also send `flagsVersion: 1`; omitted flags still resolve to
+the current default 79. A missing `flagsVersion` marks an older client, so exact
+legacy Default (15) and All (63) masks are upgraded to include the clock. A stale remote
 epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
 WebSocket connection. Runtime-owned on-demand screenshot requests, in-flight

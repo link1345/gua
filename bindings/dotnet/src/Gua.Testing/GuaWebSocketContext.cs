@@ -161,7 +161,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
     public GuaResetReport Reset(GuaResetOptions? options = null)
     {
         options ??= new(); var epoch = options.ExpectedSessionEpoch ?? GetContextStatus().SessionEpoch;
-        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, strict = options.Strict });
+        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, flagsVersion = 1, strict = options.Strict });
         return new((GuaResetResult)r.Result, r.PreviousSessionEpoch, r.SessionEpoch, r.PendingRequestCount, r.InFlightRequestCount, r.UnconsumedEventCount,
             r.DiscardedNodeCount, r.DiscardedPendingRequestCount, r.DiscardedInFlightRequestCount, r.DiscardedEventCount, r.DiscardedLogCount, r.DiscardedScreenshot,
             Action(r.FirstPendingAction), r.FirstPendingNodeId, Action(r.FirstEventAction), r.FirstEventNodeId);

@@ -139,7 +139,7 @@ int main()
     gua_runtime_end_frame(runtime);
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
     assert(request.session_epoch == 1);
-    gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 1 };
+    gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 1, GUA_RESET_FLAGS_VERSION_CURRENT };
     gua_reset_report_t reset_report { sizeof(gua_reset_report_t) };
     assert(gua_runtime_reset_context(runtime, &reset, &reset_report) == 1);
     assert(reset_report.result == GUA_RESET_SUCCEEDED);
@@ -159,7 +159,7 @@ int main()
     assert(gua_runtime_consume_screenshot_request(runtime, &request) == 1);
     assert(gua_runtime_complete_screenshot_request(
         runtime, request.request_id, GUA_SCREENSHOT_AVAILABLE, "data:image/png;base64,U0VDUkVU", 1, 1) == 1);
-    reset = { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 2 };
+    reset = { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 2, GUA_RESET_FLAGS_VERSION_CURRENT };
     reset_report = { sizeof(gua_reset_report_t) };
     assert(gua_runtime_reset_context(runtime, &reset, &reset_report) == GUA_RESET_SUCCEEDED);
     const std::string reset_completed_json = poll(runtime, completed_before_reset);
@@ -200,7 +200,7 @@ int main()
     });
     std::thread context_resetter([runtime] {
         for (int index = 0; index < 2'000; ++index) {
-            const gua_reset_options_t options { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
+            const gua_reset_options_t options { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT };
             gua_reset_report_t report { sizeof(gua_reset_report_t) };
             assert(gua_runtime_reset_context(runtime, &options, &report) == GUA_RESET_SUCCEEDED);
         }

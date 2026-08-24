@@ -48,7 +48,15 @@ public sealed class GuaClock
         if (registerWithContext) context.RegisterClock(this);
     }
     public event Action<GuaClockDelta>? Tick;
-    public GuaClockStatus Status => context.GetClockStatus();
+    public GuaClockStatus Status
+    {
+        get
+        {
+            var status = context.GetClockStatus();
+            ObserveStatus(status);
+            return status;
+        }
+    }
 
     public void Install(TimeSpan? initialTime = null, TimeSpan? step = null) => Ensure(context.InstallClock(initialTime, step));
     public void Pause() => Ensure(context.PauseClock());
@@ -129,6 +137,11 @@ public sealed class GuaClock
             item.DueMs = status.NowMilliseconds + item.DueMs;
             item.BindOnInstall = false;
         }
+    }
+
+    internal void ObserveStatus(GuaClockStatus status)
+    {
+        scheduled.RemoveAll(item => item.Cancelled || !status.Installed && item.Generation != status.Generation);
     }
 
     private static void Ensure(GuaClockResult result)

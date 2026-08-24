@@ -44,6 +44,8 @@ struct Command {
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
     unsigned int reset_flags = 79;
+    unsigned int reset_flags_version = 1;
+    bool reset_flags_version_valid = true;
     bool strict = false;
     double initial_time_ms = 0;
     bool initial_time_ms_valid = true;
@@ -688,7 +690,12 @@ Command parse_command(std::string_view json)
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
+    const bool reset_flags_present = json_has_field(json, "flags");
     command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
+    const auto reset_flags_version = json_int_field(json, "flagsVersion");
+    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 1));
+    command.reset_flags_version_valid = !json_has_field(json, "flagsVersion") ||
+        (reset_flags_version.has_value() && *reset_flags_version == 1);
     command.strict = json_bool_field(json, "strict");
     const auto initial_time_ms = json_number_field(json, "initialTimeMs");
     command.initial_time_ms = initial_time_ms.value_or(0);
@@ -1043,8 +1050,9 @@ private:
             if (command.type == "reset_context") {
                 if (!handlers_.reset_context_json) return error_response(command.id, "reset_context is not supported by this bridge");
                 if (command.expected_session_epoch == 0) return error_response(command.id, "reset_context requires expectedSessionEpoch");
+                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires flagsVersion 1 when supplied");
                 return ok_response(command.id, handlers_.reset_context_json(
-                    command.expected_session_epoch, command.reset_flags, command.strict));
+                    command.expected_session_epoch, command.reset_flags, command.reset_flags_version, command.strict));
             }
             if (command.type == "poll_events") {
                 return handlers_.poll_action_event_json

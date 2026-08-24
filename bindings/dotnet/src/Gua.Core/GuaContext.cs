@@ -219,6 +219,7 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
             Flags = (uint)options.Targets,
             Strict = options.Strict ? 1 : 0,
             ExpectedSessionEpoch = options.ExpectedSessionEpoch ?? 0,
+            FlagsVersion = 1,
         };
         Native.GuaNativeResetReport report = default;
         report.StructSize = (uint)sizeof(Native.GuaNativeResetReport);
@@ -226,6 +227,10 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
         if (result == (int)GuaResetResult.InvalidArgument)
         {
             throw new ArgumentException("Invalid Gua reset options.", nameof(options));
+        }
+        if (result == (int)GuaResetResult.Succeeded && _clock is not null)
+        {
+            _clock.ObserveStatus(GetClockStatus());
         }
         return new GuaResetReport(
             (GuaResetResult)result, report.PreviousSessionEpoch, report.SessionEpoch,

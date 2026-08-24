@@ -184,6 +184,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             type = "reset_context",
             expectedSessionEpoch = expectedEpoch,
             flags = (uint)options.Targets,
+            flagsVersion = 1,
             strict = options.Strict,
         });
         return new GuaResetReport(

@@ -519,10 +519,12 @@ public:
             ". Payload values are redacted.");
     }
 
-    [[nodiscard]] gua_reset_report_t reset(bool strict = false, std::uint32_t flags = GUA_RESET_DEFAULT) const
+    [[nodiscard]] gua_reset_report_t reset(bool strict = false, std::uint32_t flags = GUA_RESET_DEFAULT_V2) const
     {
         const auto status = inspect();
-        const gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, status.session_epoch };
+        const gua_reset_options_t options {
+            sizeof(gua_reset_options_t), flags, strict ? 1 : 0, status.session_epoch, GUA_RESET_FLAGS_VERSION_CURRENT
+        };
         gua_reset_report_t report { sizeof(gua_reset_report_t) };
         const int result = gua_reset_context(context_, &options, &report);
         if (result == GUA_RESET_ERROR_DIRTY) throw std::runtime_error("Strict Gua reset rejected dirty state without discarding it");

@@ -144,7 +144,14 @@ enum {
     GUA_RESET_LOGS = 1U << 4,
     GUA_RESET_SCREENSHOT = 1U << 5,
     GUA_RESET_CLOCK = 1U << 6,
-    GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_CLOCK
+    /* Published legacy value. Use GUA_RESET_DEFAULT_V2 for current default behavior. */
+    GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY,
+    GUA_RESET_DEFAULT_V2 = GUA_RESET_DEFAULT | GUA_RESET_CLOCK
+};
+
+enum {
+    GUA_RESET_FLAGS_VERSION_LEGACY = 0,
+    GUA_RESET_FLAGS_VERSION_CURRENT = 1
 };
 
 enum {
@@ -176,6 +183,7 @@ typedef struct gua_reset_options_t {
     uint32_t flags;
     int strict;
     uint64_t expected_session_epoch;
+    uint32_t flags_version;
 } gua_reset_options_t;
 
 typedef struct gua_reset_report_t {

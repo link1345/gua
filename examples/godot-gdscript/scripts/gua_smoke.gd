@@ -415,6 +415,10 @@ func _run() -> void:
 	if clock_reset.get("result", 0) != 1:
 		_fail("Gua direct clock reset failed: %s" % clock_reset)
 		return
+	ui.update("title")
+	if not ui.clock_schedules.is_empty():
+		_fail("Gua retained schedules after observing a remote clock reset.")
+		return
 	var reinstalled_clock := ui.clock_install(0.0, 10.0)
 	ui.clock_pause()
 	ui.clock_run_for(100.0)

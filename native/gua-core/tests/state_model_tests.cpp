@@ -2,6 +2,7 @@
 #include "gua/gua.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -11,6 +12,15 @@
 #include <vector>
 
 namespace {
+
+struct legacy_reset_options_t {
+    uint32_t struct_size;
+    uint32_t flags;
+    int strict;
+    uint64_t expected_session_epoch;
+};
+
+static_assert(sizeof(legacy_reset_options_t) == offsetof(gua_reset_options_t, flags_version));
 
 void register_checkbox(gua_context_t* context, bool checked)
 {
@@ -105,7 +115,7 @@ int main()
     assert(gua_clock_consume_step(pause_context, &clock_step) == 1);
     assert(gua_clock_pause(pause_context) == GUA_CLOCK_OK);
     assert(gua_clock_run_for(pause_context, 10.0, 10.0) == GUA_CLOCK_OK);
-    gua_reset_options_t clock_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0 };
+    gua_reset_options_t clock_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT };
     gua_reset_report_t clock_reset_report { sizeof(gua_reset_report_t) };
     assert(gua_reset_context(pause_context, &clock_reset, &clock_reset_report) == GUA_RESET_SUCCEEDED);
     gua_clock_status_t reset_clock_status { sizeof(gua_clock_status_t) };
@@ -117,6 +127,38 @@ int main()
     assert(gua_clock_get_operation_status(pause_context, &reset_operation_status) == 1);
     assert(reset_operation_status.latest_operation_sequence == reset_operation_status.completed_operation_sequence);
     gua_destroy_context(pause_context);
+
+    gua_context_t* explicit_reset_context = gua_create_context();
+    assert(gua_clock_install(explicit_reset_context, 0.0, 250.0) == GUA_CLOCK_OK);
+    gua_clock_status_t explicit_clock_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(explicit_reset_context, &explicit_clock_status) == 1);
+    const auto explicit_generation = explicit_clock_status.generation;
+    gua_reset_options_t explicit_reset {
+        sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT
+    };
+    gua_reset_report_t explicit_reset_report { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(explicit_reset_context, &explicit_reset, &explicit_reset_report) == GUA_RESET_SUCCEEDED);
+    assert(gua_clock_get_status(explicit_reset_context, &explicit_clock_status) == 1);
+    assert(explicit_clock_status.installed == 1 && explicit_clock_status.generation == explicit_generation);
+    gua_destroy_context(explicit_reset_context);
+
+    gua_context_t* legacy_reset_context = gua_create_context();
+    assert(gua_clock_install(legacy_reset_context, 0.0, 250.0) == GUA_CLOCK_OK);
+    legacy_reset_options_t legacy_reset {
+        sizeof(legacy_reset_options_t), GUA_RESET_DEFAULT, 0, 0
+    };
+    gua_reset_report_t legacy_reset_report { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(legacy_reset_context,
+        reinterpret_cast<const gua_reset_options_t*>(&legacy_reset), &legacy_reset_report) == GUA_RESET_SUCCEEDED);
+    gua_clock_status_t legacy_clock_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(legacy_reset_context, &legacy_clock_status) == 1 && legacy_clock_status.installed == 0);
+    assert(gua_clock_install(legacy_reset_context, 0.0, 250.0) == GUA_CLOCK_OK);
+    legacy_reset.flags = GUA_RESET_DEFAULT | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    legacy_reset_report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(legacy_reset_context,
+        reinterpret_cast<const gua_reset_options_t*>(&legacy_reset), &legacy_reset_report) == GUA_RESET_SUCCEEDED);
+    assert(gua_clock_get_status(legacy_reset_context, &legacy_clock_status) == 1 && legacy_clock_status.installed == 0);
+    gua_destroy_context(legacy_reset_context);
 
     gua_context_t* overflow_context = gua_create_context();
     assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
@@ -404,7 +446,7 @@ int main()
     assert(std::strcmp(status.first_pending_node_id, "remember") == 0);
 
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
-    const gua_reset_options_t strict_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 1, 1 };
+    const gua_reset_options_t strict_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 1, 1, GUA_RESET_FLAGS_VERSION_CURRENT };
     assert(gua_reset_context(context, &strict_reset, &report) == GUA_RESET_ERROR_DIRTY);
     assert(report.session_epoch == 1);
     assert(report.pending_request_count == 5);
@@ -420,12 +462,12 @@ int main()
     gua_end_frame(other);
 
     report = gua_reset_report_t { sizeof(gua_reset_report_t) };
-    const gua_reset_options_t stale_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 2 };
+    const gua_reset_options_t stale_reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 2, GUA_RESET_FLAGS_VERSION_CURRENT };
     assert(gua_reset_context(context, &stale_reset, &report) == GUA_RESET_ERROR_STALE_EPOCH);
     assert(report.session_epoch == 1);
 
     report = gua_reset_report_t { sizeof(gua_reset_report_t) };
-    const gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT, 0, 1 };
+    const gua_reset_options_t reset { sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 1, GUA_RESET_FLAGS_VERSION_CURRENT };
     assert(gua_reset_context(context, &reset, &report) == GUA_RESET_SUCCEEDED);
     assert(report.previous_session_epoch == 1 && report.session_epoch == 2);
     assert(report.discarded_pending_request_count == 5);
@@ -446,7 +488,7 @@ int main()
         GUA_ACTION_STATUS_SUCCEEDED, 0, "focus-target", nullptr, 0 };
     assert(gua_emit_action_result(context, &unsolicited) == 1);
     report = gua_reset_report_t { sizeof(gua_reset_report_t) };
-    const gua_reset_options_t strict_events { sizeof(gua_reset_options_t), GUA_RESET_EVENTS, 1, 2 };
+    const gua_reset_options_t strict_events { sizeof(gua_reset_options_t), GUA_RESET_EVENTS, 1, 2, GUA_RESET_FLAGS_VERSION_CURRENT };
     assert(gua_reset_context(context, &strict_events, &report) == GUA_RESET_ERROR_DIRTY);
     assert(report.unconsumed_event_count == 1);
     assert(report.discarded_event_count == 0);

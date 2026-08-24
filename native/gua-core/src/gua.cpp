@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <deque>
 #include <cstring>
@@ -1488,10 +1489,20 @@ extern "C" int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* 
 
 extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report)
 {
-    if (ctx == nullptr || options == nullptr || options->struct_size < sizeof(gua_reset_options_t) ||
+    constexpr uint32_t legacy_options_size = static_cast<uint32_t>(offsetof(gua_reset_options_t, flags_version));
+    constexpr uint32_t flags_version_size = static_cast<uint32_t>(offsetof(gua_reset_options_t, flags_version) + sizeof(uint32_t));
+    if (ctx == nullptr || options == nullptr || options->struct_size < legacy_options_size ||
         out_report == nullptr || out_report->struct_size < sizeof(gua_reset_report_t)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+    const uint32_t flags_version = options->struct_size >= flags_version_size
+        ? options->flags_version : GUA_RESET_FLAGS_VERSION_LEGACY;
+    if (flags_version > GUA_RESET_FLAGS_VERSION_CURRENT) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+    uint32_t reset_flags = options->flags;
+    const uint32_t legacy_all = GUA_RESET_DEFAULT | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    if (flags_version == GUA_RESET_FLAGS_VERSION_LEGACY &&
+        (reset_flags == GUA_RESET_DEFAULT || reset_flags == legacy_all))
+        reset_flags |= GUA_RESET_CLOCK;
     const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT | GUA_RESET_CLOCK;
-    if ((options->flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+    if ((reset_flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
 
     const std::lock_guard lock(ctx->mutex);
     *out_report = gua_reset_report_t { sizeof(gua_reset_report_t) };
@@ -1506,22 +1517,22 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         out_report->result = GUA_RESET_ERROR_STALE_EPOCH;
         return out_report->result;
     }
-    const bool dirty_requests = (options->flags & GUA_RESET_REQUESTS) != 0U &&
+    const bool dirty_requests = (reset_flags & GUA_RESET_REQUESTS) != 0U &&
         (!ctx->action_requests.empty() || !ctx->consumed_requests.empty());
-    const bool dirty_events = (options->flags & GUA_RESET_EVENTS) != 0U && !ctx->events.empty();
+    const bool dirty_events = (reset_flags & GUA_RESET_EVENTS) != 0U && !ctx->events.empty();
     if (options->strict != 0 && (dirty_requests || dirty_events)) {
         out_report->result = GUA_RESET_ERROR_DIRTY;
         return out_report->result;
     }
 
-    out_report->discarded_node_count = (options->flags & GUA_RESET_NODES) != 0U ? static_cast<uint32_t>(ctx->nodes.size()) : 0;
-    out_report->discarded_pending_request_count = (options->flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->action_requests.size()) : 0;
-    out_report->discarded_in_flight_request_count = (options->flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->consumed_requests.size()) : 0;
-    out_report->discarded_event_count = (options->flags & GUA_RESET_EVENTS) != 0U ? static_cast<uint32_t>(ctx->events.size()) : 0;
-    out_report->discarded_log_count = (options->flags & GUA_RESET_LOGS) != 0U ? static_cast<uint32_t>(ctx->logs.size()) : 0;
-    out_report->discarded_screenshot = (options->flags & GUA_RESET_SCREENSHOT) != 0U && !ctx->screenshot.data_uri.empty() ? 1 : 0;
+    out_report->discarded_node_count = (reset_flags & GUA_RESET_NODES) != 0U ? static_cast<uint32_t>(ctx->nodes.size()) : 0;
+    out_report->discarded_pending_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->action_requests.size()) : 0;
+    out_report->discarded_in_flight_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->consumed_requests.size()) : 0;
+    out_report->discarded_event_count = (reset_flags & GUA_RESET_EVENTS) != 0U ? static_cast<uint32_t>(ctx->events.size()) : 0;
+    out_report->discarded_log_count = (reset_flags & GUA_RESET_LOGS) != 0U ? static_cast<uint32_t>(ctx->logs.size()) : 0;
+    out_report->discarded_screenshot = (reset_flags & GUA_RESET_SCREENSHOT) != 0U && !ctx->screenshot.data_uri.empty() ? 1 : 0;
 
-    if ((options->flags & GUA_RESET_NODES) != 0U) {
+    if ((reset_flags & GUA_RESET_NODES) != 0U) {
         ctx->screen = "unknown";
         ctx->nodes.clear();
         ctx->staging_screen = "unknown";
@@ -1529,28 +1540,28 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         ctx->frame_in_progress = false;
         ctx->staging_valid = true;
     }
-    if ((options->flags & GUA_RESET_REQUESTS) != 0U) {
+    if ((reset_flags & GUA_RESET_REQUESTS) != 0U) {
         ctx->action_requests.clear();
         ctx->consumed_requests.clear();
     }
-    if ((options->flags & GUA_RESET_EVENTS) != 0U) ctx->events.clear();
-    if ((options->flags & GUA_RESET_HISTORY) != 0U) {
+    if ((reset_flags & GUA_RESET_EVENTS) != 0U) ctx->events.clear();
+    if ((reset_flags & GUA_RESET_HISTORY) != 0U) {
         ctx->operation_history.clear();
         ctx->event_history.clear();
         ctx->next_history_sequence = 1;
         ctx->diagnostics_history_started_at = std::chrono::steady_clock::now();
         ctx->diagnostics_json_cache.clear();
     }
-    if ((options->flags & GUA_RESET_LOGS) != 0U) {
+    if ((reset_flags & GUA_RESET_LOGS) != 0U) {
         ctx->logs.clear();
         ctx->next_log_sequence = 1;
         ctx->logs_json_cache.clear();
     }
-    if ((options->flags & GUA_RESET_SCREENSHOT) != 0U) {
+    if ((reset_flags & GUA_RESET_SCREENSHOT) != 0U) {
         ctx->screenshot = Screenshot {};
         ctx->screenshot_json_cache.clear();
     }
-    if ((options->flags & GUA_RESET_CLOCK) != 0U) {
+    if ((reset_flags & GUA_RESET_CLOCK) != 0U) {
         ctx->clock_installed = false; ctx->clock_paused = false; ctx->clock_now_ms = 0.0;
         ctx->clock_default_step_ms = default_clock_step_ms;
         ctx->clock_pending_ms = 0.0; ctx->clock_pending_total_ms = 0.0; ctx->clock_pending_elapsed_ms = 0.0;

@@ -3,7 +3,7 @@
   "$id": "https://gua.dev/schema/clock.schema.json",
   "title": "Gua Virtual Clock Status",
   "type": "object",
-  "required": ["schemaVersion", "installed", "state", "nowMs", "defaultStepMs", "pendingMs", "generation"],
+  "required": ["schemaVersion", "installed", "state", "nowMs", "defaultStepMs", "pendingMs", "generation", "completedOperationSequence"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": 1 },
