@@ -72,6 +72,8 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
 export class DemoRuntime {
   private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0, completedOperationSequence: 0 };
   private nextClockOperationSequence = 1;
+  private runningClockStartMs = 0;
+  private runningClockStartTimeMs = 0;
   private screen: "title" | "loading" = "title";
   private focusedNodeId = "start";
   private frameSequence = 1;
@@ -80,6 +82,8 @@ export class DemoRuntime {
     { sequence: 1, level: "info", message: "Demo runtime started." },
     { sequence: 2, level: "debug", message: "Serving Gua protocol snapshots over WebSocket." },
   ];
+
+  constructor(private readonly monotonicNow: () => number = () => performance.now()) {}
 
   getUiTree(): GuaUiTree {
     if (this.screen === "loading") {
@@ -122,16 +126,18 @@ export class DemoRuntime {
       height: 720,
     };
   }
-  getClock() { return this.clock; }
+  getClock() { this.advanceRunningClock(); return this.clock; }
   installClock(initial = 0, step = 1000 / 60) {
     if (this.clock.installed) throw new Error("invalid_state");
     const nextTime = initial + step;
     if (!Number.isFinite(initial) || initial < 0 || !Number.isFinite(step) || step <= 0 ||
         !Number.isFinite(nextTime) || nextTime <= initial) throw new Error("invalid_duration");
     this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 };
+    this.runningClockStartMs = initial;
+    this.runningClockStartTimeMs = this.monotonicNow();
     return this.clock;
   }
-  pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
+  pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.advanceRunningClock(); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
     const nextTime = this.clock.nowMs + duration;
@@ -146,7 +152,15 @@ export class DemoRuntime {
     }, 0);
     return result;
   }
-  resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
+  resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.advanceRunningClock(); this.clock = { ...this.clock, state: "running" }; this.runningClockStartMs = this.clock.nowMs; this.runningClockStartTimeMs = this.monotonicNow(); return this.clock; }
+
+  private advanceRunningClock() {
+    if (!this.clock.installed || this.clock.state !== "running") return;
+    const elapsedMs = Math.max(0, this.monotonicNow() - this.runningClockStartTimeMs);
+    const nextTime = this.runningClockStartMs + elapsedMs;
+    if (Number.isFinite(nextTime) && nextTime > this.clock.nowMs)
+      this.clock = { ...this.clock, nowMs: nextTime };
+  }
 
   clickNode(nodeId: string): void {
     this.assertNodeExists(nodeId);

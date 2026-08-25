@@ -10,6 +10,7 @@ public sealed class GuaRuntimeClock
     private readonly List<Scheduled> scheduled = [];
     private long sequence;
     private bool draining;
+    private ulong? reportedAutomaticExecutionLimitGeneration;
     internal GuaRuntimeClock(GuaRuntime runtime) => this.runtime = runtime;
     public event Action<GuaClockDelta>? Tick;
     public event Action<Exception>? CallbackFailed;
@@ -23,15 +24,25 @@ public sealed class GuaRuntimeClock
     public void RunFor(TimeSpan duration, TimeSpan? step = null)
     { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(Status.DefaultStepMilliseconds)).TotalMilliseconds)); Drain(); }
     public void Advance(TimeSpan unscaledDelta)
-    { var status = Status; PurgeInactive(status); if (!status.Installed) return; if (status.PendingMilliseconds > 0) { Drain(); return; }
-      if (status.Paused || unscaledDelta <= TimeSpan.Zero) return;
+    { var status = Status; PurgeInactive(status); if (!status.Installed) { reportedAutomaticExecutionLimitGeneration = null; return; } if (status.PendingMilliseconds > 0) { Drain(); return; }
+      if (status.Paused || unscaledDelta <= TimeSpan.Zero) { reportedAutomaticExecutionLimitGeneration = null; return; }
       var result = Native.gua_runtime_clock_advance(runtime.Handle, unscaledDelta.TotalMilliseconds);
       if (result != (int)GuaClockResult.Ok)
       {
           var latest = Status;
           if ((GuaClockResult)result == GuaClockResult.InvalidState && latest.Installed && latest.Paused) return;
+          if ((GuaClockResult)result == GuaClockResult.ExecutionLimit)
+          {
+              if (reportedAutomaticExecutionLimitGeneration != latest.Generation)
+              {
+                  reportedAutomaticExecutionLimitGeneration = latest.Generation;
+                  ReportCallbackFailure(new InvalidOperationException("Gua clock automatic advance exceeded execution_limit; the host frame will continue without advancing the clock."));
+              }
+              return;
+          }
           Check(result);
       }
+      reportedAutomaticExecutionLimitGeneration = null;
       Drain(); }
     public IDisposable Schedule(TimeSpan delay, Action callback, TimeSpan? interval = null)
     {

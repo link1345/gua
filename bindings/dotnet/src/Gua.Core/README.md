@@ -30,7 +30,9 @@ Click remains available through the original API and shares the same queue.
 
 `GuaContext.Clock` is the context-owned `GuaClock` Scheduler/Tick surface.
 Constructing `new GuaClock(context)` registers that instance as the owned clock,
-so test controls and game code drain the same scheduled work.
+so test controls and game code drain the same scheduled work. A context accepts
+only one managed clock; reuse `context.Clock` instead of constructing a second
+instance.
 
 At runtime the resolver checks:
 

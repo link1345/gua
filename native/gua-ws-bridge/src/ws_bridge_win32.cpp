@@ -587,6 +587,11 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
     if (end == start) {
         return std::nullopt;
     }
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
     try { return std::stoi(std::string(json.substr(start, end - start))); }
     catch (const std::exception&) { return std::nullopt; }
 }
@@ -599,6 +604,11 @@ std::optional<unsigned long long> json_uint64_field(std::string_view json, std::
     std::size_t end = start;
     while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
     if (end == start) return std::nullopt;
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
     try { return std::stoull(std::string(json.substr(start, end - start))); }
     catch (const std::exception&) { return std::nullopt; }
 }

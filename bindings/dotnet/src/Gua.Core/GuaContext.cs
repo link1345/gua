@@ -158,6 +158,8 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
     internal void RegisterClock(GuaClock clock)
     {
         ThrowIfDisposed();
+        if (_clock is not null && !ReferenceEquals(_clock, clock))
+            throw new InvalidOperationException("A GuaContext can own only one GuaClock. Reuse context.Clock instead of constructing another clock.");
         _clock = clock;
     }
 

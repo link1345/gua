@@ -65,6 +65,18 @@ public sealed class SelectorParityTests
         Assert.That(clock.Status.Generation, Is.EqualTo(explicitGeneration));
     }
 
+    [Test]
+    public void ContextRejectsASecondManagedClock()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+
+        Assert.That(context.Clock, Is.SameAs(clock));
+        Assert.That(() => new GuaClock(context),
+            Throws.InvalidOperationException.With.Message.Contains("only one GuaClock"));
+        Assert.That(context.Clock, Is.SameAs(clock));
+    }
+
     private static WeakReference ScheduleCapturedCallback(GuaClock clock)
     {
         var captured = new object();
@@ -962,11 +974,57 @@ public sealed class SelectorParityTests
             Assert.That(currentExplicit.GetProperty("ok").GetBoolean(), Is.True);
             Assert.That(afterCurrentExplicit.GetProperty("result").GetProperty("installed").GetBoolean(), Is.True);
 
+            var fractionalVersion = await SendRawCommandAsync(socket,
+                "{\"id\":5,\"type\":\"reset_context\",\"expectedSessionEpoch\":3,\"flags\":15,\"flagsVersion\":1.5}");
+            var afterFractionalVersion = await SendRawCommandAsync(socket, "{\"id\":6,\"type\":\"get_clock\"}");
+            Assert.That(fractionalVersion.GetProperty("ok").GetBoolean(), Is.False);
+            Assert.That(afterFractionalVersion.GetProperty("result").GetProperty("installed").GetBoolean(), Is.True,
+                "A structurally invalid flagsVersion must not partially reset the session.");
+
             var legacyAll = await SendRawCommandAsync(socket,
-                "{\"id\":5,\"type\":\"reset_context\",\"expectedSessionEpoch\":3,\"flags\":63}");
-            var afterLegacyAll = await SendRawCommandAsync(socket, "{\"id\":6,\"type\":\"get_clock\"}");
+                "{\"id\":7,\"type\":\"reset_context\",\"expectedSessionEpoch\":3,\"flags\":63}");
+            var afterLegacyAll = await SendRawCommandAsync(socket, "{\"id\":8,\"type\":\"get_clock\"}");
             Assert.That(legacyAll.GetProperty("ok").GetBoolean(), Is.True);
             Assert.That(afterLegacyAll.GetProperty("result").GetProperty("installed").GetBoolean(), Is.False);
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public async Task AutomaticClockExecutionLimitDoesNotStopHostFrames()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        runtime.BeginFrame("before-limit"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+            var install = await SendRawCommandAsync(socket,
+                "{\"id\":1,\"type\":\"clock_install\",\"initialTimeMs\":0,\"stepMs\":1e-9}");
+            Assert.That(install.GetProperty("ok").GetBoolean(), Is.True);
+
+            var failures = new List<Exception>();
+            runtime.Clock.CallbackFailed += failures.Add;
+            Assert.That(() => runtime.Clock.Advance(TimeSpan.FromMilliseconds(16)), Throws.Nothing);
+            Assert.That(() =>
+            {
+                runtime.BeginFrame("after-limit");
+                runtime.EndFrame();
+            }, Throws.Nothing);
+            Assert.That(runtime.GetUiTreeJson(), Does.Contain("after-limit"));
+            Assert.That(runtime.Clock.Status.NowMilliseconds, Is.Zero);
+            Assert.That(failures, Has.Count.EqualTo(1));
+            Assert.That(failures[0].Message, Does.Contain("execution_limit"));
+
+            Assert.That(() => runtime.Clock.Advance(TimeSpan.FromMilliseconds(16)), Throws.Nothing);
+            Assert.That(failures, Has.Count.EqualTo(1),
+                "The same invalid running-clock configuration should be diagnosed once without flooding every host frame.");
         }
         finally
         {
