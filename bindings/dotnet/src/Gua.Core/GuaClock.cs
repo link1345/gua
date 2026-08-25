@@ -70,12 +70,16 @@ public sealed class GuaClock
     public IDisposable Schedule(TimeSpan delay, Action callback, TimeSpan? interval = null)
     {
         if (callback is null) throw new ArgumentNullException(nameof(callback));
-        if (delay < TimeSpan.Zero || interval is { } repeat && repeat <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
+        if (delay < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(delay));
+        if (interval is { } repeat && repeat <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(interval));
         var status = Status;
         var bindOnInstall = !status.Installed;
-        var item = new Scheduled(++sequence, status.Generation,
-            bindOnInstall ? delay.TotalMilliseconds : status.NowMilliseconds + delay.TotalMilliseconds,
-            interval?.TotalMilliseconds, callback, bindOnInstall);
+        var delayMs = delay.TotalMilliseconds;
+        var intervalMs = interval?.TotalMilliseconds;
+        var dueMs = bindOnInstall ? delayMs : status.NowMilliseconds + delayMs;
+        if (!bindOnInstall) ValidateRepresentableSchedule(status.NowMilliseconds, delayMs, dueMs, intervalMs);
+        var item = new Scheduled(++sequence, status.Generation, dueMs,
+            intervalMs, callback, bindOnInstall);
         scheduled.Add(item);
         return new Cancellation(this, item);
     }
@@ -113,8 +117,13 @@ public sealed class GuaClock
                 }
                 if (item.IntervalMs is { } interval && !item.Cancelled)
                 {
-                    item.DueMs += interval;
-                    scheduled.Add(item);
+                    var nextDueMs = item.DueMs + interval;
+                    if (double.IsFinite(nextDueMs) && nextDueMs > item.DueMs)
+                    {
+                        item.DueMs = nextDueMs;
+                        scheduled.Add(item);
+                    }
+                    else item.Cancelled = true;
                 }
                 else item.Cancelled = true;
             }
@@ -131,10 +140,17 @@ public sealed class GuaClock
         var status = Status;
         if (!status.Installed) return;
         scheduled.RemoveAll(item => item.BindOnInstall && status.Generation != item.Generation + 1);
-        foreach (var item in scheduled.Where(item => item.BindOnInstall))
+        foreach (var item in scheduled.Where(item => item.BindOnInstall).ToArray())
         {
+            var dueMs = status.NowMilliseconds + item.DueMs;
+            try { ValidateRepresentableSchedule(status.NowMilliseconds, item.DueMs, dueMs, item.IntervalMs); }
+            catch (ArgumentOutOfRangeException)
+            {
+                Cancel(item);
+                continue;
+            }
             item.Generation = status.Generation;
-            item.DueMs = status.NowMilliseconds + item.DueMs;
+            item.DueMs = dueMs;
             item.BindOnInstall = false;
         }
     }
@@ -147,6 +163,17 @@ public sealed class GuaClock
     private static void Ensure(GuaClockResult result)
     {
         if (result != GuaClockResult.Ok) throw new InvalidOperationException($"Gua clock operation failed: {result}.");
+    }
+    private static void ValidateRepresentableSchedule(double now, double delay, double due, double? interval)
+    {
+        if (!double.IsFinite(due) || delay > 0 && due <= now)
+            throw new ArgumentOutOfRangeException(nameof(delay), "The delay cannot advance the current Gua clock timeline.");
+        if (interval is { } repeat)
+        {
+            var nextDue = due + repeat;
+            if (!double.IsFinite(nextDue) || nextDue <= due)
+                throw new ArgumentOutOfRangeException(nameof(interval), "The interval cannot advance its representable Gua clock deadline.");
+        }
     }
     private void Cancel(Scheduled item)
     {

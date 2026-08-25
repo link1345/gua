@@ -141,8 +141,12 @@ export class DemoRuntime {
   runClockFor(duration: number, step?: number) {
     if (this.clock.state !== "paused") throw new Error("invalid_state");
     const nextTime = this.clock.nowMs + duration;
+    const selectedStep = step ?? this.clock.defaultStepMs;
+    const emittedStep = Math.min(duration, selectedStep);
     if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) || duration > 0 && nextTime <= this.clock.nowMs ||
-        step !== undefined && (!Number.isFinite(step) || step <= 0)) throw new Error("invalid_duration");
+        !Number.isFinite(selectedStep) || selectedStep <= 0 ||
+        duration > 0 && (this.clock.nowMs + emittedStep <= this.clock.nowMs || nextTime - emittedStep >= nextTime))
+      throw new Error("invalid_duration");
     const operationSequence = this.nextClockOperationSequence++;
     this.clock = { ...this.clock, nowMs: nextTime };
     const result = { ...this.clock, operationSequence, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };

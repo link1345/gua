@@ -1032,6 +1032,50 @@ public sealed class SelectorParityTests
         }
     }
 
+    [Test]
+    public async Task RuntimeClockRejectsSchedulesThatCannotAdvanceRepresentableDeadlines()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        var callbacks = 0;
+        var failures = new List<Exception>();
+        runtime.Clock.CallbackFailed += failures.Add;
+        runtime.Clock.Schedule(TimeSpan.Zero, () => callbacks++, TimeSpan.FromMilliseconds(1));
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+            var install = await SendRawCommandAsync(socket,
+                "{\"id\":1,\"type\":\"clock_install\",\"initialTimeMs\":1e16,\"stepMs\":2}");
+            Assert.That(install.GetProperty("ok").GetBoolean(), Is.True);
+
+            var intervalError = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                runtime.Clock.Schedule(TimeSpan.Zero, () => callbacks++, TimeSpan.FromMilliseconds(1)));
+            Assert.That(intervalError!.ParamName, Is.EqualTo("interval"));
+            var delayError = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                runtime.Clock.Schedule(TimeSpan.FromMilliseconds(1), () => callbacks++));
+            Assert.That(delayError!.ParamName, Is.EqualTo("delay"));
+
+            using var valid = runtime.Clock.Schedule(TimeSpan.Zero, () => callbacks++, TimeSpan.FromMilliseconds(2));
+            valid.Dispose();
+            Assert.That(() => runtime.Clock.Advance(TimeSpan.FromMilliseconds(2)), Throws.Nothing);
+            Assert.Multiple(() =>
+            {
+                Assert.That(callbacks, Is.Zero);
+                Assert.That(ScheduledCount(runtime.Clock), Is.Zero,
+                    "A pre-install interval that cannot advance the installed timeline must be retired.");
+                Assert.That(failures, Has.Count.EqualTo(1));
+                Assert.That(failures[0], Is.TypeOf<ArgumentOutOfRangeException>());
+            });
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
     private static int ScheduledCount(object clock)
     {
         var field = clock.GetType().GetField("scheduled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)

@@ -28,6 +28,7 @@ describe("DemoRuntime virtual clock", () => {
     runtime.installClock(1e16, 2);
     runtime.pauseClock();
     expect(() => runtime.runClockFor(1)).toThrow("invalid_duration");
+    expect(() => runtime.runClockFor(100, 1)).toThrow("invalid_duration");
     expect(runtime.getClock().nowMs).toBe(1e16);
   });
 
