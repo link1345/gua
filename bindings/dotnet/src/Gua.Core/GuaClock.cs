@@ -129,7 +129,12 @@ public sealed class GuaClock
             }
             scheduled.RemoveAll(item => item.Cancelled);
             if (context.GetClockStatus().Generation != step.Generation) continue;
-            Tick?.Invoke(new GuaClockDelta(step.Delta.TotalMilliseconds));
+            if (Tick is not null)
+                foreach (Action<GuaClockDelta> handler in Tick.GetInvocationList())
+                {
+                    handler(new GuaClockDelta(step.Delta.TotalMilliseconds));
+                    if (context.GetClockStatus().Generation != step.Generation) break;
+                }
         }
         }
         finally { draining = false; }

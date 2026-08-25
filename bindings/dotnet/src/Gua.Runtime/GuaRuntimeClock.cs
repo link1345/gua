@@ -100,8 +100,11 @@ public sealed class GuaRuntimeClock
             }
             if (Tick is not null)
                 foreach (Action<GuaClockDelta> handler in Tick.GetInvocationList())
+                {
                     try { handler(new GuaClockDelta(step.DeltaMs)); }
                     catch (Exception error) { ReportCallbackFailure(error); }
+                    if (Status.Generation != step.Generation) break;
+                }
             step = new Native.ClockStep { StructSize = (uint)Marshal.SizeOf<Native.ClockStep>() };
         }
         }

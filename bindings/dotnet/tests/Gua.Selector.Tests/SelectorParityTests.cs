@@ -222,6 +222,61 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void TickResetStopsRemainingSubscribersFromReceivingTheStaleStep()
+    {
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        clock.Install(step: TimeSpan.FromMilliseconds(10));
+        clock.Pause();
+        var coreResetTicks = 0;
+        var coreStaleTicks = 0;
+        clock.Tick += _ =>
+        {
+            coreResetTicks++;
+            context.Reset();
+        };
+        clock.Tick += _ => coreStaleTicks++;
+
+        clock.RunFor(TimeSpan.FromMilliseconds(10));
+        Assert.Multiple(() =>
+        {
+            Assert.That(coreResetTicks, Is.EqualTo(1));
+            Assert.That(coreStaleTicks, Is.Zero);
+        });
+
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.BeginFrame("fixture"); runtime.EndFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2));
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            runtime.Clock.Install(step: TimeSpan.FromMilliseconds(10));
+            runtime.Clock.Pause();
+            var runtimeResetTicks = 0;
+            var runtimeStaleTicks = 0;
+            runtime.Clock.Tick += _ =>
+            {
+                runtimeResetTicks++;
+                remote.Reset();
+            };
+            runtime.Clock.Tick += _ => runtimeStaleTicks++;
+
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(10));
+            Assert.Multiple(() =>
+            {
+                Assert.That(runtimeResetTicks, Is.EqualTo(1));
+                Assert.That(runtimeStaleTicks, Is.Zero);
+            });
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public void ClockExecutionLimitRetiresRemainingSchedules()
     {
         using var context = new GuaContext();
