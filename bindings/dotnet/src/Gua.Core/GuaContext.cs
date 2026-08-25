@@ -164,10 +164,12 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
     }
 
     public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
-    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_install(_handle, (initialTime ?? TimeSpan.Zero).TotalMilliseconds, (step ?? TimeSpan.FromSeconds(1.0 / 60.0)).TotalMilliseconds); }
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_install(_handle,
+        initialTime?.TotalMilliseconds ?? 0.0, step?.TotalMilliseconds ?? 1000.0 / 60.0); }
     public GuaClockResult PauseClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_pause(_handle); }
     public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
-    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_run_for(_handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(GetClockStatus().DefaultStepMilliseconds)).TotalMilliseconds); }
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_run_for(_handle, duration.TotalMilliseconds,
+        step?.TotalMilliseconds ?? GetClockStatus().DefaultStepMilliseconds); }
     public GuaClockResult ResumeClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_resume(_handle); }
     public GuaClockStatus GetClockStatus()
     {

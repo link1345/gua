@@ -1148,6 +1148,58 @@ public sealed class SelectorParityTests
         }
     }
 
+    [Test]
+    public async Task RuntimeRunForUsesTheExactInstalledDefaultStepWhenOmitted()
+    {
+        const double installedStepMs = 0.123456789;
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableVirtualClockAdapter();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var socket = new ClientWebSocket();
+            await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+            var install = await SendRawCommandAsync(socket,
+                $"{{\"id\":1,\"type\":\"clock_install\",\"initialTimeMs\":0,\"stepMs\":{installedStepMs:R}}}");
+            var pause = await SendRawCommandAsync(socket, "{\"id\":2,\"type\":\"clock_pause\"}");
+            Assert.That(install.GetProperty("ok").GetBoolean(), Is.True);
+            Assert.That(pause.GetProperty("ok").GetBoolean(), Is.True);
+
+            var ticks = new List<double>();
+            runtime.Clock.Tick += delta => ticks.Add(delta.TotalMilliseconds);
+            runtime.Clock.RunFor(TimeSpan.FromMilliseconds(0.3));
+
+            Assert.That(ticks, Is.Not.Empty);
+            Assert.That(ticks[0], Is.EqualTo(installedStepMs),
+                "An omitted step must pass the installed double directly instead of round-tripping through TimeSpan.");
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public async Task AsyncClockControlsRequireOnlyTheAsyncStatusContract()
+    {
+        var context = new AsyncOnlyClockContext();
+        Assert.That(context, Is.Not.InstanceOf<IGuaClockContext>());
+
+        var installed = await GuaClockControls.InstallClockAsync(context, step: TimeSpan.FromMilliseconds(10));
+        var paused = await GuaClockControls.PauseClockAsync(context);
+        var advanced = await GuaClockControls.RunClockForAsync(context, TimeSpan.FromMilliseconds(25));
+        var resumed = await GuaClockControls.ResumeClockAsync(context);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(installed.Installed, Is.True);
+            Assert.That(paused.Paused, Is.True);
+            Assert.That(advanced.NowMilliseconds, Is.EqualTo(25));
+            Assert.That(resumed.Paused, Is.False);
+        });
+    }
+
     private static int ScheduledCount(object clock)
     {
         var field = clock.GetType().GetField("scheduled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
@@ -1181,6 +1233,51 @@ public sealed class SelectorParityTests
             if (document.RootElement.TryGetProperty("id", out var id) && id.GetInt32() == expectedId.Value)
                 return document.RootElement.Clone();
         }
+    }
+
+    private sealed class AsyncOnlyClockContext : IGuaContext, IGuaAsyncClockContext
+    {
+        private GuaClockStatus status = new(false, false, 0, 1000.0 / 60.0, 0, 0);
+
+        public GuaClockStatus GetClockStatus() => status;
+        public Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            status = new(true, false, initialTime?.TotalMilliseconds ?? 0.0,
+                step?.TotalMilliseconds ?? 1000.0 / 60.0, 0, status.Generation + 1);
+            return Task.FromResult(GuaClockResult.Ok);
+        }
+        public Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            status = status with { Paused = true };
+            return Task.FromResult(GuaClockResult.Ok);
+        }
+        public Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            status = status with { NowMilliseconds = status.NowMilliseconds + duration.TotalMilliseconds };
+            return Task.FromResult(GuaClockResult.Ok);
+        }
+        public Task<GuaClockResult> ResumeClockAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            status = status with { Paused = false };
+            return Task.FromResult(GuaClockResult.Ok);
+        }
+
+        public string GetUiTreeJson() => "{}";
+        public GuaNodeState GetNodeState(string id) => throw new NotSupportedException();
+        public string FindNodeById(string id) => throw new NotSupportedException();
+        public string FindNodeByRole(string role, string? name = null) => throw new NotSupportedException();
+        public string FindNodeByText(string text) => throw new NotSupportedException();
+        public bool EnqueueClick(string id) => throw new NotSupportedException();
+        public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) => throw new NotSupportedException();
+        public bool TryPollActionEvent(out GuaActionEvent e) => throw new NotSupportedException();
+        public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) => throw new NotSupportedException();
+        public bool TryPollEvent(out GuaEvent e) => throw new NotSupportedException();
     }
 
     private static class Native

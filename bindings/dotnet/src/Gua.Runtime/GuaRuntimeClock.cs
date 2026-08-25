@@ -18,11 +18,12 @@ public sealed class GuaRuntimeClock
         if (Native.gua_runtime_clock_get_status(runtime.Handle, ref value) == 0) throw new InvalidOperationException("Failed to inspect Gua clock.");
         return new(value.Installed != 0, value.Paused != 0, value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation); } }
     public void Install(TimeSpan? initialTime = null, TimeSpan? step = null) => Check(Native.gua_runtime_clock_install(runtime.Handle,
-        (initialTime ?? TimeSpan.Zero).TotalMilliseconds, (step ?? TimeSpan.FromSeconds(1.0 / 60.0)).TotalMilliseconds));
+        initialTime?.TotalMilliseconds ?? 0.0, step?.TotalMilliseconds ?? 1000.0 / 60.0));
     public void Pause() => Check(Native.gua_runtime_clock_pause(runtime.Handle));
     public void Resume() => Check(Native.gua_runtime_clock_resume(runtime.Handle));
     public void RunFor(TimeSpan duration, TimeSpan? step = null)
-    { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds, (step ?? TimeSpan.FromMilliseconds(Status.DefaultStepMilliseconds)).TotalMilliseconds)); Drain(); }
+    { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds,
+        step?.TotalMilliseconds ?? Status.DefaultStepMilliseconds)); Drain(); }
     public void Advance(TimeSpan unscaledDelta)
     { var status = Status; PurgeInactive(status); if (!status.Installed) { reportedAutomaticExecutionLimitGeneration = null; return; } if (status.PendingMilliseconds > 0) { Drain(); return; }
       if (status.Paused || unscaledDelta <= TimeSpan.Zero) { reportedAutomaticExecutionLimitGeneration = null; return; }

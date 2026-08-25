@@ -32,7 +32,7 @@ public static class GuaClockControls
         if (context is IGuaAsyncClockContext asyncClock)
         {
             Ensure(await asyncClock.InstallClockAsync(initialTime, step, cancellationToken).ConfigureAwait(false));
-            return Require(context).GetClockStatus();
+            return asyncClock.GetClockStatus();
         }
         return InstallClock(context, initialTime, step);
     }
@@ -42,7 +42,7 @@ public static class GuaClockControls
         if (context is IGuaAsyncClockContext asyncClock)
         {
             Ensure(await asyncClock.PauseClockAsync(cancellationToken).ConfigureAwait(false));
-            return Require(context).GetClockStatus();
+            return asyncClock.GetClockStatus();
         }
         return PauseClock(context);
     }
@@ -52,7 +52,7 @@ public static class GuaClockControls
         if (context is IGuaAsyncClockContext asyncClock)
         {
             Ensure(await asyncClock.RunClockForAsync(duration, step, cancellationToken).ConfigureAwait(false));
-            return Require(context).GetClockStatus();
+            return asyncClock.GetClockStatus();
         }
         return RunClockFor(context, duration, step);
     }
@@ -62,7 +62,7 @@ public static class GuaClockControls
         if (context is IGuaAsyncClockContext asyncClock)
         {
             Ensure(await asyncClock.ResumeClockAsync(cancellationToken).ConfigureAwait(false));
-            return Require(context).GetClockStatus();
+            return asyncClock.GetClockStatus();
         }
         return ResumeClock(context);
     }

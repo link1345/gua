@@ -17,16 +17,20 @@ public readonly record struct GuaClockDelta(double TotalMilliseconds)
     public static implicit operator TimeSpan(GuaClockDelta value) => value.TimeSpan;
 }
 
-public interface IGuaClockContext
+public interface IGuaClockStatusContext
+{
+    GuaClockStatus GetClockStatus();
+}
+
+public interface IGuaClockContext : IGuaClockStatusContext
 {
     GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null);
     GuaClockResult PauseClock();
     GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null);
     GuaClockResult ResumeClock();
-    GuaClockStatus GetClockStatus();
 }
 
-public interface IGuaAsyncClockContext
+public interface IGuaAsyncClockContext : IGuaClockStatusContext
 {
     Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default);
     Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default);
