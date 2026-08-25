@@ -145,6 +145,7 @@ export class DemoRuntime {
     const emittedStep = Math.min(duration, selectedStep);
     if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) || duration > 0 && nextTime <= this.clock.nowMs ||
         !Number.isFinite(selectedStep) || selectedStep <= 0 ||
+        !Number.isFinite(this.clock.nowMs + selectedStep) || this.clock.nowMs + selectedStep <= this.clock.nowMs ||
         duration > 0 && (this.clock.nowMs + emittedStep <= this.clock.nowMs || nextTime - emittedStep >= nextTime))
       throw new Error("invalid_duration");
     const operationSequence = this.nextClockOperationSequence++;

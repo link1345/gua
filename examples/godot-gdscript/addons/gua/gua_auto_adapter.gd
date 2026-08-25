@@ -255,16 +255,20 @@ func get_clock() -> Dictionary:
 	return context.get_clock() if _ensure_context() else {}
 
 func clock_schedule(delay_ms: float, callback: Callable, interval_ms: float = 0.0) -> int:
-	if delay_ms < 0.0 or interval_ms < 0.0 or not callback.is_valid():
+	if not is_finite(delay_ms) or not is_finite(interval_ms) or delay_ms < 0.0 or interval_ms < 0.0 or not callback.is_valid():
+		return 0
+	var status := get_clock()
+	var bind_on_install := not bool(status.get("installed", false))
+	var now_ms := float(status.get("now_ms", 0.0))
+	var due_ms := delay_ms if bind_on_install else now_ms + delay_ms
+	if not bind_on_install and not _clock_schedule_deadline_is_representable(now_ms, delay_ms, due_ms, interval_ms):
 		return 0
 	var schedule_id := next_clock_schedule_id
 	next_clock_schedule_id += 1
-	var status := get_clock()
-	var bind_on_install := not bool(status.get("installed", false))
 	clock_schedules.append({
 		"id": schedule_id,
 		"generation": int(status.get("generation", 0)),
-		"due_ms": delay_ms if bind_on_install else float(status.get("now_ms", 0.0)) + delay_ms,
+		"due_ms": due_ms,
 		"bind_on_install": bind_on_install,
 		"interval_ms": interval_ms,
 		"callback": callback,
@@ -284,11 +288,19 @@ func _bind_pending_clock_schedules(status: Dictionary) -> void:
 		return
 	var generation := int(status.get("generation", 0))
 	var now_ms := float(status.get("now_ms", 0.0))
+	var retained_schedules: Array[Dictionary] = []
 	for item: Dictionary in clock_schedules:
 		if bool(item.get("bind_on_install", false)) and generation == int(item.get("generation", 0)) + 1:
+			var delay_ms := float(item.get("due_ms", 0.0))
+			var due_ms := now_ms + delay_ms
+			if not _clock_schedule_deadline_is_representable(
+				now_ms, delay_ms, due_ms, float(item.get("interval_ms", 0.0))):
+				continue
 			item.generation = generation
-			item.due_ms = now_ms + float(item.get("due_ms", 0.0))
+			item.due_ms = due_ms
 			item.bind_on_install = false
+		retained_schedules.append(item)
+	clock_schedules = retained_schedules
 
 func _drain_clock_schedules(now_ms: float, generation: int, callback_budget: int) -> int:
 	clock_schedules = clock_schedules.filter(func(item: Dictionary) -> bool: return int(item.get("generation", 0)) == generation)
@@ -315,13 +327,27 @@ func _drain_clock_schedules(now_ms: float, generation: int, callback_budget: int
 			active_clock_schedule_cancelled = false
 			return callbacks
 		if float(item.interval_ms) > 0.0 and not active_clock_schedule_cancelled:
-			item.due_ms = float(item.due_ms) + float(item.interval_ms)
-			clock_schedules.append(item)
+			var previous_due_ms := float(item.due_ms)
+			var next_due_ms := previous_due_ms + float(item.interval_ms)
+			if is_finite(next_due_ms) and next_due_ms > previous_due_ms:
+				item.due_ms = next_due_ms
+				clock_schedules.append(item)
 		clock_schedules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 			return float(a.due_ms) < float(b.due_ms) or (float(a.due_ms) == float(b.due_ms) and int(a.id) < int(b.id)))
 		active_clock_schedule_id = 0
 		active_clock_schedule_cancelled = false
 	return callbacks
+
+
+func _clock_schedule_deadline_is_representable(
+	now_ms: float, delay_ms: float, due_ms: float, interval_ms: float) -> bool:
+	if not is_finite(due_ms) or (delay_ms > 0.0 and due_ms <= now_ms):
+		return false
+	if interval_ms > 0.0:
+		var next_due_ms := due_ms + interval_ms
+		if not is_finite(next_due_ms) or next_due_ms <= due_ms:
+			return false
+	return true
 
 
 func reset_context(options: Dictionary = {}) -> Dictionary:

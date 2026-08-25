@@ -431,6 +431,41 @@ func _run() -> void:
 		_fail("Gua Godot clock controls did not surface native operation results: %s / %s" % [reinstalled_clock, rejected_install])
 		return
 
+	var precision_reset := ui.reset_context({
+		"expected_session_epoch": ui.get_context_status().get("session_epoch", 0),
+		"flags": ui.RESET_CLOCK_FLAG,
+	})
+	var invalid_preinstall_interval_count := [0]
+	var pending_precision_schedule := ui.clock_schedule(
+		0.0, func(): invalid_preinstall_interval_count[0] += 1, 1.0)
+	var precision_install := ui.clock_install(1e16, 2.0)
+	ui.clock_pause()
+	ui.update("title")
+	if precision_reset.get("result", 0) != 1 or pending_precision_schedule == 0 or precision_install.get("result", 0) != 1 \
+			or invalid_preinstall_interval_count[0] != 0 or not ui.clock_schedules.is_empty():
+		_fail("Gua retained a pre-install interval that cannot advance the installed timeline.")
+		return
+	if ui.clock_schedule(0.0, func(): invalid_preinstall_interval_count[0] += 1, 1.0) != 0:
+		_fail("Gua accepted an interval that cannot advance its representable deadline.")
+		return
+	var precision_status := ui.get_clock()
+	var precision_generation := int(precision_status.get("generation", 0))
+	var precision_now_ms := float(precision_status.get("now_ms", 0.0))
+	ui.clock_schedules.append({
+		"id": ui.next_clock_schedule_id,
+		"generation": precision_generation,
+		"due_ms": precision_now_ms,
+		"bind_on_install": false,
+		"interval_ms": 1.0,
+		"callback": func(): invalid_preinstall_interval_count[0] += 1,
+	})
+	ui.next_clock_schedule_id += 1
+	var precision_callbacks := ui._drain_clock_schedules(precision_now_ms, precision_generation, 10)
+	if precision_callbacks != 1 or invalid_preinstall_interval_count[0] != 1 \
+			or not ui.clock_schedules.is_empty() or ui.clock_execution_limit_reached:
+		_fail("Gua reinserted a repeating schedule whose deadline did not advance.")
+		return
+
 	var leaked := ui.enqueue_action({"action": "focus", "node_id": "start"})
 	if leaked.get("request_id", 0) == 0:
 		_fail("Gua smoke could not create a pending request for reset validation.")
