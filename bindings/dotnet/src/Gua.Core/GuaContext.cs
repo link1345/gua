@@ -179,7 +179,7 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
     {
         ThrowIfDisposed(); var value = new Native.GuaNativeClockStep { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeClockStep>() };
         if (Native.gua_clock_consume_step(_handle, ref value) == 0) { step = default; return false; }
-        step = new(TimeSpan.FromMilliseconds(value.DeltaMs), value.FinalStep != 0, value.Generation); return true;
+        step = new(new GuaClockDelta(value.DeltaMs), value.FinalStep != 0, value.Generation); return true;
     }
 
     public void ConfigureDiagnostics(uint historyLimit, string environmentJson = "{}")

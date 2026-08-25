@@ -66,6 +66,23 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void NativeClockStepsPreserveFractionalDeltasAsDoubles()
+    {
+        Assert.That(typeof(GuaClockStep).GetProperty(nameof(GuaClockStep.Delta))!.PropertyType,
+            Is.EqualTo(typeof(GuaClockDelta)),
+            "Native deltas must not pass through runtime-dependent TimeSpan.FromMilliseconds rounding.");
+
+        using var context = new GuaContext();
+        var clock = new GuaClock(context);
+        var fractionalStep = TimeSpan.FromTicks(166_667);
+        clock.Install(step: fractionalStep);
+        clock.Pause();
+        Assert.That(context.RunClockFor(fractionalStep, fractionalStep), Is.EqualTo(GuaClockResult.Ok));
+        Assert.That(context.TryConsumeClockStep(out var step), Is.True);
+        Assert.That(step.Delta.TotalMilliseconds, Is.EqualTo(fractionalStep.TotalMilliseconds));
+    }
+
+    [Test]
     public void ContextRejectsASecondManagedClock()
     {
         using var context = new GuaContext();

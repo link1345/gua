@@ -8,7 +8,7 @@ public sealed record GuaClockStatus(bool Installed, bool Paused, double NowMilli
     public TimeSpan Now => TimeSpan.FromMilliseconds(NowMilliseconds);
 }
 
-public readonly record struct GuaClockStep(TimeSpan Delta, bool FinalStep, ulong Generation);
+public readonly record struct GuaClockStep(GuaClockDelta Delta, bool FinalStep, ulong Generation);
 
 public readonly record struct GuaClockDelta(double TotalMilliseconds)
 {
@@ -132,7 +132,7 @@ public sealed class GuaClock
             if (Tick is not null)
                 foreach (Action<GuaClockDelta> handler in Tick.GetInvocationList())
                 {
-                    handler(new GuaClockDelta(step.Delta.TotalMilliseconds));
+                    handler(step.Delta);
                     if (context.GetClockStatus().Generation != step.Generation) break;
                 }
         }
