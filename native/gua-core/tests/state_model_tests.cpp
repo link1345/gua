@@ -200,6 +200,19 @@ int main()
     assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
     assert(count_clock_steps(1e-16, 1.0) == 1);
 
+    gua_context_t* underflow_context = gua_create_context();
+    assert(gua_clock_install(underflow_context, 0.0, 1e308) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(underflow_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(underflow_context, 1e-300, 1e308) == GUA_CLOCK_OK);
+    gua_clock_step_t underflow_step { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(underflow_context, &underflow_step) == 1);
+    assert(underflow_step.delta_ms == 1e-300 && underflow_step.final_step == 1);
+    gua_clock_status_t underflow_status { sizeof(gua_clock_status_t) };
+    assert(gua_clock_get_status(underflow_context, &underflow_status) == 1);
+    assert(underflow_status.now_ms == 1e-300 && underflow_status.pending_ms == 0.0);
+    assert(gua_clock_consume_step(underflow_context, &underflow_step) == 0);
+    gua_destroy_context(underflow_context);
+
     gua_context_t* zero_duration_context = gua_create_context();
     assert(gua_clock_install(zero_duration_context, 0.0, 10.0) == GUA_CLOCK_OK);
     assert(gua_clock_pause(zero_duration_context) == GUA_CLOCK_OK);

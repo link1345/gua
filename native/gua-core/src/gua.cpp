@@ -384,13 +384,12 @@ bool prepare_clock_operation(
     const double nearest = std::round(quotient);
     const double quotient_tolerance = std::numeric_limits<double>::epsilon() * 8.0 * std::max(1.0, std::abs(quotient));
     if (nearest >= 1.0 && std::abs(quotient - nearest) <= quotient_tolerance) quotient = nearest;
-    step_count = static_cast<unsigned long long>(std::ceil(quotient));
+    step_count = std::max(1ULL, static_cast<unsigned long long>(std::ceil(quotient)));
     while (step_count > 1) {
         const double previous_elapsed_ms = std::min(duration_ms, step_ms * static_cast<double>(step_count - 1));
         if (now_ms + previous_elapsed_ms < target_ms) break;
         --step_count;
     }
-    if (step_count == 0) return false;
     double previous_boundary_ms = now_ms;
     for (unsigned long long index = 1; index <= step_count; ++index) {
         const double elapsed_ms = index == step_count ? duration_ms :

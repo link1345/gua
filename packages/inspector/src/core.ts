@@ -46,6 +46,7 @@ export interface GuaScreenshot {
   height: number;
 }
 export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completedOperationSequence: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
+export interface GuaContextStatus { sessionEpoch: number; frameSequence: number; revision: number; nodeCount: number; pendingRequestCount: number; inFlightRequestCount: number; unconsumedEventCount: number; logCount: number; hasScreenshot: boolean; firstPendingAction: number; firstPendingNodeId: string; firstEventAction: number; firstEventNodeId: string; }
 
 export interface InspectorPanel {
   id: "tree" | "node" | "screenshot" | "logs";
@@ -80,6 +81,7 @@ export type GuaInspectorCommand =
   | { id: number; type: "get_ui_tree" }
   | { id: number; type: "get_logs" }
   | { id: number; type: "get_screenshot" }
+  | { id: number; type: "get_context_status" }
   | { id: number; type: "poll_events"; requestId: number }
   | { id: number; type: "click_node"; nodeId: string }
   | { id: number; type: "focus_node"; nodeId: string }
@@ -96,6 +98,7 @@ type GuaInspectorCommandInput =
   | { type: "get_ui_tree" }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
+  | { type: "get_context_status" }
   | { type: "poll_events"; requestId: number }
   | { type: "click_node"; nodeId: string }
   | { type: "focus_node"; nodeId: string }

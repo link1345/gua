@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DemoRuntime } from "../src/index";
+import { DemoRuntime, handleMessage } from "../src/index";
 
 describe("DemoRuntime virtual clock", () => {
   test("rejects installation until the current timeline is reset", () => {
@@ -46,6 +46,14 @@ describe("DemoRuntime virtual clock", () => {
     expect(after.frameSequence).toBe(before.frameSequence + 1);
     expect(after.revision).toBe(before.revision);
     expect(runtime.getClock().completedOperationSequence).toBe(operation.operationSequence);
+    const response = handleMessage(JSON.stringify({ id: 9, type: "get_context_status" }), runtime);
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      const status = response.result as { sessionEpoch: number; frameSequence: number; revision: number };
+      expect(status.sessionEpoch).toBe(1);
+      expect(status.frameSequence).toBe(after.frameSequence);
+      expect(status.revision).toBe(after.revision);
+    }
   });
 
   test("advances running time from a monotonic source and freezes while paused", () => {

@@ -5,13 +5,14 @@ import type {
   GuaScreenshot,
   GuaUiTree,
   GuaClockStatus,
+  GuaContextStatus,
 } from "@gua/inspector/core";
 
 const defaultPort = 8765;
 const port = Number.parseInt(Bun.env.GUA_BRIDGE_PORT ?? Bun.argv[2] ?? `${defaultPort}`, 10);
-type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | null;
+type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | null;
 
-function handleMessage(message: string | Buffer): GuaInspectorResponse {
+export function handleMessage(message: string | Buffer, target: DemoRuntime = runtime): GuaInspectorResponse {
   if (typeof message !== "string") {
     return { id: 0, ok: false, error: "Expected a JSON text message." };
   }
@@ -26,38 +27,39 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
   try {
     switch (command.type) {
       case "get_ui_tree":
-        return ok(command.id, runtime.getUiTree());
+        return ok(command.id, target.getUiTree());
       case "get_logs":
-        return ok(command.id, runtime.getLogs());
+        return ok(command.id, target.getLogs());
       case "get_screenshot":
-        return ok(command.id, runtime.getScreenshot());
-      case "get_clock": return ok(command.id, runtime.getClock());
-      case "clock_install": return ok(command.id, runtime.installClock(command.initialTimeMs, command.stepMs));
-      case "clock_pause": return ok(command.id, runtime.pauseClock());
-      case "clock_run_for": return ok(command.id, runtime.runClockFor(command.durationMs, command.stepMs));
-      case "clock_resume": return ok(command.id, runtime.resumeClock());
+        return ok(command.id, target.getScreenshot());
+      case "get_context_status": return ok(command.id, target.getContextStatus());
+      case "get_clock": return ok(command.id, target.getClock());
+      case "clock_install": return ok(command.id, target.installClock(command.initialTimeMs, command.stepMs));
+      case "clock_pause": return ok(command.id, target.pauseClock());
+      case "clock_run_for": return ok(command.id, target.runClockFor(command.durationMs, command.stepMs));
+      case "clock_resume": return ok(command.id, target.resumeClock());
       case "poll_events":
         return ok(command.id, null);
       case "click_node":
-        runtime.clickNode(command.nodeId);
+        target.clickNode(command.nodeId);
         return ok(command.id, null);
       case "focus_node":
-        runtime.focusNode(command.nodeId);
+        target.focusNode(command.nodeId);
         return ok(command.id, null);
       case "press_key":
-        runtime.pressKey(command.key);
+        target.pressKey(command.key);
         return ok(command.id, null);
       case "set_value":
-        runtime.log("info", `set_value(${command.nodeId})`);
+        target.log("info", `set_value(${command.nodeId})`);
         return ok(command.id, null);
       case "set_checked":
-        runtime.log("info", `set_checked(${command.nodeId}, ${command.checked})`);
+        target.log("info", `set_checked(${command.nodeId}, ${command.checked})`);
         return ok(command.id, null);
       case "select":
-        runtime.log("info", `select(${command.nodeId}, ${command.value})`);
+        target.log("info", `select(${command.nodeId}, ${command.value})`);
         return ok(command.id, null);
       case "scroll":
-        runtime.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
+        target.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
         return ok(command.id, null);
     }
   } catch (error) {
@@ -124,6 +126,23 @@ export class DemoRuntime {
       dataUri: `data:image/svg+xml,${encodeURIComponent(this.renderScreenshotSvg())}`,
       width: 1280,
       height: 720,
+    };
+  }
+  getContextStatus(): GuaContextStatus {
+    return {
+      sessionEpoch: 1,
+      frameSequence: this.frameSequence,
+      revision: this.revision,
+      nodeCount: this.getUiTree().nodes.length,
+      pendingRequestCount: 0,
+      inFlightRequestCount: 0,
+      unconsumedEventCount: 0,
+      logCount: this.logs.length,
+      hasScreenshot: true,
+      firstPendingAction: 0,
+      firstPendingNodeId: "",
+      firstEventAction: 0,
+      firstEventNodeId: "",
     };
   }
   getClock() { this.advanceRunningClock(); return this.clock; }
