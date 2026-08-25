@@ -200,10 +200,19 @@ int main()
     assert(count_clock_steps(1000.0, 1000.0 / 60.0) == 60);
     assert(count_clock_steps(1e-16, 1.0) == 1);
 
+    gua_context_t* zero_duration_context = gua_create_context();
+    assert(gua_clock_install(zero_duration_context, 0.0, 10.0) == GUA_CLOCK_OK);
+    assert(gua_clock_pause(zero_duration_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(zero_duration_context, 0.0, 10.0) == GUA_CLOCK_OK);
+    gua_clock_step_t zero_duration_step { sizeof(gua_clock_step_t) };
+    assert(gua_clock_consume_step(zero_duration_context, &zero_duration_step) == 0);
+    gua_destroy_context(zero_duration_context);
+
     gua_context_t* magnitude_context = gua_create_context();
     assert(gua_clock_install(magnitude_context, 1e16, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
     assert(gua_clock_install(magnitude_context, 1e16, 3.0) == GUA_CLOCK_OK);
     assert(gua_clock_pause(magnitude_context) == GUA_CLOCK_OK);
+    assert(gua_clock_run_for(magnitude_context, 0.0, 1.0) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
     assert(gua_clock_run_for(magnitude_context, 100.0, 3.0) == GUA_CLOCK_OK);
     gua_clock_status_t magnitude_status { sizeof(gua_clock_status_t) };
     double previous_now = 1e16;

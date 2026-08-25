@@ -371,7 +371,12 @@ bool prepare_clock_operation(
 {
     target_ms = now_ms + duration_ms;
     if (!std::isfinite(target_ms)) return false;
-    if (duration_ms == 0.0) { step_count = 0; return true; }
+    if (duration_ms == 0.0) {
+        const double next_step_ms = now_ms + step_ms;
+        if (!std::isfinite(next_step_ms) || next_step_ms <= now_ms) return false;
+        step_count = 0;
+        return true;
+    }
     const double emitted_step_ms = std::min(duration_ms, step_ms);
     if (target_ms <= now_ms || now_ms + emitted_step_ms <= now_ms ||
         target_ms - emitted_step_ms >= target_ms) return false;
