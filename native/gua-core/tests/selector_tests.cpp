@@ -118,5 +118,23 @@ int main()
     std::vector<double> clock_steps;
     clock.run_for(std::chrono::milliseconds(25), [&](auto delta) { clock_steps.push_back(delta.count()); });
     assert((clock_steps == std::vector<double> { 10.0, 10.0, 5.0 }));
+
+    int throwing_tick_calls = 0;
+    bool tick_error_preserved = false;
+    try {
+        clock.run_for(std::chrono::milliseconds(30), std::chrono::milliseconds(10), [&](auto) {
+            ++throwing_tick_calls;
+            throw std::runtime_error("tick failed");
+        });
+    } catch (const std::runtime_error& error) {
+        tick_error_preserved = std::string(error.what()) == "tick failed";
+    }
+    const auto drained_status = clock.status();
+    assert(tick_error_preserved);
+    assert(throwing_tick_calls == 1);
+    assert(drained_status.now_ms == 55.0);
+    assert(drained_status.pending_ms == 0.0);
+    clock.run_for(std::chrono::milliseconds(10));
+    assert(clock.status().now_ms == 65.0);
     gua_destroy_context(context);
 }

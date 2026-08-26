@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <filesystem>
 #include <fstream>
@@ -554,11 +555,16 @@ public:
         const std::function<void(std::chrono::duration<double, std::milli>)>& on_tick = {}) const
     {
         check(gua_clock_run_for(context_, duration.count(), step.count()));
+        std::exception_ptr callback_error;
         gua_clock_step_t value { sizeof(gua_clock_step_t) };
         while (gua_clock_consume_step(context_, &value) != 0) {
-            if (on_tick) on_tick(std::chrono::duration<double, std::milli>(value.delta_ms));
+            if (on_tick && callback_error == nullptr) {
+                try { on_tick(std::chrono::duration<double, std::milli>(value.delta_ms)); }
+                catch (...) { callback_error = std::current_exception(); }
+            }
             value = gua_clock_step_t { sizeof(gua_clock_step_t) };
         }
+        if (callback_error != nullptr) std::rethrow_exception(callback_error);
     }
     void resume() const { check(gua_clock_resume(context_)); }
     [[nodiscard]] gua_clock_status_t status() const

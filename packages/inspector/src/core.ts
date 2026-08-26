@@ -67,6 +67,7 @@ export interface GuaInspectorClient {
   getUiTree(): Promise<GuaUiTree>;
   getLogs(): Promise<GuaLogEntry[]>;
   getScreenshot(): Promise<GuaScreenshot>;
+  getContextStatus(): Promise<GuaContextStatus>;
   performAction(action: SemanticActionInput): Promise<ActionOutcome>;
   clickNode(nodeId: string): Promise<void>;
   focusNode(nodeId: string): Promise<void>;
@@ -297,6 +298,16 @@ export class MockInspectorClient implements GuaInspectorClient {
     };
   }
 
+  async getContextStatus(): Promise<GuaContextStatus> {
+    return {
+      sessionEpoch: 1, frameSequence: this.frameSequence, revision: this.revision,
+      nodeCount: (await this.getUiTree()).nodes.length, pendingRequestCount: 0,
+      inFlightRequestCount: 0, unconsumedEventCount: 0, logCount: this.logs.length,
+      hasScreenshot: false, firstPendingAction: 0, firstPendingNodeId: "",
+      firstEventAction: 0, firstEventNodeId: "",
+    };
+  }
+
   async performAction(action: SemanticActionInput): Promise<ActionOutcome> {
     if (action.action === "click") await this.clickNode(action.nodeId as string);
     else if (action.action === "focus") await this.focusNode(action.nodeId as string);
@@ -421,6 +432,10 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     return this.request<GuaScreenshot>({ type: "get_screenshot" });
   }
 
+  async getContextStatus(): Promise<GuaContextStatus> {
+    return this.request<GuaContextStatus>({ type: "get_context_status" });
+  }
+
   async getClock(): Promise<GuaClockStatus> { return this.request({ type: "get_clock" }); }
   async installClock(initialTimeMs = 0, stepMs?: number): Promise<GuaClockStatus> { return this.request({ type: "clock_install", initialTimeMs, stepMs }); }
   async pauseClock(): Promise<GuaClockStatus> {
@@ -434,9 +449,9 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     if (completionEpoch === undefined || completionFrame === undefined || operationSequence === undefined) throw new Error("unsupported");
     const started = Date.now();
     while (Date.now() - started < this.requestTimeoutMs) {
-      const tree = await this.getUiTree();
-      if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
-      if (status.completedOperationSequence >= operationSequence && tree.frameSequence > completionFrame) return status;
+      const context = await this.getContextStatus();
+      if (context.sessionEpoch !== completionEpoch) throw new Error("stale_session");
+      if (status.completedOperationSequence >= operationSequence && context.frameSequence > completionFrame) return status;
       await new Promise((resolve) => window.setTimeout(resolve, 5));
       status = await this.getClock();
     }

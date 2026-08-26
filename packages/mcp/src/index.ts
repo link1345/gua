@@ -106,6 +106,11 @@ interface GuaActionEvent {
   revision: number;
 }
 
+interface GuaContextStatus {
+  sessionEpoch: number;
+  frameSequence: number;
+}
+
 type BridgeResult = unknown;
 
 export interface GuaMcpServerOptions {
@@ -769,6 +774,10 @@ class GuaBridgeClient {
     return this.request<GuaScreenshot>({ type: "get_screenshot" });
   }
 
+  async getContextStatus(): Promise<GuaContextStatus> {
+    return this.request<GuaContextStatus>({ type: "get_context_status" });
+  }
+
   async getClock(): Promise<unknown> { return this.request({ type: "get_clock" }); }
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
@@ -784,9 +793,9 @@ class GuaBridgeClient {
     if (completionEpoch === undefined || completionFrame === undefined || operationSequence === undefined) throw new Error("unsupported");
     const started = Date.now();
     while (Date.now() - started < 10000) {
-      const tree = await this.getUiTree();
-      if (tree.sessionEpoch !== completionEpoch) throw new Error("stale_session");
-      if (result.completedOperationSequence >= operationSequence && (tree.frameSequence ?? 0) > completionFrame) return result;
+      const context = await this.getContextStatus();
+      if (context.sessionEpoch !== completionEpoch) throw new Error("stale_session");
+      if (result.completedOperationSequence >= operationSequence && context.frameSequence > completionFrame) return result;
       await sleep(5);
       const status = await this.request<{
         schemaVersion: number;
@@ -956,6 +965,7 @@ type BridgeCommandInput =
   | { type: "get_ui_tree" }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
+  | { type: "get_context_status" }
   | { type: "poll_events"; requestId: number }
   | { type: "get_clock" | "clock_pause" | "clock_resume" }
   | { type: "clock_install"; initialTimeMs?: number; stepMs?: number }
