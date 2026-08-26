@@ -56,6 +56,29 @@ jobs:
           node-version: 24.15.0
           registry-url: https://registry.npmjs.org
 
+      - name: Check whether npm version is already published
+        id: npm_version
+        shell: bash
+        run: |
+          package_name="gui-mcp"
+          package_version="${{ steps.version.outputs.version }}"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://registry.npmjs.org/${package_name}/${package_version}")"
+
+          case "${status}" in
+            200)
+              echo "published=true" >> "${GITHUB_OUTPUT}"
+              echo "${package_name}@${package_version} is already published; npm publish will be skipped."
+              ;;
+            404)
+              echo "published=false" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Unexpected npm registry response for ${package_name}@${package_version}: HTTP ${status}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Install dependencies
         working-directory: .
         run: bun install --frozen-lockfile
@@ -101,6 +124,7 @@ jobs:
           npm pack --dry-run
 
       - name: Publish to npm
+        if: steps.npm_version.outputs.published != 'true'
         run: |
           cd "${{ steps.prepare.outputs.publish_dir }}"
           npm publish --access public --tag latest
