@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/agent-policy.schema.json",
+  "title": "Gua agent projection policy v1",
+  "description": "Use $defs/uiPolicy for UI nodes and $defs/worldPolicy for World objects.",
+  "anyOf": [
+    { "$ref": "#/$defs/uiPolicy" },
+    { "$ref": "#/$defs/worldPolicy" }
+  ],
+  "$defs": {
+    "exposure": { "enum": ["auto", "private"], "default": "auto" },
+    "allowedActions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] }
+    },
+    "passRule": {
+      "type": "object",
+      "required": ["path", "mode"],
+      "properties": { "path": { "type": "string" }, "mode": { "enum": ["keep", "omit", "redact"] } },
+      "additionalProperties": false
+    },
+    "stringRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/passRule" },
+        {
+          "type": "object",
+          "required": ["path", "mode", "replacement"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "string" } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "numberRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/passRule" },
+        {
+          "type": "object",
+          "required": ["path", "mode", "replacement"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "number" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["path", "mode", "quantum"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "quantize" }, "quantum": { "type": "number", "exclusiveMinimum": 0 } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "booleanRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/passRule" },
+        {
+          "type": "object",
+          "required": ["path", "mode", "replacement"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "boolean" } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "worldStateRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/passRule" },
+        {
+          "type": "object",
+          "required": ["path", "mode", "replacement"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": ["string", "number", "boolean", "null"] } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["path", "mode", "quantum"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "quantize" }, "quantum": { "type": "number", "exclusiveMinimum": 0 } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "uiFieldRule": {
+      "oneOf": [
+        { "allOf": [{ "$ref": "#/$defs/stringRule" }, { "properties": { "path": { "enum": ["label", "text", "value"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/numberRule" }, { "properties": { "path": { "enum": ["bounds.x", "bounds.y", "bounds.w", "bounds.h", "state.caretPosition", "state.selectionStart", "state.selectionEnd", "state.scrollX", "state.scrollY", "state.scrollMaxX", "state.scrollMaxY", "state.rangeValue", "state.rangeMin", "state.rangeMax", "state.selectedIndex"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/booleanRule" }, { "properties": { "path": { "enum": ["state.focused", "state.hovered", "state.pressed", "state.checked", "state.selected"] } } }] }
+      ]
+    },
+    "worldFieldRule": {
+      "oneOf": [
+        { "allOf": [{ "$ref": "#/$defs/stringRule" }, { "properties": { "path": { "enum": ["label", "description", "domainId", "relatedUiNodeId"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/numberRule" }, { "properties": { "path": { "enum": ["position.x", "position.y", "position.z"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/passRule" }, { "properties": { "path": { "const": "tags" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/worldStateRule" }, { "properties": { "path": { "type": "string", "pattern": "^state\\.[^.].*$" } } }] }
+      ]
+    },
+    "uiPolicy": {
+      "type": "object",
+      "properties": {
+        "exposure": { "$ref": "#/$defs/exposure" },
+        "fieldRules": { "type": "array", "items": { "$ref": "#/$defs/uiFieldRule" } },
+        "allowedActions": { "$ref": "#/$defs/allowedActions" }
+      },
+      "additionalProperties": false
+    },
+    "worldPolicy": {
+      "type": "object",
+      "properties": {
+        "exposure": { "$ref": "#/$defs/exposure" },
+        "fieldRules": { "type": "array", "items": { "$ref": "#/$defs/worldFieldRule" } },
+        "allowedActions": { "$ref": "#/$defs/allowedActions" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

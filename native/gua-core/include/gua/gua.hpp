@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gua {
 
@@ -40,6 +41,28 @@ enum class ActionType {
     click = GUA_ACTION_CLICK, focus = GUA_ACTION_FOCUS, set_value = GUA_ACTION_SET_VALUE,
     set_checked = GUA_ACTION_SET_CHECKED, select = GUA_ACTION_SELECT, scroll = GUA_ACTION_SCROLL,
     press_key = GUA_ACTION_PRESS_KEY,
+};
+
+enum class ObservationProfile { debug = GUA_OBSERVATION_PROFILE_DEBUG, player = GUA_OBSERVATION_PROFILE_PLAYER };
+enum class AgentExposure { automatic = GUA_AGENT_EXPOSURE_AUTO, private_ = GUA_AGENT_EXPOSURE_PRIVATE };
+enum class AgentFieldMode {
+    keep = GUA_AGENT_FIELD_KEEP, omit = GUA_AGENT_FIELD_OMIT, redact = GUA_AGENT_FIELD_REDACT,
+    replace = GUA_AGENT_FIELD_REPLACE, quantize = GUA_AGENT_FIELD_QUANTIZE,
+};
+
+struct AgentFieldRule {
+    std::string path;
+    AgentFieldMode mode = AgentFieldMode::keep;
+    int replacement_type = GUA_WORLD_VALUE_NULL;
+    std::string string_value;
+    double number_value = 0, quantum = 0;
+    bool bool_value = false;
+};
+
+struct AgentPolicy {
+    AgentExposure exposure = AgentExposure::automatic;
+    std::optional<std::uint64_t> allowed_actions;
+    std::vector<AgentFieldRule> field_rules;
 };
 
 struct ActionRequest {
@@ -172,7 +195,8 @@ public:
         Rect bounds,
         const NodeProperties& properties = {},
         bool visible = true,
-        bool enabled = true)
+        bool enabled = true,
+        const AgentPolicy& policy = {})
     {
         id_buffer_.assign(id);
         role_buffer_.assign(role);
@@ -223,7 +247,16 @@ public:
             properties.scroll_x.value_or(0), properties.scroll_y.value_or(0), properties.scroll_max_x.value_or(0), properties.scroll_max_y.value_or(0),
             properties.range_value.value_or(0), properties.range_min.value_or(0), properties.range_max.value_or(0), properties.selected_index.value_or(-1)
         };
-        if (gua_register_node_v3(context_, &detailed) == 0) {
+        std::vector<gua_agent_field_rule_v1_t> native_rules;
+        native_rules.reserve(policy.field_rules.size());
+        for (const auto& rule : policy.field_rules) native_rules.push_back({ sizeof(gua_agent_field_rule_v1_t), rule.path.c_str(),
+            static_cast<int>(rule.mode), rule.replacement_type, rule.string_value.empty() ? nullptr : rule.string_value.c_str(), rule.number_value,
+            rule.bool_value ? 1 : 0, rule.quantum });
+        const gua_agent_policy_v1_t native_policy { sizeof(gua_agent_policy_v1_t), static_cast<int>(policy.exposure),
+            policy.allowed_actions.has_value() ? 1 : 0, policy.allowed_actions.value_or(0),
+            native_rules.empty() ? nullptr : native_rules.data(), static_cast<std::uint32_t>(native_rules.size()) };
+        const gua_node_descriptor_v4_t secured { sizeof(gua_node_descriptor_v4_t), detailed, native_policy };
+        if (gua_register_node_v4(context_, &secured) == 0) {
             throw std::runtime_error("Failed to register Gua v2 node");
         }
     }
@@ -246,6 +279,13 @@ public:
     [[nodiscard]] std::string ui_tree_json() const
     {
         return copy_json(gua_copy_ui_tree_json);
+    }
+
+    [[nodiscard]] std::string ui_tree_json(ObservationProfile profile) const
+    {
+        return copy_json([profile](gua_context_t* context, char* output, int size) {
+            return gua_copy_ui_tree_json_for_profile(context, static_cast<int>(profile), output, size);
+        });
     }
 
     void log(LogLevel level, std::string_view message)
@@ -282,6 +322,13 @@ public:
     [[nodiscard]] std::string diagnostics_json() const
     {
         return copy_json(gua_copy_diagnostics_json);
+    }
+
+    [[nodiscard]] std::string diagnostics_json(ObservationProfile profile) const
+    {
+        return copy_json([profile](gua_context_t* context, char* output, int size) {
+            return gua_copy_diagnostics_json_for_profile(context, static_cast<int>(profile), output, size);
+        });
     }
 
     [[nodiscard]] bool enqueue_click(std::string_view node_id)
@@ -326,6 +373,16 @@ public:
             key_buffer_.empty() ? nullptr : key_buffer_.c_str(), request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit
         };
         return gua_enqueue_action(context_, &descriptor, &request_id);
+    }
+
+    [[nodiscard]] int enqueue_action(const ActionRequest& request, ObservationProfile profile, std::uint64_t& request_id)
+    {
+        id_buffer_.assign(request.node_id); value_buffer_.assign(request.value); key_buffer_.assign(request.key);
+        const gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t), static_cast<int>(request.action),
+            id_buffer_.empty() ? nullptr : id_buffer_.c_str(), value_buffer_.empty() ? nullptr : value_buffer_.c_str(),
+            request.delta_x, request.delta_y, request.bool_value ? 1 : 0, key_buffer_.empty() ? nullptr : key_buffer_.c_str(),
+            request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit };
+        return gua_enqueue_action_for_profile(context_, &descriptor, static_cast<int>(profile), &request_id);
     }
 
     [[nodiscard]] bool consume_action(ActionType action, std::string_view node_id, ActionRequest& out)
