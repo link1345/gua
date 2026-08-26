@@ -61,19 +61,19 @@ so sensitive values cannot leak through teardown diagnostics.
 Reset is scoped to one `gua_context_t` / `gua_runtime_t`; it does not use global
 state and cannot affect another context. The selectable flags are nodes (1),
 requests (2), events (4), retained diagnostic history (8), logs (16), and
-screenshot (32), and virtual clock state and pending work (64). The default is
-79: nodes, requests, events, history, and clock state are cleared, while logs
+screenshot (32), virtual clock state and pending work (64), and World Object Tree state (128). The current default is
+207: nodes, requests, events, history, clock state, and world state are cleared, while logs
 and screenshot are preserved unless explicitly selected. Resetting the clock
 also advances its generation so language wrappers can discard old schedules.
 Bridge server, port, active WebSocket connections, and context configuration are
 never reset.
 
 The published C ABI constant `GUA_RESET_DEFAULT` retains its original value 15.
-Current native callers use `GUA_RESET_DEFAULT_V2` (79) and set
-`gua_reset_options_t.flags_version` to `GUA_RESET_FLAGS_VERSION_CURRENT`.
+Current native callers use `GUA_RESET_DEFAULT_V3` (207) and set
+`gua_reset_options_t.flags_version` to `GUA_RESET_FLAGS_VERSION_CURRENT` (2).
 For binary compatibility, the runtime recognizes an older reset-options struct
 or legacy flags version and upgrades the exact legacy Default (15) and All (63)
-masks to include the clock. Current-version explicit masks are never upgraded.
+masks to include the clock and world state. Flags-version 1 exact Default (79) and All (127) masks are upgraded to include world state. Current-version explicit masks are never upgraded.
 
 Strict reset checks selected request/event queues before mutation. If pending,
 in-flight, or unconsumed state exists, it returns `dirty` with counts and a
@@ -81,9 +81,9 @@ redacted first-item summary and changes nothing. Non-strict reset reports how
 many selected items it discarded. Every successful reset increments
 `sessionEpoch`; local callers may pass zero to use the current epoch, but remote
 `reset_context` commands must provide `expectedSessionEpoch`. Current clients
-that provide `flags` also send `flagsVersion: 1`; omitted flags still resolve to
-the current default 79. A missing `flagsVersion` marks an older client, so exact
-legacy Default (15) and All (63) masks are upgraded to include the clock. A stale remote
+that provide `flags` also send `flagsVersion: 2`; omitted flags resolve to
+the current default 207. A missing `flagsVersion` marks an older client, so exact
+legacy Default (15) and All (63) masks are upgraded to include the clock and world state. A stale remote
 epoch is rejected without mutation. Multiple clients of one runtime observe the
 same reset because the isolation boundary is the shared runtime context, not a
 WebSocket connection. Runtime-owned on-demand screenshot requests, in-flight
@@ -188,6 +188,16 @@ unsupported properties from observed false or empty values. Readers should
 continue accepting legacy payloads that contain only `screen` and `nodes`
 during migration.
 
+## World Object Tree v1
+
+`world-object-tree.schema.json` defines a separate, read-only snapshot for explicitly registered game-world objects. It never mixes Node2D, Node3D, GameObject, or gameplay state into the Semantic UI Tree. A snapshot has its own `scene`, `frameSequence`, and `revision`, while sharing the context `sessionEpoch`.
+
+Publishers use `begin_world_frame -> register_world_object -> end_world_frame`. Publication is atomic: duplicate IDs, missing parents, cycles, non-finite positions, invalid state values, or malformed descriptors reject the whole staged frame and preserve the previous snapshot. Omission from the next valid frame removes an object. State is limited to flat string, finite number, boolean, or null values and must not contain secrets.
+
+`visibleToPlayer` is host-defined semantic visibility, not pixel occlusion. The host fixes an observation profile before transport use: `debug` returns every registered object, while `player` removes invisible or `private` objects and descendants whose parent is not observable. Commands do not accept a profile override. Queries project first, so guessing a private ID produces the same empty result as an unknown ID.
+
+World v1 provides no actions, relationship/distance queries, pathfinding, teleportation, or arbitrary host method invocation. Capability `world_object_tree_v1` is advertised only after an adapter installs its world-frame publisher.
+
 ## Inspector Snapshots
 
 The v0.3 Inspector consumes three protocol payloads:
@@ -276,6 +286,8 @@ work is still pending.
 Initial command types:
 
 - `get_ui_tree`
+- `get_world_object_tree`
+- `query_world_objects`
 - `get_node`
 - `click_node`
 - `focus_node`
@@ -346,6 +358,7 @@ package can be launched with `bunx gui-mcp@latest mcp`.
 MCP tools:
 
 - `get_ui_tree`: returns the current semantic UI tree
+- `get_world_object_tree`, `find_world_objects`, `wait_for_world_object`: observe the host-authorized World Object Tree
 - `click_node`, `focus_node`, `set_value`, `set_checked`, `select`, `scroll`, `press_key`: invoke protocol v1 semantic actions
 - `wait_for_node`: polls `get_ui_tree` until a node id appears
 - `get_screenshot`: returns the latest screenshot payload

@@ -144,14 +144,17 @@ enum {
     GUA_RESET_LOGS = 1U << 4,
     GUA_RESET_SCREENSHOT = 1U << 5,
     GUA_RESET_CLOCK = 1U << 6,
-    /* Published legacy value. Use GUA_RESET_DEFAULT_V2 for current default behavior. */
+    GUA_RESET_WORLD_OBJECTS = 1U << 7,
+    /* Published legacy value. Use GUA_RESET_DEFAULT_V3 for current default behavior. */
     GUA_RESET_DEFAULT = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY,
-    GUA_RESET_DEFAULT_V2 = GUA_RESET_DEFAULT | GUA_RESET_CLOCK
+    GUA_RESET_DEFAULT_V2 = GUA_RESET_DEFAULT | GUA_RESET_CLOCK,
+    GUA_RESET_DEFAULT_V3 = GUA_RESET_DEFAULT_V2 | GUA_RESET_WORLD_OBJECTS
 };
 
 enum {
     GUA_RESET_FLAGS_VERSION_LEGACY = 0,
-    GUA_RESET_FLAGS_VERSION_CURRENT = 1
+    GUA_RESET_FLAGS_VERSION_V1 = 1,
+    GUA_RESET_FLAGS_VERSION_CURRENT = 2
 };
 
 enum {
@@ -176,6 +179,9 @@ typedef struct gua_context_status_t {
     char first_pending_node_id[128];
     int first_event_action;
     char first_event_node_id[128];
+    uint64_t world_frame_sequence;
+    uint64_t world_revision;
+    uint32_t world_object_count;
 } gua_context_status_t;
 
 typedef struct gua_reset_options_t {
@@ -204,7 +210,78 @@ typedef struct gua_reset_report_t {
     char first_pending_node_id[128];
     int first_event_action;
     char first_event_node_id[128];
+    uint32_t discarded_world_object_count;
 } gua_reset_report_t;
+
+enum {
+    GUA_WORLD_SPACE_2D = 1,
+    GUA_WORLD_SPACE_3D = 2
+};
+
+enum {
+    GUA_AGENT_EXPOSURE_AUTO = 0,
+    GUA_AGENT_EXPOSURE_PRIVATE = 1
+};
+
+enum {
+    GUA_OBSERVATION_PROFILE_DEBUG = 0,
+    GUA_OBSERVATION_PROFILE_PLAYER = 1
+};
+
+enum {
+    GUA_WORLD_VALUE_NULL = 0,
+    GUA_WORLD_VALUE_STRING = 1,
+    GUA_WORLD_VALUE_NUMBER = 2,
+    GUA_WORLD_VALUE_BOOLEAN = 3
+};
+
+typedef struct gua_world_state_value_v1_t {
+    uint32_t struct_size;
+    const char* key;
+    int type;
+    const char* string_value;
+    double number_value;
+    int bool_value;
+} gua_world_state_value_v1_t;
+
+typedef struct gua_world_object_descriptor_v1_t {
+    uint32_t struct_size;
+    const char* id;
+    const char* parent_id;
+    const char* kind;
+    const char* label;
+    const char* description;
+    int space;
+    double position_x;
+    double position_y;
+    double position_z;
+    int visible_to_player;
+    int active;
+    int agent_exposure;
+    const char* domain_id;
+    const char* related_ui_node_id;
+    const char* const* tags;
+    uint32_t tag_count;
+    const gua_world_state_value_v1_t* state_values;
+    uint32_t state_value_count;
+} gua_world_object_descriptor_v1_t;
+
+typedef struct gua_world_selector_v1_t {
+    uint32_t struct_size;
+    const char* id;
+    int id_match;
+    const char* kind;
+    int kind_match;
+    const char* label;
+    int label_match;
+    const char* tag;
+    int tag_match;
+    const char* parent_id;
+    int direct_child;
+    int visible_to_player;
+    int active;
+    const gua_world_state_value_v1_t* state;
+} gua_world_selector_v1_t;
 
 typedef struct gua_node_state_t {
     int visible;
@@ -380,6 +457,11 @@ int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);
 /* Returns the required JSON byte size including the trailing NUL. The result contains valid, matches, and optional error fields. */
 int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t* selector, char* out_json, int out_json_size);
+int gua_begin_world_frame(gua_context_t* ctx, const char* scene);
+int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor);
+int gua_end_world_frame(gua_context_t* ctx);
+int gua_copy_world_object_tree_json(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
+int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size);
 int gua_enqueue_click(gua_context_t* ctx, const char* node_id);
 int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
 int gua_emit_click(gua_context_t* ctx, const char* node_id);

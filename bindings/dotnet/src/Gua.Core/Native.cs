@@ -61,6 +61,9 @@ internal static partial class Native
         public fixed byte FirstPendingNodeId[128];
         public int FirstEventAction;
         public fixed byte FirstEventNodeId[128];
+        public ulong WorldFrameSequence;
+        public ulong WorldRevision;
+        public uint WorldObjectCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -101,6 +104,7 @@ internal static partial class Native
         public fixed byte FirstPendingNodeId[128];
         public int FirstEventAction;
         public fixed byte FirstEventNodeId[128];
+        public uint DiscardedWorldObjectCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -173,6 +177,27 @@ internal static partial class Native
         public double ScrollX, ScrollY, ScrollMaxX, ScrollMaxY;
         public double RangeValue, RangeMin, RangeMax;
         public long SelectedIndex;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeWorldStateValueV1
+    {
+        public uint StructSize; public nint Key; public int Type; public nint StringValue; public double NumberValue; public int BoolValue;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeWorldObjectDescriptorV1
+    {
+        public uint StructSize; public nint Id; public nint ParentId; public nint Kind; public nint Label; public nint Description;
+        public int Space; public double PositionX, PositionY, PositionZ; public int VisibleToPlayer; public int Active; public int AgentExposure;
+        public nint DomainId; public nint RelatedUiNodeId; public nint Tags; public uint TagCount; public nint StateValues; public uint StateValueCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeWorldSelectorV1
+    {
+        public uint StructSize; public nint Id; public int IdMatch; public nint Kind; public int KindMatch; public nint Label; public int LabelMatch;
+        public nint Tag; public int TagMatch; public nint ParentId; public int DirectChild; public int VisibleToPlayer; public int Active; public nint State;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -336,6 +361,12 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static partial int gua_register_node_v3(nint context, in GuaNativeNodeDescriptorV3 descriptor);
+
+    [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)] internal static partial int gua_begin_world_frame(nint context, string scene);
+    [LibraryImport("gua")] internal static partial int gua_register_world_object_v1(nint context, in GuaNativeWorldObjectDescriptorV1 descriptor);
+    [LibraryImport("gua")] internal static partial int gua_end_world_frame(nint context);
+    [LibraryImport("gua")] internal static unsafe partial int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
+    [LibraryImport("gua")] internal static unsafe partial int gua_query_world_objects_json(nint context, in GuaNativeWorldSelectorV1 selector, int profile, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua")]
     internal static partial nint gua_get_ui_tree_json(nint context);

@@ -32,6 +32,7 @@ struct Command {
     std::string node_id;
     std::string key;
     gua::ws::QuerySelector selector;
+    gua::ws::WorldQuerySelector world_selector;
     std::string value;
     float delta_x = 0;
     float delta_y = 0;
@@ -43,8 +44,8 @@ struct Command {
     unsigned long long expected_session_epoch = 0;
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
-    unsigned int reset_flags = 79;
-    unsigned int reset_flags_version = 1;
+    unsigned int reset_flags = 207;
+    unsigned int reset_flags_version = 2;
     bool reset_flags_version_valid = true;
     bool strict = false;
     double initial_time_ms = 0;
@@ -689,6 +690,23 @@ Command parse_command(std::string_view json)
     command.selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
     command.selector.visible = json_int_field(json, "visible").value_or(0);
     command.selector.enabled = json_int_field(json, "enabled").value_or(0);
+    command.world_selector.id = json_string_field(json, "worldId").value_or("");
+    command.world_selector.id_match = json_int_field(json, "worldIdMatch").value_or(0);
+    command.world_selector.kind = json_string_field(json, "kind").value_or("");
+    command.world_selector.kind_match = json_int_field(json, "kindMatch").value_or(0);
+    command.world_selector.label = json_string_field(json, "label").value_or("");
+    command.world_selector.label_match = json_int_field(json, "labelMatch").value_or(0);
+    command.world_selector.tag = json_string_field(json, "tag").value_or("");
+    command.world_selector.tag_match = json_int_field(json, "tagMatch").value_or(0);
+    command.world_selector.parent_id = json_string_field(json, "parentId").value_or("");
+    command.world_selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
+    command.world_selector.visible_to_player = json_int_field(json, "visibleToPlayer").value_or(0);
+    command.world_selector.active = json_int_field(json, "active").value_or(0);
+    command.world_selector.state_key = json_string_field(json, "stateKey").value_or("");
+    command.world_selector.state_type = json_int_field(json, "stateType").value_or(-1);
+    command.world_selector.state_string = json_string_field(json, "stateString").value_or("");
+    command.world_selector.state_number = json_number_field(json, "stateNumber").value_or(0);
+    command.world_selector.state_bool = json_bool_field(json, "stateBool");
     command.value = json_string_field(json, "value").value_or("");
     command.delta_x = static_cast<float>(json_number_field(json, "deltaX").value_or(0));
     command.delta_y = static_cast<float>(json_number_field(json, "deltaY").value_or(0));
@@ -701,11 +719,11 @@ Command parse_command(std::string_view json)
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
     const bool reset_flags_present = json_has_field(json, "flags");
-    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(207));
     const auto reset_flags_version = json_int_field(json, "flagsVersion");
-    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 1));
+    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 2));
     command.reset_flags_version_valid = !json_has_field(json, "flagsVersion") ||
-        (reset_flags_version.has_value() && *reset_flags_version == 1);
+        (reset_flags_version.has_value() && (*reset_flags_version == 1 || *reset_flags_version == 2));
     command.strict = json_bool_field(json, "strict");
     const auto initial_time_ms = json_number_field(json, "initialTimeMs");
     command.initial_time_ms = initial_time_ms.value_or(0);
@@ -852,6 +870,8 @@ public:
         try {
             message = "{\"type\":\"snapshot\",\"snapshot\":{\"uiTree\":"
                 + handlers_.get_ui_tree_json()
+                + ",\"worldObjectTree\":"
+                + (handlers_.get_world_object_tree_json ? handlers_.get_world_object_tree_json() : "null")
                 + ",\"logs\":"
                 + handlers_.get_logs_json()
                 + ",\"screenshot\":"
@@ -1007,6 +1027,11 @@ private:
             if (command.type == "get_ui_tree") {
                 return ok_response(command.id, handlers_.get_ui_tree_json());
             }
+            if (command.type == "get_world_object_tree") {
+                return handlers_.get_world_object_tree_json
+                    ? ok_response(command.id, handlers_.get_world_object_tree_json())
+                    : error_response(command.id, "unsupported");
+            }
             if (command.type == "get_logs") {
                 return ok_response(command.id, handlers_.get_logs_json());
             }
@@ -1052,6 +1077,11 @@ private:
                 }
                 return ok_response(command.id, handlers_.query_nodes_json(command.selector));
             }
+            if (command.type == "query_world_objects") {
+                return handlers_.query_world_objects_json
+                    ? ok_response(command.id, handlers_.query_world_objects_json(command.world_selector))
+                    : error_response(command.id, "unsupported");
+            }
             if (command.type == "get_context_status") {
                 return handlers_.get_context_status_json
                     ? ok_response(command.id, handlers_.get_context_status_json())
@@ -1060,7 +1090,7 @@ private:
             if (command.type == "reset_context") {
                 if (!handlers_.reset_context_json) return error_response(command.id, "reset_context is not supported by this bridge");
                 if (command.expected_session_epoch == 0) return error_response(command.id, "reset_context requires expectedSessionEpoch");
-                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires flagsVersion 1 when supplied");
+                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires a supported flagsVersion when supplied");
                 return ok_response(command.id, handlers_.reset_context_json(
                     command.expected_session_epoch, command.reset_flags, command.reset_flags_version, command.strict));
             }

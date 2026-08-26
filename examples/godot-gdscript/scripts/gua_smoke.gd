@@ -118,8 +118,9 @@ func _run() -> void:
 	await process_frame
 	var extension := load("res://addons/gua/gua.gdextension")
 	var bare_context: Object = ClassDB.instantiate("GuaContext")
-	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1"):
-		_fail("A bare Godot GuaContext advertised the virtual clock without an adapter pump.")
+	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1") \
+			or bare_context.get_version_json().contains("world_object_tree_v1"):
+		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
 		return
 	bare_context = null
 
@@ -130,10 +131,32 @@ func _run() -> void:
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
 		return
 
+	var door := Node2D.new()
+	door.name = "Door"
+	door.position = Vector2(640, 180)
+	door.add_to_group(&"gua_world_object")
+	door.set_meta(&"gua_world_id", "door-a")
+	door.set_meta(&"gua_world_kind", "door")
+	door.set_meta(&"gua_world_label", "Door A")
+	door.set_meta(&"gua_world_visible_to_player", true)
+	door.set_meta(&"gua_world_tags", ["east-corridor", "mission-critical"])
+	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
+	screen.add_child(door)
+
 	ui.attach(screen)
 	ui.update("title")
 	if not ui.context.get_version_json().contains("virtual_clock_v1"):
 		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
+		return
+	if not ui.context.get_version_json().contains("world_object_tree_v1"):
+		_fail("GuaAutoAdapter did not enable its pumped World Object Tree capability.")
+		return
+	var world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	var world_door = _find_world_object(world_tree, "door-a")
+	if world_door == null or world_door.get("kind", "") != "door" or world_door.get("space", "") != "world2d" \
+			or float(world_door.get("position", {}).get("x", -1)) != 640.0 or float(world_door.get("position", {}).get("y", -1)) != 180.0 \
+			or not world_door.get("visibleToPlayer", false) or not world_door.get("state", {}).get("locked", false):
+		_fail("Gua Godot adapter did not publish the shared Door fixture: %s" % world_tree)
 		return
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
@@ -513,6 +536,13 @@ func _find_node(tree: Dictionary, id: String) -> Variant:
 	for node in tree.get("nodes", []):
 		if node.get("id", "") == id:
 			return node
+	return null
+
+
+func _find_world_object(tree: Dictionary, id: String) -> Variant:
+	for object in tree.get("objects", []):
+		if object.get("id", "") == id:
+			return object
 	return null
 
 

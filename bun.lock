@@ -40,11 +40,19 @@
         "gui-mcp": "./dist/cli.js",
       },
       "dependencies": {
+        "@gua/world-tools": "workspace:*",
         "pngjs": "^7.0.0",
       },
       "devDependencies": {
         "@types/pngjs": "^6.0.5",
         "bun-types": "^1.3.0",
+        "typescript": "^5.5.0",
+      },
+    },
+    "packages/world-tools": {
+      "name": "@gua/world-tools",
+      "version": "0.0.0",
+      "devDependencies": {
         "typescript": "^5.5.0",
       },
     },
@@ -143,6 +151,8 @@
     "@gua/bridge-ws": ["@gua/bridge-ws@workspace:packages/bridge-ws"],
 
     "@gua/inspector": ["@gua/inspector@workspace:packages/inspector"],
+
+    "@gua/world-tools": ["@gua/world-tools@workspace:packages/world-tools"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 

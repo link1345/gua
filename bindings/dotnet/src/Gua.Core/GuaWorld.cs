@@ -1,0 +1,174 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+
+namespace Gua.Core;
+
+public enum GuaWorldSpace { World2D = 1, World3D = 2 }
+public enum GuaAgentExposure { Auto = 0, Private = 1 }
+public enum GuaObservationProfile { Debug = 0, Player = 1 }
+
+public sealed record GuaWorldPosition(double X, double Y, double Z = 0);
+public sealed record GuaWorldObjectDescriptor(
+    string Id, string Kind, string Label, GuaWorldSpace Space, GuaWorldPosition Position,
+    bool VisibleToPlayer = false, bool Active = true, string? ParentId = null, string? Description = null,
+    GuaAgentExposure AgentExposure = GuaAgentExposure.Auto, IReadOnlyList<string>? Tags = null,
+    IReadOnlyDictionary<string, object?>? State = null, string? DomainId = null, string? RelatedUiNodeId = null);
+
+public sealed record GuaWorldStateCriterion(string Key, object? Value);
+public sealed record GuaWorldSelector(
+    string? Id = null, GuaMatchMode IdMatch = GuaMatchMode.Exact,
+    string? Kind = null, GuaMatchMode KindMatch = GuaMatchMode.Exact,
+    string? Label = null, GuaMatchMode LabelMatch = GuaMatchMode.Exact,
+    string? Tag = null, GuaMatchMode TagMatch = GuaMatchMode.Exact,
+    string? ParentId = null, bool DirectChild = false, bool? VisibleToPlayer = null,
+    bool? Active = null, GuaWorldStateCriterion? State = null);
+
+public sealed record GuaWorldObject(
+    string Id, string Kind, string Label, string Space, JsonElement Position, bool VisibleToPlayer,
+    bool Active, string AgentExposure, string? ParentId, string? Description,
+    IReadOnlyList<string> Tags, IReadOnlyDictionary<string, JsonElement> State,
+    string? DomainId, string? RelatedUiNodeId);
+public sealed record GuaWorldTree(int SchemaVersion, ulong SessionEpoch, ulong FrameSequence, ulong Revision, string Scene, IReadOnlyList<GuaWorldObject> Objects);
+public sealed record GuaWorldQueryResult(bool Valid, IReadOnlyList<GuaWorldObject> Matches, string? Error = null);
+
+public interface IGuaWorldContext
+{
+    string GetWorldObjectTreeJson(GuaObservationProfile profile = GuaObservationProfile.Debug);
+    GuaWorldTree GetWorldObjectTree(GuaObservationProfile profile = GuaObservationProfile.Debug);
+    GuaWorldQueryResult QueryWorldObjects(GuaWorldSelector selector, GuaObservationProfile profile = GuaObservationProfile.Debug);
+    Task<GuaWorldObject> WaitForWorldObjectAsync(GuaWorldSelector selector, TimeSpan? timeout = null,
+        GuaObservationProfile profile = GuaObservationProfile.Debug, CancellationToken cancellationToken = default);
+}
+
+public sealed partial class GuaContext : IGuaWorldContext
+{
+    public void BeginWorldFrame(string scene)
+    {
+        ThrowIfDisposed();
+        if (Native.gua_begin_world_frame(_handle, scene) == 0) throw new InvalidOperationException("Failed to begin the Gua world frame.");
+    }
+
+    public void RegisterWorldObject(GuaWorldObjectDescriptor descriptor)
+    {
+        if (descriptor is null) throw new ArgumentNullException(nameof(descriptor));
+        ThrowIfDisposed();
+        using var native = new NativeWorldDescriptor(descriptor);
+        var value = native.Value;
+        if (Native.gua_register_world_object_v1(_handle, in value) == 0)
+            throw new InvalidOperationException($"Failed to register Gua world object '{descriptor.Id}'.");
+    }
+
+    public void EndWorldFrame()
+    {
+        ThrowIfDisposed();
+        if (Native.gua_end_world_frame(_handle) == 0) throw new InvalidOperationException("The Gua world frame was rejected.");
+    }
+
+    public string GetWorldObjectTreeJson(GuaObservationProfile profile = GuaObservationProfile.Debug) =>
+        CopyWorldJson(null, profile);
+
+    public GuaWorldTree GetWorldObjectTree(GuaObservationProfile profile = GuaObservationProfile.Debug) =>
+        ParseTree(GetWorldObjectTreeJson(profile));
+
+    public GuaWorldQueryResult QueryWorldObjects(GuaWorldSelector selector, GuaObservationProfile profile = GuaObservationProfile.Debug)
+    {
+        if (selector is null) throw new ArgumentNullException(nameof(selector));
+        using var native = new NativeWorldSelector(selector);
+        return ParseQuery(CopyWorldJson(native.Value, profile));
+    }
+
+    public async Task<GuaWorldObject> WaitForWorldObjectAsync(GuaWorldSelector selector, TimeSpan? timeout = null,
+        GuaObservationProfile profile = GuaObservationProfile.Debug, CancellationToken cancellationToken = default)
+    {
+        var limit = timeout ?? TimeSpan.FromSeconds(5);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        while (started.Elapsed <= limit) {
+            cancellationToken.ThrowIfCancellationRequested();
+            var match = QueryWorldObjects(selector, profile).Matches.FirstOrDefault();
+            if (match is not null) return match;
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+        throw new TimeoutException("Timed out waiting for a Gua world object.");
+    }
+
+    private unsafe string CopyWorldJson(Native.GuaNativeWorldSelectorV1? selector, GuaObservationProfile profile)
+    {
+        ThrowIfDisposed();
+        int Required(byte* buffer, int size) => selector is { } value
+            ? Native.gua_query_world_objects_json(_handle, in value, (int)profile, buffer, size)
+            : Native.gua_copy_world_object_tree_json(_handle, (int)profile, buffer, size);
+        var required = Required(null, 0);
+        if (required <= 0) throw new InvalidOperationException("Native Gua returned an invalid World Object Tree JSON size.");
+        while (true) {
+            var bytes = new byte[required];
+            fixed (byte* pointer = bytes) {
+                var actual = Required(pointer, bytes.Length);
+                if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
+                required = actual;
+            }
+        }
+    }
+
+    internal static GuaWorldTree ParseTree(string json) => JsonSerializer.Deserialize<GuaWorldTree>(json,
+        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidOperationException("Invalid World Object Tree JSON.");
+    internal static GuaWorldQueryResult ParseQuery(string json) => JsonSerializer.Deserialize<GuaWorldQueryResult>(json,
+        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidOperationException("Invalid world query JSON.");
+}
+
+internal sealed class NativeWorldDescriptor : IDisposable
+{
+    private readonly List<nint> allocations = [];
+    public Native.GuaNativeWorldObjectDescriptorV1 Value { get; }
+
+    public NativeWorldDescriptor(GuaWorldObjectDescriptor source)
+    {
+        nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
+        var tags = source.Tags ?? [];
+        var tagPointers = tags.Select(Text).ToArray();
+        nint tagsMemory = 0;
+        if (tagPointers.Length != 0) tagsMemory = (nint)Marshal.AllocCoTaskMem(IntPtr.Size * tagPointers.Length);
+        if (tagsMemory != 0) { allocations.Add(tagsMemory); Marshal.Copy(tagPointers, 0, tagsMemory, tagPointers.Length); }
+        var states = (source.State ?? new Dictionary<string, object?>()).Select(pair => State(pair.Key, pair.Value, Text)).ToArray();
+        var stateSize = Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>();
+        nint statesMemory = 0;
+        if (states.Length != 0) statesMemory = (nint)Marshal.AllocCoTaskMem(stateSize * states.Length);
+        if (statesMemory != 0) { allocations.Add(statesMemory); for (var i = 0; i < states.Length; i++) Marshal.StructureToPtr(states[i], statesMemory + i * stateSize, false); }
+        Value = new Native.GuaNativeWorldObjectDescriptorV1 {
+            StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldObjectDescriptorV1>(), Id = Text(source.Id), ParentId = Text(source.ParentId),
+            Kind = Text(source.Kind), Label = Text(source.Label), Description = Text(source.Description), Space = (int)source.Space,
+            PositionX = source.Position.X, PositionY = source.Position.Y, PositionZ = source.Position.Z,
+            VisibleToPlayer = source.VisibleToPlayer ? 1 : 0, Active = source.Active ? 1 : 0, AgentExposure = (int)source.AgentExposure,
+            DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tagsMemory, TagCount = (uint)tagPointers.Length,
+            StateValues = statesMemory, StateValueCount = (uint)states.Length
+        };
+    }
+
+    internal static Native.GuaNativeWorldStateValueV1 State(string key, object? value, Func<string?, nint> text) => value switch {
+        null => New(0), string item => New(1, text(item)), bool item => New(3, boolean: item),
+        byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal => New(2, number: Convert.ToDouble(value)),
+        _ => throw new ArgumentException($"World state '{key}' must be a primitive JSON value.")
+    } with { Key = text(key) };
+    private static Native.GuaNativeWorldStateValueV1 New(int type, nint text = 0, double number = 0, bool boolean = false) =>
+        new() { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>(), Type = type, StringValue = text, NumberValue = number, BoolValue = boolean ? 1 : 0 };
+    public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
+}
+
+internal sealed class NativeWorldSelector : IDisposable
+{
+    private readonly List<nint> allocations = [];
+    public Native.GuaNativeWorldSelectorV1 Value { get; }
+    public NativeWorldSelector(GuaWorldSelector source)
+    {
+        nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
+        nint statePointer = 0;
+        if (source.State is { } state) { var native = NativeWorldDescriptor.State(state.Key, state.Value, Text); statePointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>()); allocations.Add(statePointer); Marshal.StructureToPtr(native, statePointer, false); }
+        Value = new Native.GuaNativeWorldSelectorV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV1>(),
+            Id = Text(source.Id), IdMatch = (int)source.IdMatch, Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
+            Label = Text(source.Label), LabelMatch = (int)source.LabelMatch, Tag = Text(source.Tag), TagMatch = (int)source.TagMatch,
+            ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
+            VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer };
+    }
+    private static int Filter(bool? value) => value is null ? 0 : value.Value ? 2 : 1;
+    public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
+}

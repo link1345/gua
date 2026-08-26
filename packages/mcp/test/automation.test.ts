@@ -33,6 +33,10 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("get_visual_artifacts");
     expect(guaMcpTools).toContain("clock_pause");
     expect(guaMcpTools).toContain("clock_run_for");
+    expect(guaMcpTools).toContain("get_world_object_tree");
+    expect(guaMcpTools).toContain("find_world_objects");
+    expect(guaMcpTools).toContain("wait_for_world_object");
+    expect(guaMcpTools).not.toContain("interact_world_object" as never);
   });
 
   test("records, redacts, saves, and reloads semantic operations", async () => {

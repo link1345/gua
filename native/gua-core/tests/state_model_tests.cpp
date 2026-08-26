@@ -55,6 +55,93 @@ int main()
     assert(gua_copy_version_json(version.data(), version_size) == version_size);
     assert(std::string(version.data()).find("\"godotPluginVersion\":null") != std::string::npos);
     assert(std::string(version.data()).find("\"version_v1\"") != std::string::npos);
+    assert(std::string(version.data()).find("\"world_object_tree_v1\"") != std::string::npos);
+
+    gua_context_t* world = gua_create_context();
+    const gua_world_state_value_v1_t door_state[] {
+        { sizeof(gua_world_state_value_v1_t), "open", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0 },
+        { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 },
+    };
+    const char* door_tags[] { "east-corridor", "mission-critical" };
+    assert(gua_begin_world_frame(world, "corridor") == 1);
+    const gua_world_object_descriptor_v1_t door { sizeof(gua_world_object_descriptor_v1_t), "door-a", nullptr, "door", "Door A", nullptr,
+        GUA_WORLD_SPACE_2D, 640, 180, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, "door-status", door_tags, 2, door_state, 2 };
+    assert(gua_register_world_object_v1(world, &door) == 1);
+    const gua_world_object_descriptor_v1_t private_object { sizeof(gua_world_object_descriptor_v1_t), "secret", "door-a", "item", "Secret", nullptr,
+        GUA_WORLD_SPACE_3D, 1, 2, 3, 1, 1, GUA_AGENT_EXPOSURE_PRIVATE, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+    assert(gua_register_world_object_v1(world, &private_object) == 1);
+    assert(gua_end_world_frame(world) == 1);
+    int world_size = gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    std::vector<char> world_json(static_cast<std::size_t>(world_size));
+    gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_DEBUG, world_json.data(), world_size);
+    assert(std::string(world_json.data()).find("\"door-a\"") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"z\":3") != std::string::npos);
+    world_size = gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    world_json.resize(static_cast<std::size_t>(world_size));
+    gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), world_size);
+    assert(std::string(world_json.data()).find("\"door-a\"") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"secret\"") == std::string::npos);
+    const gua_world_selector_v1_t private_query { sizeof(gua_world_selector_v1_t), "secret", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, nullptr };
+    char query[512] {};
+    gua_query_world_objects_json(world, &private_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"matches\":[]") != std::string::npos);
+    const gua_world_state_value_v1_t locked { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 };
+    const gua_world_selector_v1_t locked_query { sizeof(gua_world_selector_v1_t), nullptr, 0, "door", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, &locked };
+    gua_query_world_objects_json(world, &locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"door-a\"") != std::string::npos);
+
+    // Player projection must be independent of registration order while still requiring every ancestor to be public.
+    assert(gua_begin_world_frame(world, "reverse-order") == 1);
+    const gua_world_object_descriptor_v1_t child { sizeof(gua_world_object_descriptor_v1_t), "child", "parent", "item", "Child", nullptr,
+        GUA_WORLD_SPACE_2D, 2, 3, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+    const gua_world_object_descriptor_v1_t parent { sizeof(gua_world_object_descriptor_v1_t), "parent", nullptr, "area", "Parent", nullptr,
+        GUA_WORLD_SPACE_2D, 0, 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+    assert(gua_register_world_object_v1(world, &child) == 1);
+    assert(gua_register_world_object_v1(world, &parent) == 1);
+    assert(gua_end_world_frame(world) == 1);
+    world_size = gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    world_json.resize(static_cast<std::size_t>(world_size));
+    gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), world_size);
+    assert(std::string(world_json.data()).find("\"child\"") != std::string::npos);
+    assert(gua_begin_world_frame(world, "reverse-order") == 1);
+    assert(gua_register_world_object_v1(world, &child) == 1 && gua_register_world_object_v1(world, &parent) == 1);
+    assert(gua_end_world_frame(world) == 1);
+    gua_context_status_t unchanged_status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(world, &unchanged_status) == 1 && unchanged_status.world_frame_sequence == 3 && unchanged_status.world_revision == 2);
+
+    assert(gua_begin_world_frame(world, "invalid") == 1);
+    const gua_world_object_descriptor_v1_t orphan { sizeof(gua_world_object_descriptor_v1_t), "orphan", "missing", "item", "Orphan", nullptr,
+        GUA_WORLD_SPACE_2D, 0, 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+    assert(gua_register_world_object_v1(world, &orphan) == 1);
+    assert(gua_end_world_frame(world) == 0);
+    gua_context_status_t world_status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(world, &world_status) == 1 && world_status.world_object_count == 2 && world_status.world_revision == 2);
+    assert(gua_begin_world_frame(world, "bad-kind") == 1);
+    auto invalid_kind = parent;
+    invalid_kind.kind = "Bad Kind";
+    assert(gua_register_world_object_v1(world, &invalid_kind) == 0);
+    assert(gua_end_world_frame(world) == 0);
+    assert(gua_begin_world_frame(world, "duplicate") == 1);
+    assert(gua_register_world_object_v1(world, &parent) == 1);
+    assert(gua_register_world_object_v1(world, &parent) == 0);
+    assert(gua_end_world_frame(world) == 0);
+    assert(gua_begin_world_frame(world, "cycle") == 1);
+    auto cycle_a = child; cycle_a.id = "cycle-a"; cycle_a.parent_id = "cycle-b";
+    auto cycle_b = child; cycle_b.id = "cycle-b"; cycle_b.parent_id = "cycle-a";
+    assert(gua_register_world_object_v1(world, &cycle_a) == 1 && gua_register_world_object_v1(world, &cycle_b) == 1);
+    assert(gua_end_world_frame(world) == 0);
+    assert(gua_begin_world_frame(world, "non-finite") == 1);
+    auto non_finite = parent; non_finite.position_x = std::numeric_limits<double>::infinity();
+    assert(gua_register_world_object_v1(world, &non_finite) == 0);
+    assert(gua_end_world_frame(world) == 0);
+    const gua_world_state_value_v1_t invalid_state { sizeof(gua_world_state_value_v1_t), "bad", 99, nullptr, 0, 0 };
+    auto bad_state = parent; bad_state.state_values = &invalid_state; bad_state.state_value_count = 1;
+    assert(gua_begin_world_frame(world, "invalid-state") == 1);
+    assert(gua_register_world_object_v1(world, &bad_state) == 0);
+    assert(gua_end_world_frame(world) == 0);
+    assert(gua_get_context_status(world, &world_status) == 1 && world_status.world_object_count == 2 && world_status.world_revision == 2);
+    gua_destroy_context(world);
+
     gua_context_t* detailed_context = gua_create_context();
     gua_begin_frame(detailed_context, "details");
     const gua_node_descriptor_v3_t detailed {
@@ -159,6 +246,20 @@ int main()
         reinterpret_cast<const gua_reset_options_t*>(&legacy_reset), &legacy_reset_report) == GUA_RESET_SUCCEEDED);
     assert(gua_clock_get_status(legacy_reset_context, &legacy_clock_status) == 1 && legacy_clock_status.installed == 0);
     gua_destroy_context(legacy_reset_context);
+
+    for (const uint32_t legacy_flags : { 15U, 63U, 79U }) {
+        gua_context_t* legacy_world = gua_create_context();
+        assert(gua_begin_world_frame(legacy_world, "legacy") == 1);
+        const gua_world_object_descriptor_v1_t legacy_object { sizeof(gua_world_object_descriptor_v1_t), "legacy-world", nullptr, "item", "Legacy", nullptr,
+            GUA_WORLD_SPACE_2D, 0, 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+        assert(gua_register_world_object_v1(legacy_world, &legacy_object) == 1 && gua_end_world_frame(legacy_world) == 1);
+        legacy_reset_options_t old_options { sizeof(legacy_reset_options_t), legacy_flags, 0, 0 };
+        gua_reset_report_t old_report { sizeof(gua_reset_report_t) };
+        assert(gua_reset_context(legacy_world, reinterpret_cast<const gua_reset_options_t*>(&old_options), &old_report) == GUA_RESET_SUCCEEDED);
+        gua_context_status_t old_status { sizeof(gua_context_status_t) };
+        assert(gua_get_context_status(legacy_world, &old_status) == 1 && old_status.world_object_count == 0);
+        gua_destroy_context(legacy_world);
+    }
 
     gua_context_t* overflow_context = gua_create_context();
     assert(gua_clock_install(overflow_context, 1e308, 1e308) == GUA_CLOCK_ERROR_INVALID_ARGUMENT);
@@ -530,6 +631,14 @@ int main()
         gua_register_node(concurrent, id.c_str(), "text", id.c_str(), { 0, 0, 1, 1 }, 1, 1);
     }
     gua_end_frame(concurrent);
+    assert(gua_begin_world_frame(concurrent, "stress") == 1);
+    for (int i = 0; i < 8; ++i) {
+        const std::string id = "old-world-" + std::to_string(i);
+        const gua_world_object_descriptor_v1_t object { sizeof(gua_world_object_descriptor_v1_t), id.c_str(), nullptr, "item", id.c_str(), nullptr,
+            GUA_WORLD_SPACE_2D, static_cast<double>(i), 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+        assert(gua_register_world_object_v1(concurrent, &object) == 1);
+    }
+    assert(gua_end_world_frame(concurrent) == 1);
     std::atomic<bool> stop { false };
     std::atomic<bool> invalid_count { false };
     std::vector<std::thread> readers;
@@ -539,6 +648,7 @@ int main()
                 gua_context_status_t concurrent_status { sizeof(gua_context_status_t) };
                 assert(gua_get_context_status(concurrent, &concurrent_status) == 1);
                 if (concurrent_status.node_count != 8 && concurrent_status.node_count != 64) invalid_count = true;
+                if (concurrent_status.world_object_count != 8 && concurrent_status.world_object_count != 64) invalid_count = true;
             }
         });
     }
@@ -551,6 +661,15 @@ int main()
             if ((i % 8) == 0) std::this_thread::yield();
         }
         gua_end_frame(concurrent);
+        assert(gua_begin_world_frame(concurrent, "stress") == 1);
+        for (int i = 0; i < count; ++i) {
+            const std::string id = "world-" + std::to_string(i);
+            const gua_world_object_descriptor_v1_t object { sizeof(gua_world_object_descriptor_v1_t), id.c_str(), nullptr, "item", id.c_str(), nullptr,
+                GUA_WORLD_SPACE_3D, static_cast<double>(i), static_cast<double>(frame), 1.0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+            assert(gua_register_world_object_v1(concurrent, &object) == 1);
+            if ((i % 8) == 0) std::this_thread::yield();
+        }
+        assert(gua_end_world_frame(concurrent) == 1);
     }
     stop = true;
     for (auto& reader : readers) reader.join();

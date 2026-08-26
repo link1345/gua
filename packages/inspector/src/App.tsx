@@ -4,6 +4,7 @@ import {
   type GuaInspectorClient,
   type GuaClockStatus,
   type GuaNode,
+  type GuaWorldObject,
   type InspectorSnapshot,
   type InspectorState,
   MockInspectorClient,
@@ -261,6 +262,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
           selectedNodeId={state.selectedNodeId}
           onSelect={(nodeId) => setState((current) => selectNode(current, nodeId))}
         />
+        <WorldTreePanel objects={state.worldObjectTree.objects} scene={state.worldObjectTree.scene} />
         <NodeDetailPanel
           node={selectedNode}
           onClick={() => void clickSelected()}
@@ -364,6 +366,20 @@ function TreePanel({ nodes, selectedNodeId, onSelect }: TreePanelProps) {
             </button>
           </li>
         ))}
+      </ol>
+    </section>
+  );
+}
+
+function WorldTreePanel({ objects, scene }: { objects: GuaWorldObject[]; scene: string }) {
+  return (
+    <section className="gua-panel gua-tree-panel">
+      <PanelHeader title="World Object Tree" detail={`${objects.length} objects · ${scene}`} />
+      <ol className="gua-tree">
+        {objects.map((object) => <li key={object.id}><div className="gua-tree__node" data-depth={object.parentId === undefined ? 0 : 1}>
+          <span className="gua-role">{object.kind}</span><span className="gua-tree__label"><span>{object.label}</span><small>#{object.id} · {object.space} ({object.position.x}, {object.position.y}{object.position.z === undefined ? "" : `, ${object.position.z}`})</small></span>
+          <span>{object.visibleToPlayer ? "visible" : "hidden"}{object.active ? "" : " · inactive"}</span>
+        </div></li>)}
       </ol>
     </section>
   );

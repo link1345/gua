@@ -49,6 +49,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
+            runtime.EnableWorldObjectTreeAdapter();
             var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
             var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
             if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");
@@ -86,6 +87,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             CollectUGui();
             PruneClickObservers();
             runtime.EndFrame();
+            CollectWorldObjects();
             DispatchActions();
             ScheduleScreenshot();
         }
@@ -113,6 +115,55 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (screen != null && !string.IsNullOrWhiteSpace(screen.Value)) return screen.Value;
         var scene = SceneManager.GetActiveScene();
         return string.IsNullOrWhiteSpace(scene.path) ? scene.name : scene.path;
+    }
+
+    private void CollectWorldObjects()
+    {
+        if (runtime == null) return;
+        runtime.BeginWorldFrame(CurrentScreen());
+        var published = false;
+        try
+        {
+            var frameIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in FindObjectsByType<GuaWorldObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                .Where(item => item.gameObject.scene.IsValid() && item.gameObject.scene.isLoaded)
+                .OrderBy(item => HierarchyPath(item.transform), StringComparer.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(source.Id)) { runtime.AddLog(3, $"Unity GuaWorldObject on '{source.name}' requires a stable Id."); continue; }
+                if (!frameIds.Add(source.Id)) { runtime.AddLog(3, $"Duplicate Unity GuaWorldObject Id '{source.Id}' rejected the world frame."); throw new InvalidOperationException($"Duplicate world object Id '{source.Id}'."); }
+                var parentId = NearestWorldParentId(source.transform.parent);
+                var position = source.transform.position;
+                runtime.RegisterWorldObject(new GuaWorldObjectDescriptor(source.Id, source.Kind, source.Label, source.Space,
+                    new GuaWorldPosition(position.x, position.y, source.Space == GuaWorldSpace.World3D ? position.z : 0),
+                    source.VisibleToPlayer, source.Active, parentId, source.Description,
+                    source.AgentExposure, source.Tags, source.State,
+                    string.IsNullOrEmpty(source.DomainId) ? null : source.DomainId,
+                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId));
+            }
+            runtime.EndWorldFrame();
+            published = true;
+        }
+        finally
+        {
+            if (!published) try { runtime.EndWorldFrame(); } catch { /* End clears a rejected staging frame. */ }
+        }
+    }
+
+    private static string? NearestWorldParentId(Transform? current)
+    {
+        for (; current != null; current = current.parent)
+        {
+            var parent = current.GetComponent<GuaWorldObject>();
+            if (parent != null && !string.IsNullOrWhiteSpace(parent.Id)) return parent.Id;
+        }
+        return null;
+    }
+
+    private static string HierarchyPath(Transform transform)
+    {
+        var parts = new Stack<string>();
+        for (var current = transform; current != null; current = current.parent) parts.Push(current.GetSiblingIndex().ToString("D6", CultureInfo.InvariantCulture));
+        return string.Join("/", parts);
     }
 
     private void CollectUiToolkit()

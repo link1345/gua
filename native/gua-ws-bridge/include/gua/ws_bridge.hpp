@@ -22,6 +22,20 @@ struct QuerySelector {
     int enabled = 0;
 };
 
+struct WorldQuerySelector {
+    std::string id; int id_match = 0;
+    std::string kind; int kind_match = 0;
+    std::string label; int label_match = 0;
+    std::string tag; int tag_match = 0;
+    std::string parent_id; bool direct_child = false;
+    int visible_to_player = 0; int active = 0;
+    std::string state_key;
+    int state_type = -1;
+    std::string state_string;
+    double state_number = 0;
+    bool state_bool = false;
+};
+
 struct ActionCommand {
     std::string type;
     std::string node_id;
@@ -43,6 +57,7 @@ struct CommandResult {
 
 struct BridgeHandlers {
     std::function<std::string()> get_ui_tree_json;
+    std::function<std::string()> get_world_object_tree_json;
     std::function<std::string()> get_logs_json;
     std::function<std::string()> get_screenshot_json;
     std::function<CommandResult(unsigned long long after_frame_sequence, unsigned int timeout_ms)> capture_screenshot;
@@ -52,6 +67,7 @@ struct BridgeHandlers {
     std::function<std::string()> get_clock_json;
     std::function<CommandResult(std::string_view command, double value_ms, double step_ms, bool step_ms_present)> control_clock;
     std::function<std::string(const QuerySelector& selector)> query_nodes_json;
+    std::function<std::string(const WorldQuerySelector& selector)> query_world_objects_json;
     std::function<std::string()> get_context_status_json;
     std::function<std::string(unsigned long long expected_epoch, unsigned int flags, unsigned int flags_version, bool strict)> reset_context_json;
     std::function<bool(std::string_view node_id)> click_node;

@@ -17,6 +17,70 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void WorldObjectTreePublishesQueriesProjectsAndResetsIndependently()
+    {
+        using var context = new GuaContext();
+        context.BeginWorldFrame("corridor");
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
+            new GuaWorldPosition(640, 180), VisibleToPlayer: true, Tags: ["east-corridor"],
+            State: new Dictionary<string, object?> { ["open"] = false, ["locked"] = true }));
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World3D,
+            new GuaWorldPosition(1, 2, 3), VisibleToPlayer: true, ParentId: "door-a", AgentExposure: GuaAgentExposure.Private));
+        context.EndWorldFrame();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(2));
+            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
+            Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Id: "secret"), GuaObservationProfile.Player).Matches, Is.Empty);
+            Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Kind: "door")).Matches.Single().State["locked"].GetBoolean(), Is.True);
+            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(2));
+        });
+
+        var reset = context.Reset();
+        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(2));
+        Assert.That(context.GetWorldObjectTree().Objects, Is.Empty);
+    }
+
+    [Test]
+    public async Task RemoteWorldObjectTreeKeepsTheHostPlayerProfileAndStateSelector()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableWorldObjectTreeAdapter();
+        runtime.SetObservationProfile(GuaObservationProfile.Player);
+        runtime.BeginWorldFrame("corridor");
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
+            new GuaWorldPosition(640, 180), VisibleToPlayer: true,
+            State: new Dictionary<string, object?> { ["locked"] = true }));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
+            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
+            new GuaWorldPosition(2, 2), VisibleToPlayer: false));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
+            new GuaWorldPosition(3, 3), VisibleToPlayer: true, ParentId: "hidden-parent"));
+        runtime.EndWorldFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(remote.GetWorldObjectTree(GuaObservationProfile.Debug).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }),
+                "A transport argument must not elevate the host-fixed player profile.");
+            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "secret")).Matches, Is.Empty);
+            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "hidden-child")).Matches, Is.Empty);
+            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))).Matches.Single().Id, Is.EqualTo("door-a"));
+            Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
+            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(4));
+            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(4));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
     public void LocalClockControlsDrainTheContextsOwnedClock()
     {
         using var context = new GuaContext();
@@ -53,9 +117,11 @@ public sealed class SelectorParityTests
             Assert.That(resetStatus.DefaultStepMilliseconds, Is.EqualTo(1000.0 / 60.0));
             Assert.That(captured.IsAlive, Is.False, "Clock reset must release stale callback closures immediately.");
             Assert.That((uint)GuaResetTargets.Default, Is.EqualTo(15));
-            Assert.That((uint)GuaResetTargets.SessionDefault, Is.EqualTo(79));
+            Assert.That((uint)GuaResetTargets.LegacySessionDefault, Is.EqualTo(79));
+            Assert.That((uint)GuaResetTargets.SessionDefault, Is.EqualTo(207));
             Assert.That((uint)GuaResetTargets.All, Is.EqualTo(63));
             Assert.That((uint)GuaResetTargets.AllWithClock, Is.EqualTo(127));
+            Assert.That((uint)GuaResetTargets.AllCurrent, Is.EqualTo(255));
         });
 
         clock.Install(step: TimeSpan.FromMilliseconds(10));
