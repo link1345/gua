@@ -60,7 +60,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.EnableVirtualClockAdapter();
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
-                webOwnerId = GetInstanceID().ToString(CultureInfo.InvariantCulture);
+                webOwnerId = Guid.NewGuid().ToString("N");
                 GuaUnityWebInstall(gameObject.name, webOwnerId, WebCallTimeoutMs);
                 webInstalled = true;
                 Debug.Log("Gua Unity WebGL same-page bridge installed.");
@@ -260,13 +260,15 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var label = VisualLabel(element);
         var sensitive = sensitiveTargetIds.Contains(resolved);
         if (sensitive) label = string.IsNullOrWhiteSpace(element.name) ? resolved : element.name;
+        var range = VisualRange(element);
+        if (sensitive) range.value = null;
         var visible = hostVisible && element.resolvedStyle.display != DisplayStyle.None && element.resolvedStyle.visibility == Visibility.Visible;
         var enabled = element.enabledInHierarchy;
         var registered = Register(resolved, role, label, VisualBounds(element), visible, enabled, parentId,
             text: !sensitive && (role is "text" or "textbox") ? label : null,
             value: sensitive ? null : VisualValue(element), focused: ReferenceEquals(frameFocusTarget, element),
             checkedValue: element is UnityEngine.UIElements.Toggle toggle ? toggle.value : null,
-            selectedValue: null, range: VisualRange(element), target: new Target(element, role));
+            selectedValue: null, range: range, target: new Target(element, role));
         if (registered && element is UnityEngine.UIElements.Button button) ObserveClick(button, resolved);
         if (element is ListView listView)
         {
@@ -327,6 +329,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (sensitive) label = transform.name;
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
+        if (sensitive) range.value = null;
         var suppressAsSelectableLabel = selectable == null && role == "text" && ancestorSelectableLabel != null &&
             string.Equals(label, ancestorSelectableLabel, StringComparison.Ordinal);
         var registered = !suppressAsSelectableLabel && Register(id, role, label, bounds, visible, enabled, parentId,

@@ -1594,7 +1594,6 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     ctx->previous_semantic_snapshot.clear();
     ctx->json_cache.clear();
     ++ctx->session_epoch;
-    ctx->next_request_id = 1;
     out_report->session_epoch = ctx->session_epoch;
     out_report->result = GUA_RESET_SUCCEEDED;
     return out_report->result;

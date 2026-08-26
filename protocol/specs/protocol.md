@@ -287,7 +287,7 @@ Initial command types:
 
 ### Semantic action lifecycle (v1)
 
-Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId`, and the adapter must copy that ID into its success or failure event after attempting the host operation.
+Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId` that is not reused across session resets during the context's lifetime, and the adapter must copy that ID into its success or failure event after attempting the host operation.
 
 The core captures `sessionEpoch`, `frameSequence`, and `revision` when the adapter emits completion; additive v3 event APIs and remote responses preserve that metadata even when polled later. Callers must still wait for the expected semantic state: action completion proves host processing, while `WaitForStateAsync` repeatedly obtains fresh snapshots until its predicate succeeds.
 
@@ -299,7 +299,7 @@ an in-flight request has already been handed to the host and must finish through
 the ordinary correlated result path. A successfully cancelled request is never
 later consumed if a node with the same ID reappears.
 
-`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. After applying a sensitive value, adapters must also omit that control's plaintext `text` and `value` from subsequent semantic snapshots (and must not copy the plaintext into another semantic field). `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
+`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. After applying a sensitive value, adapters must also omit that control's plaintext `text` and `value` from subsequent semantic snapshots (and must not copy the plaintext into another semantic field such as `state.rangeValue`). `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
 Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Control is `4`, and Meta/Command is `8`. Adapters must route both key-down and key-up through the host input pipeline and report success only after accepting the complete key gesture.
 - `text_input`
 - `move_gamepad`

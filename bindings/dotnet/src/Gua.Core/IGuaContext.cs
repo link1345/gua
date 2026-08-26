@@ -26,6 +26,8 @@ public interface IGuaContext
 
     GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId);
 
+    GuaActionCancelResult CancelAction(ulong requestId) => throw new NotSupportedException("This Gua context does not support action cancellation.");
+
     bool TryPollActionEvent(out GuaActionEvent e);
 
     bool TryPollActionEvent(ulong requestId, out GuaActionEvent e);

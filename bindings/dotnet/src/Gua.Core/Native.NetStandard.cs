@@ -115,6 +115,9 @@ internal static partial class Native
     internal static extern int gua_enqueue_action(nint context, in GuaNativeActionRequestDescriptor descriptor, out ulong requestId);
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int gua_cancel_action_request(nint context, ulong requestId);
+
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int gua_poll_event_v2(nint context, GuaNativeEventV2* outEvent);
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]

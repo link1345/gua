@@ -17,6 +17,21 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void CoreContextExposesQueuedActionCancellation()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("fixture");
+        context.RegisterNode("name", "textbox", "Name", new GuaBounds(0, 0, 1, 1));
+        context.EndFrame();
+
+        Assert.That(context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, "name"), out var requestId),
+            Is.EqualTo(GuaActionError.None));
+        IGuaContext abstraction = context;
+        Assert.That(abstraction.CancelAction(requestId), Is.EqualTo(GuaActionCancelResult.Cancelled));
+        Assert.That(abstraction.CancelAction(requestId), Is.EqualTo(GuaActionCancelResult.NotFound));
+    }
+
+    [Test]
     public void LocalClockControlsDrainTheContextsOwnedClock()
     {
         using var context = new GuaContext();

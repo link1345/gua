@@ -92,6 +92,24 @@ public sealed class UnityIntegrationTests
         Assert.That(integerSliderResult.Value, Is.EqualTo("7"));
         Assert.That(WaitForValue(host, integerSlider.Id, value => value == "7"), Is.True);
 
+        var sensitiveToolkitSliderError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "8", Sensitive: true),
+            out var sensitiveToolkitSliderRequestId);
+        Assert.That(sensitiveToolkitSliderError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveToolkitSliderRequestId, out var sensitiveToolkitSliderResult), Is.True);
+        Assert.That(sensitiveToolkitSliderResult.Succeeded, Is.True);
+        Assert.That(WaitForRedactedRangeNode(host, integerSlider.Id), Is.True,
+            "Sensitive UI Toolkit sliders must omit both value and state.rangeValue.");
+
+        var sensitiveUGuiSliderError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "sample-slider", "0.75", Sensitive: true),
+            out var sensitiveUGuiSliderRequestId);
+        Assert.That(sensitiveUGuiSliderError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveUGuiSliderRequestId, out var sensitiveUGuiSliderResult), Is.True);
+        Assert.That(sensitiveUGuiSliderResult.Succeeded, Is.True);
+        Assert.That(WaitForRedactedRangeNode(host, "sample-slider"), Is.True,
+            "Sensitive uGUI sliders must omit both value and state.rangeValue.");
+
         var uGuiFocusError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, "sample-input"), out var uGuiFocusRequestId);
         Assert.That(uGuiFocusError, Is.EqualTo(GuaActionError.None));
         Assert.That(WaitForAction(host, uGuiFocusRequestId), Is.True);
@@ -258,6 +276,23 @@ public sealed class UnityIntegrationTests
                 if (node.GetProperty("id").GetString() != id) continue;
                 if (!node.TryGetProperty("text", out _) && !node.TryGetProperty("value", out _) &&
                     !json.Contains(secret, StringComparison.Ordinal)) return true;
+            }
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForRedactedRangeNode(UnitySceneTestHost host, string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
+            foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
+            {
+                if (node.GetProperty("id").GetString() != id) continue;
+                var exposesRangeValue = node.TryGetProperty("state", out var state) && state.TryGetProperty("rangeValue", out _);
+                if (!node.TryGetProperty("value", out _) && !exposesRangeValue) return true;
             }
             Thread.Sleep(20);
         }

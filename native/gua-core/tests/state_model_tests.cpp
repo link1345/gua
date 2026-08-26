@@ -509,6 +509,17 @@ int main()
     assert(reset_diagnostics.find("\"operations\":[]") != std::string::npos);
     assert(reset_diagnostics.find("\"events\":[]") != std::string::npos);
     assert(std::string(gua_get_ui_tree_json(context)).find("\"sessionEpoch\":2") != std::string::npos);
+    gua_begin_frame(context, "post-reset");
+    gua_register_node(context, "post-reset-focus", "textbox", "Post-reset focus", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(context);
+    const gua_action_request_descriptor_t post_reset_focus {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_FOCUS, "post-reset-focus"
+    };
+    std::uint64_t post_reset_request_id = 0;
+    assert(gua_enqueue_action(context, &post_reset_focus, &post_reset_request_id) == GUA_ACTION_ACCEPTED);
+    assert(post_reset_request_id > request_id);
+    assert(gua_cancel_action_request(context, action_ids[0]) == GUA_ACTION_CANCEL_NOT_FOUND);
+    assert(gua_cancel_action_request(context, post_reset_request_id) == GUA_ACTION_CANCELLED);
     char other_id[16] {};
     assert(gua_find_node_by_id(other, "other", other_id, sizeof(other_id)) == 1);
 
