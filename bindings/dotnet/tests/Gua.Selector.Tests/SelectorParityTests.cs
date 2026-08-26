@@ -52,7 +52,7 @@ public sealed class SelectorParityTests
         runtime.BeginWorldFrame("corridor");
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
             new GuaWorldPosition(640, 180), VisibleToPlayer: true,
-            State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7 }));
+            State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
             new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
@@ -71,6 +71,11 @@ public sealed class SelectorParityTests
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "hidden-child")).Matches, Is.Empty);
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))).Matches.Single().Id, Is.EqualTo("door-a"));
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("priority", (byte)7))).Matches.Single().Id, Is.EqualTo("door-a"));
+            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("code", ""))).Matches.Single().Id, Is.EqualTo("door-a"));
+            foreach (var invalid in new[] {
+                new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
+                new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: "") })
+                Assert.Throws<InvalidOperationException>(() => remote.QueryWorldObjects(invalid));
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
             Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
             Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1));
@@ -78,7 +83,7 @@ public sealed class SelectorParityTests
             runtime.BeginWorldFrame("corridor");
             runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
                 new GuaWorldPosition(640, 180), VisibleToPlayer: true,
-                State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7 }));
+                State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
             runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
                 new GuaWorldPosition(99, 99), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
             runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
@@ -97,11 +102,26 @@ public sealed class SelectorParityTests
     }
 
     [Test]
-    public void DisabledRuntimeReturnsASchemaValidEmptyWorldTree()
+    public void DisabledRuntimeReturnsASchemaValidEmptyWorldTreeAtTheCurrentEpoch()
     {
+        var port = ReservePort();
         using var runtime = new GuaRuntime();
         var tree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         Assert.Multiple(() => { Assert.That(tree.Scene, Is.EqualTo("unsupported")); Assert.That(tree.Objects, Is.Empty); });
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            var reset = remote.Reset();
+            Assert.That(remote.GetWorldObjectTree().SessionEpoch, Is.EqualTo(reset.SessionEpoch));
+            var localTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            Assert.That(localTree.SessionEpoch, Is.EqualTo(reset.SessionEpoch));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
     }
 
     [Test]

@@ -166,6 +166,41 @@ int main()
     assert(std::string(query).find("\"valid\":false") != std::string::npos);
     gua_destroy_context(atomic_world);
 
+    // State entry order is not semantic, and retained world objects keep their comparison baseline across reset.
+    gua_context_t* canonical_world = gua_create_context();
+    const gua_world_state_value_v1_t state_ab[] {
+        { sizeof(gua_world_state_value_v1_t), "a", GUA_WORLD_VALUE_NUMBER, nullptr, 1, 0 },
+        { sizeof(gua_world_state_value_v1_t), "b", GUA_WORLD_VALUE_NUMBER, nullptr, 2, 0 },
+    };
+    const gua_world_state_value_v1_t state_ba[] {
+        { sizeof(gua_world_state_value_v1_t), "b", GUA_WORLD_VALUE_NUMBER, nullptr, 2, 0 },
+        { sizeof(gua_world_state_value_v1_t), "a", GUA_WORLD_VALUE_NUMBER, nullptr, 1, 0 },
+    };
+    gua_world_object_descriptor_v1_t canonical_object { sizeof(gua_world_object_descriptor_v1_t), "ordered", nullptr,
+        "item", "Ordered", nullptr, GUA_WORLD_SPACE_2D, 0, 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO,
+        nullptr, nullptr, nullptr, 0, state_ab, 2 };
+    assert(gua_begin_world_frame(canonical_world, "canonical") == 1);
+    assert(gua_register_world_object_v1(canonical_world, &canonical_object) == 1);
+    assert(gua_end_world_frame(canonical_world) == 1);
+    canonical_object.state_values = state_ba;
+    assert(gua_begin_world_frame(canonical_world, "canonical") == 1);
+    assert(gua_register_world_object_v1(canonical_world, &canonical_object) == 1);
+    assert(gua_end_world_frame(canonical_world) == 1);
+    gua_context_status_t canonical_status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(canonical_world, &canonical_status) == 1 && canonical_status.world_revision == 1);
+    gua_reset_options_t retain_world { sizeof(gua_reset_options_t), 0, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT };
+    gua_reset_report_t retain_world_report { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(canonical_world, &retain_world, &retain_world_report) == GUA_RESET_SUCCEEDED);
+    assert(gua_begin_world_frame(canonical_world, "canonical") == 1);
+    assert(gua_register_world_object_v1(canonical_world, &canonical_object) == 1);
+    assert(gua_end_world_frame(canonical_world) == 1);
+    assert(gua_get_context_status(canonical_world, &canonical_status) == 1 && canonical_status.world_revision == 0);
+    world_size = gua_copy_world_object_tree_json(canonical_world, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    world_json.resize(static_cast<std::size_t>(world_size));
+    gua_copy_world_object_tree_json(canonical_world, GUA_OBSERVATION_PROFILE_DEBUG, world_json.data(), world_size);
+    assert(std::string(world_json.data()).find("\"state\":{\"a\":1,\"b\":2}") != std::string::npos);
+    gua_destroy_context(canonical_world);
+
     // Selector syntax is validated before projection, scope, tags, or object scanning can short-circuit it.
     gua_context_t* empty_world = gua_create_context();
     gua_world_selector_v1_t invalid_world_regex { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0,

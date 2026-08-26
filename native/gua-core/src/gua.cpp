@@ -1504,6 +1504,9 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
         object.state.push_back(WorldStateValue { value.key, value.type, value.string_value == nullptr ? "" : value.string_value,
             value.number_value, value.bool_value != 0 });
     }
+    std::sort(object.state.begin(), object.state.end(), [](const auto& left, const auto& right) {
+        return left.key < right.key;
+    });
     ctx->staging_world_objects.push_back(std::move(object));
     return 1;
 }
@@ -1953,7 +1956,6 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     ctx->world_frame_sequence = 0;
     ctx->world_revision = 0;
     ctx->player_world_revision = 0;
-    ctx->previous_world_snapshot.clear();
     ctx->world_json_cache_debug.clear();
     ctx->world_json_cache_player.clear();
     ++ctx->session_epoch;
