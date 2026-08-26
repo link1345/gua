@@ -70,6 +70,7 @@ var clock_execution_limit_reached := false
 
 
 func attach(root_control: Control) -> void:
+	_detach_webmcp_bridge()
 	root = root_control
 	last_clock_ticks_ms = Time.get_ticks_msec()
 	if _ensure_context() and OS.has_feature("web"):
@@ -77,6 +78,17 @@ func attach(root_control: Control) -> void:
 		if bridge_script != null:
 			webmcp_bridge = bridge_script.new()
 			webmcp_bridge.attach(self)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_detach_webmcp_bridge()
+
+
+func _detach_webmcp_bridge() -> void:
+	if webmcp_bridge != null and webmcp_bridge.has_method("detach"):
+		webmcp_bridge.detach()
+	webmcp_bridge = null
 
 
 func update(screen: String) -> void:

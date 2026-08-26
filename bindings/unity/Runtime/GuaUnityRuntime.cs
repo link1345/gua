@@ -133,7 +133,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var result = runtime.EnqueueAction(request, out var requestId);
         if (result != GuaActionError.None)
         {
-            ResolveWebError(envelope.callId, "invalid_request", $"Unity rejected the Gua action ({(int)result}).");
+            ResolveWebError(envelope.callId, WebErrorCode(result), $"Unity rejected the Gua action ({(int)result}).");
             return;
         }
         webCalls[requestId] = envelope.callId;
@@ -158,6 +158,14 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     private static void ResolveWebError(int callId, string code, string message) =>
         GuaUnityWebResolve(callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
+    private static string WebErrorCode(GuaActionError error) => error switch
+    {
+        GuaActionError.NodeNotFound => "node_not_found",
+        GuaActionError.Hidden => "hidden",
+        GuaActionError.Disabled => "disabled",
+        GuaActionError.Unsupported => "unsupported_action",
+        _ => "invalid_request",
+    };
     private static string? EmptyToNull(string value) => string.IsNullOrEmpty(value) ? null : value;
     private static bool TryActionType(string value, out GuaActionType action)
     {

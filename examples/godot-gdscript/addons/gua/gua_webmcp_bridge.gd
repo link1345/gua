@@ -3,14 +3,16 @@ extends RefCounted
 # Same-page Godot Web Export port consumed by gua-webmcp. It deliberately has
 # no WebSocket endpoint and uses the adapter's request-correlated event queue.
 
-var adapter: RefCounted
+var adapter_ref: WeakRef
 var get_tree_callback: JavaScriptObject
 var enqueue_callback: JavaScriptObject
 var poll_callback: JavaScriptObject
+var bridge_owner_id := ""
 
 
 func attach(gua_adapter: RefCounted) -> bool:
-	adapter = gua_adapter
+	detach()
+	adapter_ref = weakref(gua_adapter)
 	if not OS.has_feature("web"):
 		return false
 	var window := JavaScriptBridge.get_interface("window")
@@ -22,13 +24,19 @@ func attach(gua_adapter: RefCounted) -> bool:
 	window.__guaGodotGetTree = get_tree_callback
 	window.__guaGodotEnqueueAction = enqueue_callback
 	window.__guaGodotPollAction = poll_callback
+	bridge_owner_id = str(get_instance_id())
 	JavaScriptBridge.eval("""
 (() => {
   const engineError = (code, message) => Object.assign(new Error(message), { code });
   globalThis.__guaGodotWebPort = {
+    __guaOwnerId: "%s",
     async invoke(command) {
       if (!command || typeof command.type !== 'string') throw engineError('invalid_request', 'Missing Gua in-page command.');
-      if (command.type === 'get_ui_tree') return JSON.parse(globalThis.__guaGodotGetTree());
+      if (command.type === 'get_ui_tree') {
+        const tree = JSON.parse(globalThis.__guaGodotGetTree());
+        if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
+        return tree;
+      }
       if (command.type !== 'perform_action') throw engineError('engine_unsupported', `Godot Web command is unsupported: ${command.type}`);
       const receipt = JSON.parse(globalThis.__guaGodotEnqueueAction(JSON.stringify(command.request)));
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
@@ -45,15 +53,45 @@ func attach(gua_adapter: RefCounted) -> bool:
     }
   };
 })();
-""")
+""" % bridge_owner_id)
 	return true
 
 
+func detach() -> void:
+	if not bridge_owner_id.is_empty() and OS.has_feature("web"):
+		JavaScriptBridge.eval("""
+(() => {
+  const port = globalThis.__guaGodotWebPort;
+  if (!port || port.__guaOwnerId !== "%s") return;
+  delete globalThis.__guaGodotWebPort;
+  delete globalThis.__guaGodotGetTree;
+  delete globalThis.__guaGodotEnqueueAction;
+  delete globalThis.__guaGodotPollAction;
+})();
+""" % bridge_owner_id)
+	bridge_owner_id = ""
+	get_tree_callback = null
+	enqueue_callback = null
+	poll_callback = null
+	adapter_ref = null
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		detach()
+
+
 func _get_tree(_arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
 	return adapter.get_ui_tree_json()
 
 
 func _enqueue_action(arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
 	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
 	if not source is Dictionary:
 		return JSON.stringify({"code": "invalid_request", "message": "Action request must be an object."})
@@ -72,11 +110,33 @@ func _enqueue_action(arguments: Array) -> String:
 	}
 	var receipt: Dictionary = adapter.enqueue_action(native_request)
 	if receipt.get("error_code", -1) != 0:
-		return JSON.stringify({"code": "invalid_request", "message": "Godot rejected the Gua action.", "hostError": receipt.get("error_code")})
+		var error_code := int(receipt.get("error_code", -1))
+		return JSON.stringify({"code": _web_error_code(error_code), "message": "Godot rejected the Gua action.", "hostError": error_code})
 	return JSON.stringify({"requestId": receipt.get("request_id", 0)})
 
 
 func _poll_action(arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return "null"
 	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
 	var result: Dictionary = adapter.poll_action_result(request_id)
 	return "null" if result.is_empty() else JSON.stringify(result)
+
+
+func _adapter() -> RefCounted:
+	return adapter_ref.get_ref() if adapter_ref != null else null
+
+
+func _web_error_code(error_code: int) -> String:
+	match error_code:
+		-2:
+			return "node_not_found"
+		-3:
+			return "hidden"
+		-4:
+			return "disabled"
+		-5:
+			return "unsupported_action"
+		_:
+			return "invalid_request"

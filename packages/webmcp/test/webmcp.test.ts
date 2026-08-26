@@ -218,6 +218,17 @@ describe("Gua same-page engine port", () => {
     ]);
   });
 
+  test("preserves protocol top-level node text and value", async () => {
+    const bridge = createGuaInPageBridge({
+      invoke: async () => JSON.stringify(tree([{
+        ...button("name"), role: "textbox", text: "Player name", value: "Gua", actions: ["set_value"],
+      }])),
+    });
+    const node = (await bridge.getUiTree()).nodes[0]!;
+    expect(node.text).toBe("Player name");
+    expect(node.value).toBe("Gua");
+  });
+
   test("does not expose screenshot support until explicitly enabled", () => {
     const port = { invoke: async () => ({}) };
     expect(createGuaInPageBridge(port).getScreenshot).toBeUndefined();
@@ -225,10 +236,12 @@ describe("Gua same-page engine port", () => {
   });
 
   test("preserves recognized structured engine error codes", async () => {
-    const bridge = createGuaInPageBridge({
-      invoke: async () => { throw { code: "timeout", message: "Host completion timed out." }; },
-    });
-    await expect(bridge.performAction({ action: "click", nodeId: "start" })).rejects.toMatchObject({ code: "timeout" });
+    for (const code of ["node_not_found", "hidden", "disabled", "unsupported_action", "timeout"] as const) {
+      const bridge = createGuaInPageBridge({
+        invoke: async () => { throw { code, message: "Host rejected the action." }; },
+      });
+      await expect(bridge.performAction({ action: "click", nodeId: "start" })).rejects.toMatchObject({ code });
+    }
   });
 });
 

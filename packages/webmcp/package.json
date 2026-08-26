@@ -19,7 +19,7 @@
   "types": "./src/index.ts",
   "files": ["dist", "src", "README.md", "package.json"],
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
     "test": "bun test test",
     "build": "bun build src/index.ts --target browser --format esm --outfile dist/index.js && tsc --emitDeclarationOnly",
     "prepack": "bun run build"

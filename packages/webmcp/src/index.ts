@@ -15,6 +15,8 @@ export interface GuaNode {
   parentId?: string;
   role: string;
   label?: string;
+  text?: string;
+  value?: number | string | boolean | null;
   visible: boolean;
   enabled: boolean;
   bounds: GuaBounds;
@@ -31,18 +33,13 @@ export interface GuaUiTree {
 export interface GuaScreenshot { dataUri: string; width: number; height: number }
 
 export type GuaWebAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
-export interface GuaWebActionRequest {
-  action: GuaWebAction;
-  nodeId?: string;
-  value?: string;
-  checked?: boolean;
-  sensitive?: boolean;
-  deltaX?: number;
-  deltaY?: number;
-  scrollUnit?: 0 | 1;
-  key?: string;
-  modifiers?: number;
-}
+export type GuaWebActionRequest =
+  | { action: "click" | "focus"; nodeId: string }
+  | { action: "set_value"; nodeId: string; value: string; sensitive?: boolean }
+  | { action: "set_checked"; nodeId: string; checked: boolean }
+  | { action: "select"; nodeId: string; value: string }
+  | { action: "scroll"; nodeId: string; deltaX: number; deltaY: number; scrollUnit?: 0 | 1 }
+  | { action: "press_key"; nodeId?: string; key: string; modifiers?: number };
 export interface GuaWebActionCompletion {
   requestId: number;
   action: GuaWebAction | number;
@@ -196,7 +193,9 @@ async function executeTool(
         hostError: completion.error ?? "unknown",
       });
     }
-    const safeCompletion = request.sensitive || completion.sensitive ? { ...completion, value: "", sensitive: true } : completion;
+    const safeCompletion = (request.action === "set_value" && request.sensitive) || completion.sensitive
+      ? { ...completion, value: "", sensitive: true }
+      : completion;
     return toolResult(safeCompletion);
   } catch (error) {
     const normalized = normalizeError(error, input.sensitive === true ? String(input.value ?? "") : undefined);
@@ -247,24 +246,39 @@ async function waitForNode(bridge: GuaBrowserBridge, nodeId: string, timeoutMs: 
 
 function actionRequest(name: string, input: Record<string, unknown>): GuaWebActionRequest {
   const action = name.replace(/_node$/, "") as GuaWebAction;
-  if (!["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"].includes(action)) {
-    throw new GuaWebError("invalid_request", `Unknown Gua WebMCP tool: ${name}`);
+  switch (action) {
+    case "click":
+    case "focus":
+      return { action, nodeId: requiredString(input, "nodeId") };
+    case "set_value":
+      return {
+        action,
+        nodeId: requiredString(input, "nodeId"),
+        value: requiredString(input, "value"),
+        sensitive: input.sensitive === true,
+      };
+    case "set_checked":
+      return { action, nodeId: requiredString(input, "nodeId"), checked: requiredBoolean(input, "checked") };
+    case "select":
+      return { action, nodeId: requiredString(input, "nodeId"), value: requiredString(input, "value") };
+    case "scroll":
+      return {
+        action,
+        nodeId: requiredString(input, "nodeId"),
+        deltaX: requiredNumber(input, "deltaX"),
+        deltaY: requiredNumber(input, "deltaY"),
+        scrollUnit: optionalInteger(input, "scrollUnit", 0, 0, 1) as 0 | 1,
+      };
+    case "press_key":
+      return {
+        action,
+        ...(input.nodeId === undefined ? {} : { nodeId: requiredString(input, "nodeId") }),
+        key: requiredString(input, "key"),
+        modifiers: optionalInteger(input, "modifiers", 0, 0, 15),
+      };
+    default:
+      throw new GuaWebError("invalid_request", `Unknown Gua WebMCP tool: ${name}`);
   }
-  const request: GuaWebActionRequest = { action };
-  if (action !== "press_key" || input.nodeId !== undefined) request.nodeId = requiredString(input, "nodeId");
-  if (action === "set_value" || action === "select") request.value = requiredString(input, "value");
-  if (action === "set_value") request.sensitive = input.sensitive === true;
-  if (action === "set_checked") request.checked = requiredBoolean(input, "checked");
-  if (action === "scroll") {
-    request.deltaX = requiredNumber(input, "deltaX");
-    request.deltaY = requiredNumber(input, "deltaY");
-    request.scrollUnit = optionalInteger(input, "scrollUnit", 0, 0, 1) as 0 | 1;
-  }
-  if (action === "press_key") {
-    request.key = requiredString(input, "key");
-    request.modifiers = optionalInteger(input, "modifiers", 0, 0, 15);
-  }
-  return request;
 }
 
 function toolResult(value: unknown) { return { content: [{ type: "text", text: JSON.stringify(value) }] }; }
