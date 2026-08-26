@@ -25,12 +25,13 @@ public sealed class GuaAgentPolicyComponent : MonoBehaviour
             replacementType == ReplacementType.Number ? numberReplacement : replacementType == ReplacementType.Boolean ? booleanReplacement : null, quantum);
     }
 
+    [SerializeField] private bool overrideExposure;
     [SerializeField] private GuaAgentExposure exposure;
     [SerializeField] private FieldRule[] fieldRules = Array.Empty<FieldRule>();
     [SerializeField] private bool overrideAllowedActions;
     [SerializeField] private GuaActionType[] allowedActions = Array.Empty<GuaActionType>();
 
-    public GuaAgentPolicy Policy => new(exposure, fieldRules.Where(rule => rule != null).Select(rule => rule.ToPolicy()).ToArray(),
+    public GuaAgentPolicy Policy => new(overrideExposure ? exposure : null, fieldRules.Where(rule => rule != null).Select(rule => rule.ToPolicy()).ToArray(),
         overrideAllowedActions ? new List<GuaActionType>(allowedActions) : null);
 }
 }

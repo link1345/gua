@@ -43,6 +43,26 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public async Task PlayerTestingParsersPreserveOmittedLabelsAndBounds()
+    {
+        const string playerTree = """
+            {"schemaVersion":2,"sessionEpoch":1,"frameSequence":1,"revision":1,"screen":"policy","nodes":[{"id":"public","role":"button","visible":true,"enabled":true,"bounds":{"y":2,"w":20,"h":10},"actions":["click"]}]}
+            """;
+        var context = new StaticTreeContext(playerTree);
+        var direct = GuaAssertions.GetById(context, "public").Snapshot;
+        var waited = (await GuaAssertions.WaitForStateAsync(context, "public", node => !node.KnownBounds.HasFlag(GuaBoundsKnownState.X),
+            timeout: TimeSpan.FromMilliseconds(100))).Snapshot;
+        Assert.Multiple(() =>
+        {
+            Assert.That(direct.HasLabel, Is.False);
+            Assert.That(direct.Label, Is.Empty);
+            Assert.That(direct.KnownBounds, Is.EqualTo(GuaBoundsKnownState.Y | GuaBoundsKnownState.Width | GuaBoundsKnownState.Height));
+            Assert.That(direct.Bounds.X, Is.Zero);
+            Assert.That(waited.KnownBounds.HasFlag(GuaBoundsKnownState.X), Is.False);
+        });
+    }
+
+    [Test]
     public void WorldObjectTreePublishesQueriesProjectsAndResetsIndependently()
     {
         using var context = new GuaContext();
@@ -52,19 +72,25 @@ public sealed class SelectorParityTests
             State: new Dictionary<string, object?> { ["open"] = false, ["locked"] = true }));
         context.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World3D,
             new GuaWorldPosition(1, 2, 3), VisibleToPlayer: true, ParentId: "door-a", AgentExposure: GuaAgentExposure.Private));
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("field-private", "item", "Field Private", GuaWorldSpace.World2D,
+            new GuaWorldPosition(2, 3), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [new("label", GuaAgentFieldMode.Redact)])));
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("explicit-public", "item", "Explicit Public", GuaWorldSpace.World2D,
+            new GuaWorldPosition(3, 4), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Auto, [new("label", GuaAgentFieldMode.Redact)])));
         context.EndWorldFrame();
 
         Assert.Multiple(() =>
         {
-            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(2));
-            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
+            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(4));
+            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a", "explicit-public" }));
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Id: "secret"), GuaObservationProfile.Player).Matches, Is.Empty);
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Kind: "door")).Matches.Single().State["locked"].GetBoolean(), Is.True);
-            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(2));
+            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(4));
         });
 
         var reset = context.Reset();
-        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(2));
+        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(4));
         Assert.That(context.GetWorldObjectTree().Objects, Is.Empty);
     }
 
@@ -80,7 +106,8 @@ public sealed class SelectorParityTests
             new GuaWorldPosition(640, 180), VisibleToPlayer: true,
             State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
-            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [new("label", GuaAgentFieldMode.Redact)])));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
             new GuaWorldPosition(2, 2), VisibleToPlayer: false));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
@@ -1680,6 +1707,20 @@ public sealed class SelectorParityTests
         public bool TryPollActionEvent(out GuaActionEvent e) => throw new NotSupportedException();
         public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) => throw new NotSupportedException();
         public bool TryPollEvent(out GuaEvent e) => throw new NotSupportedException();
+    }
+
+    private sealed class StaticTreeContext(string json) : IGuaContext
+    {
+        public string GetUiTreeJson() => json;
+        public GuaNodeState GetNodeState(string id) => throw new NotSupportedException();
+        public string FindNodeById(string id) => id == "public" ? id : string.Empty;
+        public string FindNodeByRole(string role, string? name = null) => throw new NotSupportedException();
+        public string FindNodeByText(string text) => throw new NotSupportedException();
+        public bool EnqueueClick(string id) => throw new NotSupportedException();
+        public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) { requestId = 0; throw new NotSupportedException(); }
+        public bool TryPollActionEvent(out GuaActionEvent e) { e = default!; return false; }
+        public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) { e = default!; return false; }
+        public bool TryPollEvent(out GuaEvent e) { e = default; return false; }
     }
 
     private static class Native

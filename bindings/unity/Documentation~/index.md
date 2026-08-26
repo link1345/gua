@@ -33,3 +33,5 @@ Add `GuaAgentPolicyComponent` to a uGUI or `GuaWorldObject` GameObject to mark i
 private, transform Player-visible fields, or override allowed UI actions. For UI
 Toolkit and custom adapters, call `GuaUnityAdapterRegistry.SetAgentPolicy` with
 the reflected target object. These policies affect Player profile only.
+Enable `Override Exposure` only when the component should replace the exposure
+already declared by `GuaWorldObject`; field-only policies inherit that setting.

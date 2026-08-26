@@ -397,7 +397,25 @@ bool copy_agent_policy(const gua_agent_policy_v1_t& source, AgentPolicy& target,
 
 double quantize(double value, double quantum)
 {
-    return std::floor(value / quantum) * quantum;
+    const double remainder = std::fmod(value, quantum);
+    double result = value - remainder;
+    if (remainder < 0.0) {
+        const double lowest = std::numeric_limits<double>::lowest();
+        if (result < lowest + quantum) return lowest;
+        result -= quantum;
+    }
+    return std::isfinite(result) ? result : value;
+}
+
+template <typename T>
+T quantize_to(T value, double quantum)
+{
+    const double result = quantize(static_cast<double>(value), quantum);
+    const double lowest = static_cast<double>(std::numeric_limits<T>::lowest());
+    const double highest = static_cast<double>(std::numeric_limits<T>::max());
+    if (result <= lowest) return std::numeric_limits<T>::lowest();
+    if (result >= highest) return std::numeric_limits<T>::max();
+    return static_cast<T>(result);
 }
 
 void apply_node_policy(Node& node)
@@ -408,11 +426,11 @@ void apply_node_policy(Node& node)
             else if (rule.mode == GUA_AGENT_FIELD_REDACT) node.label = "[redacted]";
             else if (rule.mode == GUA_AGENT_FIELD_REPLACE) node.label = rule.string_value;
         } else if (rule.path == "text") {
-            if (rule.mode == GUA_AGENT_FIELD_OMIT) node.known_mask &= ~GUA_NODE_KNOWN_TEXT;
+            if (rule.mode == GUA_AGENT_FIELD_OMIT) { node.known_mask &= ~GUA_NODE_KNOWN_TEXT; node.text.clear(); }
             else if (rule.mode == GUA_AGENT_FIELD_REDACT) { node.known_mask |= GUA_NODE_KNOWN_TEXT; node.text = "[redacted]"; }
             else if (rule.mode == GUA_AGENT_FIELD_REPLACE) { node.known_mask |= GUA_NODE_KNOWN_TEXT; node.text = rule.string_value; }
         } else if (rule.path == "value") {
-            if (rule.mode == GUA_AGENT_FIELD_OMIT) node.known_mask &= ~GUA_NODE_KNOWN_VALUE;
+            if (rule.mode == GUA_AGENT_FIELD_OMIT) { node.known_mask &= ~GUA_NODE_KNOWN_VALUE; node.value.clear(); }
             else if (rule.mode == GUA_AGENT_FIELD_REDACT) { node.known_mask |= GUA_NODE_KNOWN_VALUE; node.value.clear(); }
             else if (rule.mode == GUA_AGENT_FIELD_REPLACE) { node.known_mask |= GUA_NODE_KNOWN_VALUE; node.value = rule.string_value; }
         } else if (rule.path.starts_with("bounds.")) {
@@ -420,10 +438,32 @@ void apply_node_policy(Node& node)
             if (rule.mode == GUA_AGENT_FIELD_OMIT) node.omitted_fields.insert(rule.path);
             else if (rule.mode == GUA_AGENT_FIELD_REDACT) *value = 0;
             else if (rule.mode == GUA_AGENT_FIELD_REPLACE) *value = static_cast<float>(rule.number_value);
-            else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) *value = static_cast<float>(quantize(*value, rule.quantum));
+            else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) *value = quantize_to(*value, rule.quantum);
         } else if (rule.path.starts_with("state.")) {
             const auto key = rule.path.substr(6);
-            if (rule.mode == GUA_AGENT_FIELD_OMIT) { node.omitted_fields.insert(rule.path); continue; }
+            if (rule.mode == GUA_AGENT_FIELD_OMIT) {
+                node.omitted_fields.insert(rule.path);
+                if (key == "focused") { node.known_mask &= ~GUA_NODE_KNOWN_FOCUSED; node.focused = false; }
+                else if (key == "hovered") { node.known_mask &= ~GUA_NODE_KNOWN_HOVERED; node.hovered = false; }
+                else if (key == "pressed") { node.known_mask &= ~GUA_NODE_KNOWN_PRESSED; node.pressed = false; }
+                else if (key == "checked") { node.known_mask &= ~GUA_NODE_KNOWN_CHECKED; node.checked = false; }
+                else if (key == "selected") { node.known_mask &= ~GUA_NODE_KNOWN_SELECTED; node.selected = false; }
+                else if (key == "caretPosition") { node.known_mask &= ~GUA_NODE_KNOWN_CARET_POSITION; node.caret_position = 0; }
+                else if (key == "selectionStart") node.selection_start = 0;
+                else if (key == "selectionEnd") node.selection_end = 0;
+                else if (key == "scrollX") node.scroll_x = 0;
+                else if (key == "scrollY") node.scroll_y = 0;
+                else if (key == "scrollMaxX") node.scroll_max_x = 0;
+                else if (key == "scrollMaxY") node.scroll_max_y = 0;
+                else if (key == "rangeValue") { node.known_mask &= ~GUA_NODE_KNOWN_RANGE_VALUE; node.range_value = 0; }
+                else if (key == "rangeMin") { node.known_mask &= ~GUA_NODE_KNOWN_RANGE_MIN; node.range_min = 0; }
+                else if (key == "rangeMax") { node.known_mask &= ~GUA_NODE_KNOWN_RANGE_MAX; node.range_max = 0; }
+                else if (key == "selectedIndex") { node.known_mask &= ~GUA_NODE_KNOWN_SELECTED_INDEX; node.selected_index = -1; }
+                if (node.omitted_fields.contains("state.selectionStart") && node.omitted_fields.contains("state.selectionEnd")) node.known_mask &= ~GUA_NODE_KNOWN_SELECTION;
+                if (node.omitted_fields.contains("state.scrollX") && node.omitted_fields.contains("state.scrollY")) node.known_mask &= ~GUA_NODE_KNOWN_SCROLL;
+                if (node.omitted_fields.contains("state.scrollMaxX") && node.omitted_fields.contains("state.scrollMaxY")) node.known_mask &= ~GUA_NODE_KNOWN_SCROLL_MAX;
+                continue;
+            }
             const bool boolean = key == "focused" || key == "hovered" || key == "pressed" || key == "checked" || key == "selected";
             if (boolean) {
                 bool* value = key == "focused" ? &node.focused : key == "hovered" ? &node.hovered : key == "pressed" ? &node.pressed : key == "checked" ? &node.checked : &node.selected;
@@ -433,7 +473,7 @@ void apply_node_policy(Node& node)
                 const auto transform = [&](auto& value) {
                     if (rule.mode == GUA_AGENT_FIELD_REDACT) value = 0;
                     else if (rule.mode == GUA_AGENT_FIELD_REPLACE) value = static_cast<std::decay_t<decltype(value)>>(rule.number_value);
-                    else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) value = static_cast<std::decay_t<decltype(value)>>(quantize(static_cast<double>(value), rule.quantum));
+                    else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) value = quantize_to(value, rule.quantum);
                 };
                 if (key == "caretPosition") transform(node.caret_position); else if (key == "selectionStart") transform(node.selection_start);
                 else if (key == "selectionEnd") transform(node.selection_end); else if (key == "scrollX") transform(node.scroll_x);
@@ -612,7 +652,7 @@ std::vector<WorldObject> project_world_objects(const std::vector<WorldObject>& o
                 if (rule.mode == GUA_AGENT_FIELD_OMIT) projected.omitted_fields.insert(rule.path);
                 else if (rule.mode == GUA_AGENT_FIELD_REDACT) *value = 0;
                 else if (rule.mode == GUA_AGENT_FIELD_REPLACE) *value = rule.number_value;
-                else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) *value = quantize(*value, rule.quantum);
+                else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE) *value = quantize_to(*value, rule.quantum);
             } else if (rule.path == "tags") {
                 if (rule.mode == GUA_AGENT_FIELD_OMIT) projected.tags.clear();
                 else if (rule.mode == GUA_AGENT_FIELD_REDACT) projected.tags = { "[redacted]" };
@@ -640,7 +680,7 @@ std::vector<WorldObject> project_world_objects(const std::vector<WorldObject>& o
                     else if (rule.replacement_type == GUA_WORLD_VALUE_NUMBER) value->number_value = rule.number_value;
                     else if (rule.replacement_type == GUA_WORLD_VALUE_BOOLEAN) value->bool_value = rule.bool_value;
                 }
-                else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE && value->type == GUA_WORLD_VALUE_NUMBER) value->number_value = quantize(value->number_value, rule.quantum);
+                else if (rule.mode == GUA_AGENT_FIELD_QUANTIZE && value->type == GUA_WORLD_VALUE_NUMBER) value->number_value = quantize_to(value->number_value, rule.quantum);
             }
         }
     }
@@ -2208,7 +2248,7 @@ extern "C" int gua_poll_event_v2_for_request_and_profile(gua_context_t* ctx, uin
     if (ctx == nullptr || request_id == 0 || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v2_t)) return 0;
     const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->events.begin(), ctx->events.end(), [&](const Event& event) {
-        return event.request_id == request_id && event.observation_profile == observation_profile && event_observable_for_profile(ctx->nodes, event, observation_profile);
+        return event.request_id == request_id && event.observation_profile == observation_profile;
     });
     if (found == ctx->events.end()) return 0; const Event event = *found; ctx->events.erase(found); copy_event_v2(event, out_event); return 1;
 }
@@ -2277,7 +2317,7 @@ extern "C" int gua_poll_event_v3_for_request_and_profile(gua_context_t* ctx, uin
     if (ctx == nullptr || request_id == 0 || out_event == nullptr || out_event->struct_size < sizeof(gua_event_v3_t)) return 0;
     const std::lock_guard lock(ctx->mutex);
     const auto found = std::find_if(ctx->events.begin(), ctx->events.end(), [&](const Event& event) {
-        return event.request_id == request_id && event.observation_profile == observation_profile && event_observable_for_profile(ctx->nodes, event, observation_profile);
+        return event.request_id == request_id && event.observation_profile == observation_profile;
     });
     if (found == ctx->events.end()) return 0; const Event event = *found; ctx->events.erase(found);
     out_event->base.struct_size = sizeof(gua_event_v2_t); copy_event_v2(event, &out_event->base);

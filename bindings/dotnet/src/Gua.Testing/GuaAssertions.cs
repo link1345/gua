@@ -122,6 +122,15 @@ public static partial class GuaAssertions
             }
 
             var bounds = node.GetProperty("bounds");
+            float? OptionalBound(string name) => bounds.TryGetProperty(name, out var coordinate) ? coordinate.GetSingle() : null;
+            var boundsX = OptionalBound("x");
+            var boundsY = OptionalBound("y");
+            var boundsWidth = OptionalBound("w");
+            var boundsHeight = OptionalBound("h");
+            var knownBounds = (boundsX.HasValue ? GuaBoundsKnownState.X : GuaBoundsKnownState.None) |
+                (boundsY.HasValue ? GuaBoundsKnownState.Y : GuaBoundsKnownState.None) |
+                (boundsWidth.HasValue ? GuaBoundsKnownState.Width : GuaBoundsKnownState.None) |
+                (boundsHeight.HasValue ? GuaBoundsKnownState.Height : GuaBoundsKnownState.None);
             var actions = new List<string>();
             if (node.TryGetProperty("actions", out var actionValues) && actionValues.ValueKind == JsonValueKind.Array)
             {
@@ -154,12 +163,12 @@ public static partial class GuaAssertions
             return new GuaNodeSnapshot(
                 Id: id,
                 Role: node.GetProperty("role").GetString() ?? string.Empty,
-                Label: node.GetProperty("label").GetString() ?? string.Empty,
+                Label: OptionalString("label") ?? string.Empty,
                 Bounds: new GuaBounds(
-                    bounds.GetProperty("x").GetSingle(),
-                    bounds.GetProperty("y").GetSingle(),
-                    bounds.GetProperty("w").GetSingle(),
-                    bounds.GetProperty("h").GetSingle()),
+                    boundsX ?? 0,
+                    boundsY ?? 0,
+                    boundsWidth ?? 0,
+                    boundsHeight ?? 0),
                 Visible: node.GetProperty("visible").GetBoolean(),
                 Enabled: node.GetProperty("enabled").GetBoolean(),
                 Actions: actions,
@@ -177,7 +186,8 @@ public static partial class GuaAssertions
                 Revision: OptionalRootUInt64("revision"),
                 CaretPosition: OptionalStateInt64("caretPosition"), SelectionStart: OptionalStateInt64("selectionStart"), SelectionEnd: OptionalStateInt64("selectionEnd"),
                 ScrollX: OptionalStateDouble("scrollX"), ScrollY: OptionalStateDouble("scrollY"), ScrollMaxX: OptionalStateDouble("scrollMaxX"), ScrollMaxY: OptionalStateDouble("scrollMaxY"),
-                RangeValue: OptionalStateDouble("rangeValue"), RangeMin: OptionalStateDouble("rangeMin"), RangeMax: OptionalStateDouble("rangeMax"), SelectedIndex: OptionalStateInt64("selectedIndex"));
+                RangeValue: OptionalStateDouble("rangeValue"), RangeMin: OptionalStateDouble("rangeMin"), RangeMax: OptionalStateDouble("rangeMax"), SelectedIndex: OptionalStateInt64("selectedIndex"),
+                KnownBounds: knownBounds, HasLabel: node.TryGetProperty("label", out _));
         }
 
         return null;

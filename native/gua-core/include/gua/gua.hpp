@@ -250,7 +250,9 @@ public:
         std::vector<gua_agent_field_rule_v1_t> native_rules;
         native_rules.reserve(policy.field_rules.size());
         for (const auto& rule : policy.field_rules) native_rules.push_back({ sizeof(gua_agent_field_rule_v1_t), rule.path.c_str(),
-            static_cast<int>(rule.mode), rule.replacement_type, rule.string_value.empty() ? nullptr : rule.string_value.c_str(), rule.number_value,
+            static_cast<int>(rule.mode), rule.replacement_type,
+            rule.mode == AgentFieldMode::replace && rule.replacement_type == GUA_WORLD_VALUE_STRING
+                ? rule.string_value.c_str() : (rule.string_value.empty() ? nullptr : rule.string_value.c_str()), rule.number_value,
             rule.bool_value ? 1 : 0, rule.quantum });
         const gua_agent_policy_v1_t native_policy { sizeof(gua_agent_policy_v1_t), static_cast<int>(policy.exposure),
             policy.allowed_actions.has_value() ? 1 : 0, policy.allowed_actions.value_or(0),

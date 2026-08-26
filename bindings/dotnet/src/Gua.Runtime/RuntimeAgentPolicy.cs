@@ -11,10 +11,9 @@ internal sealed class RuntimeAgentPolicy : IDisposable
 
     internal RuntimeAgentPolicy(GuaAgentPolicy? source, GuaAgentExposure fallback = GuaAgentExposure.Auto)
     {
-        source ??= new GuaAgentPolicy(fallback);
         try
         {
-            var rules = (source.FieldRules ?? []).Select(CreateRule).ToArray();
+            var rules = (source?.FieldRules ?? []).Select(CreateRule).ToArray();
             var size = Marshal.SizeOf<Native.AgentFieldRule>();
             nint memory = 0;
             if (rules.Length != 0)
@@ -23,9 +22,9 @@ internal sealed class RuntimeAgentPolicy : IDisposable
                 for (var index = 0; index < rules.Length; index++) Marshal.StructureToPtr(rules[index], memory + index * size, false);
             }
             ulong allowed = 0;
-            foreach (var action in source.AllowedActions ?? []) allowed |= 1UL << (int)action;
-            Value = new Native.AgentPolicy { StructSize = (uint)Marshal.SizeOf<Native.AgentPolicy>(), Exposure = (int)source.Exposure,
-                HasAllowedActions = source.AllowedActions is null ? 0 : 1, AllowedActions = allowed, FieldRules = memory, FieldRuleCount = (uint)rules.Length };
+            foreach (var action in source?.AllowedActions ?? []) allowed |= 1UL << (int)action;
+            Value = new Native.AgentPolicy { StructSize = (uint)Marshal.SizeOf<Native.AgentPolicy>(), Exposure = (int)(source?.Exposure ?? fallback),
+                HasAllowedActions = source?.AllowedActions is null ? 0 : 1, AllowedActions = allowed, FieldRules = memory, FieldRuleCount = (uint)rules.Length };
         }
         catch { Dispose(); throw; }
     }

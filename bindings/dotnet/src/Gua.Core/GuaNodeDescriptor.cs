@@ -4,7 +4,7 @@ public enum GuaAgentExposure { Auto = 0, Private = 1 }
 public enum GuaAgentFieldMode { Keep = 0, Omit = 1, Redact = 2, Replace = 3, Quantize = 4 }
 public sealed record GuaAgentFieldRule(string Path, GuaAgentFieldMode Mode, object? Replacement = null, double Quantum = 0);
 public sealed record GuaAgentPolicy(
-    GuaAgentExposure Exposure = GuaAgentExposure.Auto,
+    GuaAgentExposure? Exposure = null,
     IReadOnlyList<GuaAgentFieldRule>? FieldRules = null,
     IReadOnlyList<GuaActionType>? AllowedActions = null);
 

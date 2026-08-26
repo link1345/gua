@@ -10,10 +10,9 @@ internal sealed class NativeAgentPolicy : IDisposable
 
     internal NativeAgentPolicy(GuaAgentPolicy? source, GuaAgentExposure fallback = GuaAgentExposure.Auto)
     {
-        source ??= new GuaAgentPolicy(fallback);
         try
         {
-            var rules = (source.FieldRules ?? []).Select(Rule).ToArray();
+            var rules = (source?.FieldRules ?? []).Select(Rule).ToArray();
             nint ruleMemory = 0;
             var ruleSize = Marshal.SizeOf<Native.GuaNativeAgentFieldRuleV1>();
             if (rules.Length != 0)
@@ -24,12 +23,12 @@ internal sealed class NativeAgentPolicy : IDisposable
                     Marshal.StructureToPtr(rules[index], ruleMemory + index * ruleSize, false);
             }
             ulong allowed = 0;
-            foreach (var action in source.AllowedActions ?? []) allowed |= 1UL << (int)action;
+            foreach (var action in source?.AllowedActions ?? []) allowed |= 1UL << (int)action;
             Value = new Native.GuaNativeAgentPolicyV1
             {
                 StructSize = (uint)Marshal.SizeOf<Native.GuaNativeAgentPolicyV1>(),
-                Exposure = (int)source.Exposure,
-                HasAllowedActions = source.AllowedActions is null ? 0 : 1,
+                Exposure = (int)(source?.Exposure ?? fallback),
+                HasAllowedActions = source?.AllowedActions is null ? 0 : 1,
                 AllowedActions = allowed,
                 FieldRules = ruleMemory,
                 FieldRuleCount = (uint)rules.Length,
