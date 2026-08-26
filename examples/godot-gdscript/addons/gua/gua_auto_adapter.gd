@@ -87,9 +87,13 @@ var held_gamepad_axes: Dictionary = {}
 var game_input_sequence := 0
 var raw_input_enabled := false
 var last_game_input_ticks_ms := Time.get_ticks_msec()
+var disposed := false
 
 
 func attach(root_control: Control) -> void:
+	if disposed:
+		push_error("GuaAutoAdapter.attach called after dispose.")
+		return
 	root = root_control
 	last_clock_ticks_ms = Time.get_ticks_msec()
 	last_game_input_ticks_ms = last_clock_ticks_ms
@@ -97,8 +101,33 @@ func attach(root_control: Control) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE:
+	if what == NOTIFICATION_PREDELETE and not disposed:
 		_release_all_injected_inputs()
+
+
+func dispose() -> void:
+	if disposed:
+		return
+	disposed = true
+	_release_all_injected_inputs()
+	_disconnect_buttons()
+	for signal_name in [&"clock_tick", &"game_input_action_changed"]:
+		for connection in get_signal_connection_list(signal_name):
+			var callback: Callable = connection.get("callable", Callable())
+			if callback.is_valid() and is_connected(signal_name, callback):
+				disconnect(signal_name, callback)
+	clock_schedules.clear()
+	screenshot_capture_scheduled = false
+	buttons_by_id.clear()
+	tabs_by_id.clear()
+	list_items_by_id.clear()
+	controls_by_id.clear()
+	suppressed_clicks.clear()
+	root = null
+	if context != null:
+		context.stop_inspector_bridge()
+	context = null
+	gdextension_resource = null
 
 
 func update(screen: String) -> void:
@@ -248,6 +277,8 @@ func _publish_world_frame(scene: String) -> void:
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
 	for connection in get_signal_connection_list(&"clock_tick"):
+		if disposed or context == null:
+			return
 		if int(context.get_clock().get("generation", -1)) != step_generation:
 			return
 		var callback: Callable = connection.get("callable", Callable())
@@ -264,6 +295,8 @@ func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
 
 
 func _dispatch_deferred_clock_tick(callback: Callable, delta_seconds: float, step_generation: int) -> void:
+	if disposed or context == null:
+		return
 	if int(context.get_clock().get("generation", -1)) == step_generation and callback.is_valid():
 		callback.call(delta_seconds)
 
@@ -282,7 +315,7 @@ func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
 
 
 func _schedule_screenshot_capture() -> void:
-	if screenshot_capture_scheduled:
+	if disposed or context == null or screenshot_capture_scheduled:
 		return
 	var request: Dictionary = context.consume_screenshot_request()
 	if request.is_empty():
@@ -295,14 +328,23 @@ func _schedule_screenshot_capture() -> void:
 
 
 func _capture_requested_screenshot(request: Dictionary) -> void:
+	if disposed or context == null or not is_instance_valid(root):
+		screenshot_capture_scheduled = false
+		return
 	while context.get_context_status().get("session_epoch", 0) == request.get("session_epoch", 0) and context.get_context_status().get("frame_sequence", 0) <= request.get("after_frame_sequence", 0):
 		await root.get_tree().process_frame
+		if disposed or context == null or not is_instance_valid(root):
+			screenshot_capture_scheduled = false
+			return
 	if context.get_context_status().get("session_epoch", 0) != request.get("session_epoch", 0):
 		context.complete_screenshot_request({"request_id": request.get("request_id", 0), "unavailable": "unsupported"})
 		screenshot_capture_scheduled = false
 		_schedule_screenshot_capture()
 		return
 	await RenderingServer.frame_post_draw
+	if disposed or context == null or not is_instance_valid(root):
+		screenshot_capture_scheduled = false
+		return
 	var result := {"request_id": request.get("request_id", 0)}
 	if DisplayServer.get_name() == "headless":
 		result["unavailable"] = "headless"
@@ -498,6 +540,7 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 		resolved["expected_session_epoch"] = context.get_context_status().get("session_epoch", 0)
 	var report: Dictionary = context.reset_context(resolved)
 	if report.get("result", -1) == 1:
+		_disconnect_buttons()
 		buttons_by_id.clear()
 		tabs_by_id.clear()
 		list_items_by_id.clear()
@@ -517,6 +560,8 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 
 
 func _ensure_context() -> bool:
+	if disposed:
+		return false
 	if context != null:
 		return not unavailable
 	if unavailable:
@@ -1262,8 +1307,18 @@ func _connect_button(button: BaseButton, id: String) -> void:
 	if connected_buttons.has(instance_id):
 		return
 
-	connected_buttons[instance_id] = true
-	button.pressed.connect(_on_button_pressed.bind(id))
+	var callback := _on_button_pressed.bind(id)
+	connected_buttons[instance_id] = {"button": button, "callback": callback}
+	button.pressed.connect(callback)
+
+
+func _disconnect_buttons() -> void:
+	for connection in connected_buttons.values():
+		var button := connection.get("button") as BaseButton
+		var callback: Callable = connection.get("callback", Callable())
+		if is_instance_valid(button) and callback.is_valid() and button.pressed.is_connected(callback):
+			button.pressed.disconnect(callback)
+	connected_buttons.clear()
 
 
 func _on_button_pressed(id: String) -> void:

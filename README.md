@@ -716,6 +716,9 @@ Run the GDScript smoke check with:
 The wrapper places Godot's temporary `user://` data under the ignored `build/`
 directory. This also prevents a Godot 4.7 Windows access violation when the
 normal `%APPDATA%` location is unavailable in a restricted test environment.
+The sample also disables Godot's built-in file logging because smoke output is
+collected from stdout and Godot 4.7 can crash while creating `user://logs` when
+that location is unavailable.
 
 ## Repository Layout
 

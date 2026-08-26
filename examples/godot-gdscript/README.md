@@ -116,6 +116,10 @@ checks pending/in-flight requests and unconsumed events and changes nothing when
 it reports a leak. The default preserves logs and screenshots; all clients of
 the same runtime observe the new `sessionEpoch`.
 
+Call `GuaAutoAdapter.dispose()` before dropping the adapter. It neutralizes
+injected input, disconnects adapter-managed signals, stops the Inspector bridge,
+and releases the native context deterministically.
+
 For a headless smoke check of the load-order-safe path:
 
 ```powershell
@@ -125,3 +129,5 @@ For a headless smoke check of the load-order-safe path:
 Run the command from the repository root. The wrapper keeps Godot's temporary
 `user://` data under the ignored `build/` directory, avoiding a Godot 4.7
 Windows access violation when `%APPDATA%` is not writable.
+The sample disables built-in file logging because the smoke already writes to
+stdout and Godot 4.7 can crash while creating an unavailable `user://logs` path.

@@ -40,6 +40,10 @@ func _process(delta: float) -> void:
 	ui.update(_current_screen())
 
 
+func _exit_tree() -> void:
+	ui.dispose()
+
+
 func _build_ui() -> void:
 	title_label = Label.new()
 	title_label.name = "title"

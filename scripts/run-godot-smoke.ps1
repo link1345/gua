@@ -21,7 +21,7 @@ try {
     & $GodotExecutable `
         --headless `
         --path (Join-Path $root "examples/godot-gdscript") `
-        --script "res://scripts/gua_smoke.gd"
+        --scene "res://GuaSmoke.tscn"
     if ($LASTEXITCODE -ne 0) {
         throw "Godot GDScript smoke failed with exit code $LASTEXITCODE."
     }

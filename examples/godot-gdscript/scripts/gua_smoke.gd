@@ -1,4 +1,4 @@
-extends SceneTree
+extends Node
 
 const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 
@@ -6,17 +6,20 @@ var pressed_count := 0
 var adapter: Variant
 var expected_click_request_id := 0
 var click_completed_before_handler := false
+var smoke_root: Control
+var finishing := false
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	call_deferred("_run")
 
 
 func _run() -> void:
 	var screen := Control.new()
+	smoke_root = screen
 	screen.name = "screen"
 	screen.size = Vector2(1280, 720)
-	root.add_child(screen)
+	get_tree().root.add_child(screen)
 
 	var button := Button.new()
 	button.name = "start"
@@ -115,7 +118,7 @@ func _run() -> void:
 	scroll.add_child(scroll_content)
 	screen.add_child(scroll)
 
-	await process_frame
+	await get_tree().process_frame
 	var extension := load("res://addons/gua/gua.gdextension")
 	var bare_context: Object = ClassDB.instantiate("GuaContext")
 	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1") \
@@ -221,7 +224,7 @@ func _run() -> void:
 		_fail("Gua accepted a world state integer that loses precision in the C ABI: %s" % imprecise_integer_world_tree)
 		return
 	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
-	await process_frame
+	await get_tree().process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
 	var capture := ui.capture_viewport_screenshot(smoke_image)
@@ -589,7 +592,7 @@ func _run() -> void:
 		return
 
 	print("Gua GDScript smoke passed.")
-	quit(0)
+	call_deferred("_finish", 0)
 
 
 func _on_start_pressed() -> void:
@@ -615,4 +618,18 @@ func _find_world_object(tree: Dictionary, id: String) -> Variant:
 
 func _fail(message: String) -> void:
 	push_error(message)
-	quit(1)
+	call_deferred("_finish", 1)
+
+
+func _finish(exit_code: int) -> void:
+	if finishing:
+		return
+	finishing = true
+	if adapter != null:
+		adapter.dispose()
+	adapter = null
+	if is_instance_valid(smoke_root):
+		smoke_root.queue_free()
+	smoke_root = null
+	await get_tree().process_frame
+	get_tree().quit(exit_code)
