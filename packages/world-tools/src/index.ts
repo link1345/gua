@@ -19,7 +19,11 @@ const selectorProperties = {
   tag: string("Required object tag."), parentId: string("Scope parent id."), directChild: { type: "boolean" },
   visibleToPlayer: { type: "boolean" }, active: { type: "boolean" },
   stateKey: string("Primitive state key."),
-  stateValue: { type: ["string", "number", "boolean", "null"], description: "Exact primitive state value." },
+  stateValue: { anyOf: [
+    { type: ["string", "boolean", "null"] },
+    { type: "number", not: { type: "integer" } },
+    { type: "integer", minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+  ], description: "Exact primitive state value; integers must be safely distinguishable." },
 };
 const selectorSchema = (properties: Record<string, unknown>) => ({
   type: "object", additionalProperties: false, properties,
@@ -57,6 +61,8 @@ export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSe
     if (value !== null && typeof value !== "string" && typeof value !== "boolean" &&
         (typeof value !== "number" || !Number.isFinite(value)))
       throw new TypeError("stateValue must be a primitive JSON value.");
+    if (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value))
+      throw new TypeError("Integer stateValue must be a safely distinguishable JSON number.");
     result.state = { key: args.stateKey, value: value as WorldPrimitive };
   }
   return result as GuaWorldSelector;

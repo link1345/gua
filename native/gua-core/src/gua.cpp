@@ -1522,19 +1522,34 @@ extern "C" int gua_end_world_frame(gua_context_t* ctx)
     if (!ctx->world_frame_in_progress || !ctx->staging_world_valid) {
         ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; ctx->staging_world_valid = true; return 0;
     }
-    for (const auto& object : ctx->staging_world_objects) {
-        if (object.parent_id.empty()) continue;
-        std::string current = object.parent_id;
-        bool found_parent = false;
-        for (std::size_t depth = 0; depth <= ctx->staging_world_objects.size(); ++depth) {
-            if (current == object.id) { ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; return 0; }
-            const auto parent = std::find_if(ctx->staging_world_objects.begin(), ctx->staging_world_objects.end(), [&](const auto& item) { return item.id == current; });
-            if (parent == ctx->staging_world_objects.end()) break;
-            found_parent = true;
-            if (parent->parent_id.empty()) { current.clear(); break; }
-            current = parent->parent_id;
+    const auto reject_frame = [&]() {
+        ctx->staging_world_objects.clear();
+        ctx->world_frame_in_progress = false;
+        return 0;
+    };
+    std::unordered_map<std::string, std::size_t> world_indices;
+    world_indices.reserve(ctx->staging_world_objects.size());
+    for (std::size_t index = 0; index < ctx->staging_world_objects.size(); ++index)
+        world_indices.emplace(ctx->staging_world_objects[index].id, index);
+    std::vector<unsigned char> visit_state(ctx->staging_world_objects.size(), 0);
+    std::vector<std::size_t> path;
+    path.reserve(ctx->staging_world_objects.size());
+    for (std::size_t start = 0; start < ctx->staging_world_objects.size(); ++start) {
+        if (visit_state[start] == 2) continue;
+        path.clear();
+        std::size_t current = start;
+        while (true) {
+            if (visit_state[current] == 1) return reject_frame();
+            if (visit_state[current] == 2) break;
+            visit_state[current] = 1;
+            path.push_back(current);
+            const auto& parent_id = ctx->staging_world_objects[current].parent_id;
+            if (parent_id.empty()) break;
+            const auto parent = world_indices.find(parent_id);
+            if (parent == world_indices.end()) return reject_frame();
+            current = parent->second;
         }
-        if (!found_parent || !current.empty()) { ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; return 0; }
+        for (const auto index : path) visit_state[index] = 2;
     }
     const std::string semantic = build_world_semantic_json(ctx->staging_world_scene, ctx->staging_world_objects);
     const std::string player_semantic = build_world_semantic_json(ctx->staging_world_scene,
@@ -1577,6 +1592,11 @@ extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_
 {
     if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_world_selector_v1_t) ||
         (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER) ||
+        (selector->id != nullptr && selector->id[0] == '\0') ||
+        (selector->kind != nullptr && selector->kind[0] == '\0') ||
+        (selector->label != nullptr && selector->label[0] == '\0') ||
+        (selector->tag != nullptr && selector->tag[0] == '\0') ||
+        (selector->parent_id != nullptr && selector->parent_id[0] == '\0') ||
         (selector->direct_child != 0 && selector->direct_child != 1) ||
         (selector->direct_child == 1 && (selector->parent_id == nullptr || selector->parent_id[0] == '\0')))
         return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector\",\"matches\":[]}", out_json, out_json_size);

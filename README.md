@@ -113,7 +113,7 @@ Gua publishes explicitly opted-in game-world objects separately from the Semanti
 
 The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=player` in the host process to expose only player-visible, non-private objects. Clients cannot elevate that profile. World v1 is observation-only; MCP exposes `get_world_object_tree`, `find_world_objects`, and `wait_for_world_object`, while Inspector displays a separate World Object Tree panel.
 
-Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. State values must be strings, finite numbers, booleans, or null and must not contain secrets.
+Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
 
 ### Deterministic virtual time
 

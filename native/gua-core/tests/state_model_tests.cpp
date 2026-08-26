@@ -179,7 +179,33 @@ int main()
     gua_world_selector_v1_t unscoped_direct_child { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 1, 0, 0, nullptr };
     gua_query_world_objects_json(atomic_world, &unscoped_direct_child, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
     assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    for (int criterion = 0; criterion < 5; ++criterion) {
+        gua_world_selector_v1_t empty_criterion { sizeof(gua_world_selector_v1_t) };
+        if (criterion == 0) empty_criterion.id = "";
+        else if (criterion == 1) empty_criterion.kind = "";
+        else if (criterion == 2) empty_criterion.label = "";
+        else if (criterion == 3) empty_criterion.tag = "";
+        else empty_criterion.parent_id = "";
+        gua_query_world_objects_json(atomic_world, &empty_criterion, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
+        assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    }
     gua_destroy_context(atomic_world);
+
+    // Deep parent chains validate in one graph traversal rather than repeatedly scanning every ancestor.
+    gua_context_t* deep_world = gua_create_context();
+    assert(gua_begin_world_frame(deep_world, "deep") == 1);
+    for (int index = 0; index < 1600; ++index) {
+        const std::string id = "chain-" + std::to_string(index);
+        const std::string parent_id = index == 0 ? std::string() : "chain-" + std::to_string(index - 1);
+        const gua_world_object_descriptor_v1_t object { sizeof(gua_world_object_descriptor_v1_t), id.c_str(),
+            index == 0 ? nullptr : parent_id.c_str(), "item", "Chain", nullptr, GUA_WORLD_SPACE_2D,
+            static_cast<double>(index), 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+        assert(gua_register_world_object_v1(deep_world, &object) == 1);
+    }
+    assert(gua_end_world_frame(deep_world) == 1);
+    gua_context_status_t deep_status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(deep_world, &deep_status) == 1 && deep_status.world_object_count == 1600);
+    gua_destroy_context(deep_world);
 
     // State entry order is not semantic, and retained world objects keep their comparison baseline across reset.
     gua_context_t* canonical_world = gua_create_context();

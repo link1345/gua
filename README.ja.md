@@ -154,7 +154,7 @@ Guaは、明示的にopt-inしたゲーム世界のobjectをSemantic UI Treeと�
 
 native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_PROFILE=player`を設定すると、playerから見えるprivateでないobjectだけを公開する。client入力からdebugへ昇格することはできない。World v1は観測専用であり、MCPは`get_world_object_tree`、`find_world_objects`、`wait_for_world_object`を提供し、Inspectorは独立したWorld Object Tree panelへ表示する。
 
-Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_label`、`gua_world_visible_to_player`、`gua_world_active`、`gua_world_agent_exposure`、`gua_world_tags`、`gua_world_state`を使う。state値は文字列、有限数値、真偽値、nullだけを許可し、秘密情報を含めてはならない。
+Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_label`、`gua_world_visible_to_player`、`gua_world_active`、`gua_world_agent_exposure`、`gua_world_tags`、`gua_world_state`を使う。state値は文字列、有限数値、真偽値、nullだけを許可し、秘密情報を含めてはならない。整数値はv1 C ABIの`double`表現を正確に往復できる必要があり、JavaScript selector clientはsafe integer範囲外の整数を拒否する。
 
 ### 決定論的な仮想時間
 

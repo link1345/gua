@@ -192,7 +192,7 @@ during migration.
 
 `world-object-tree.schema.json` defines a separate, read-only snapshot for explicitly registered game-world objects. It never mixes Node2D, Node3D, GameObject, or gameplay state into the Semantic UI Tree. A snapshot has its own `scene`, `frameSequence`, and `revision`, while sharing the context `sessionEpoch`.
 
-Publishers use `begin_world_frame -> register_world_object -> end_world_frame`, and call `abort_world_frame` when adapter-side conversion or collection fails before native validation. Publication is atomic: duplicate IDs, missing parents, cycles, non-finite positions, invalid state values, or malformed descriptors reject the whole staged frame and preserve the previous snapshot. Omission from the next valid frame removes an object. State is limited to flat string, finite number, boolean, or null values and must not contain secrets.
+Publishers use `begin_world_frame -> register_world_object -> end_world_frame`, and call `abort_world_frame` when adapter-side conversion or collection fails before native validation. Publication is atomic: duplicate IDs, missing parents, cycles, non-finite positions, invalid state values, or malformed descriptors reject the whole staged frame and preserve the previous snapshot. Omission from the next valid frame removes an object. State is limited to flat string, finite number, boolean, or null values and must not contain secrets. Because the v1 C ABI represents numbers as `double`, integer publishers and selector clients must reject values that cannot be distinguished exactly at that boundary; JavaScript clients accept integer criteria only within the safe-integer range.
 
 `visibleToPlayer` is host-defined semantic visibility, not pixel occlusion. The host fixes an observation profile before transport use: `debug` returns every registered object, while `player` removes invisible or `private` objects and descendants whose parent is not observable. Commands do not accept a profile override. Queries project first, so guessing a private ID produces the same empty result as an unknown ID. Player snapshots and transport status/reset metadata use the projected revision and object count; changes confined to hidden objects cannot be detected through those fields.
 
@@ -211,7 +211,7 @@ The Inspector consumes four protocol payloads:
 - Screenshot: the latest runtime screenshot, matching `screenshot.schema.json`
 - Logs: ordered runtime log entries, matching `logs.schema.json`
 
-Each pushed Inspector snapshot captures the UI and World Object trees under one runtime context lock, so both trees always report the same `sessionEpoch` even when another client resets the context concurrently.
+Each pushed Inspector snapshot captures the UI and World Object trees under one runtime context lock, so both trees always report the same `sessionEpoch` even when another client resets the context concurrently. An Inspector assembling a snapshot through separate polling commands must compare both epochs and retry instead of publishing a mixed-epoch state.
 
 The screenshot payload stores an already encoded `dataUri` plus `width` and
 `height`. This keeps the C ABI small and avoids forcing the core protocol to own

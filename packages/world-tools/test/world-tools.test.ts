@@ -19,9 +19,14 @@ describe("World WebMCP tools", () => {
   test("requires complete primitive state criteria", () => {
     const schemas = worldObservationTools.filter((tool) => tool.name !== "get_world_object_tree").map((tool) => tool.inputSchema);
     expect(schemas.every((schema) => "dependentRequired" in schema)).toBe(true);
+    expect(schemas.every((schema) => "anyOf" in schema.properties.stateValue)).toBe(true);
     expect(() => selectorFromArguments({ stateKey: "locked" })).toThrow("supplied together");
     expect(() => selectorFromArguments({ stateValue: true })).toThrow("supplied together");
     expect(() => selectorFromArguments({ stateKey: "locked", stateValue: {} })).toThrow("primitive JSON value");
+    expect(() => selectorFromArguments(JSON.parse('{"stateKey":"code","stateValue":9007199254740993}')))
+      .toThrow("safely distinguishable");
+    expect(selectorFromArguments({ stateKey: "distance", stateValue: 1.5 }))
+      .toEqual({ state: { key: "distance", value: 1.5 } });
     expect(selectorFromArguments({ stateKey: "locked", stateValue: false })).toEqual({ state: { key: "locked", value: false } });
   });
 

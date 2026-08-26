@@ -212,14 +212,17 @@ export function worldObjectDepths(objects: GuaWorldObject[]): Map<string, number
 }
 
 export async function readSnapshot(client: GuaInspectorClient): Promise<InspectorSnapshot> {
-  const [uiTree, worldObjectTree, logs, screenshot] = await Promise.all([
-    client.getUiTree(),
-    client.getWorldObjectTree(),
-    client.getLogs(),
-    client.getScreenshot(),
-  ]);
-
-  return { uiTree, worldObjectTree, logs, screenshot };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [uiTree, worldObjectTree, logs, screenshot] = await Promise.all([
+      client.getUiTree(),
+      client.getWorldObjectTree(),
+      client.getLogs(),
+      client.getScreenshot(),
+    ]);
+    if (uiTree.sessionEpoch === undefined || uiTree.sessionEpoch === worldObjectTree.sessionEpoch)
+      return { uiTree, worldObjectTree, logs, screenshot };
+  }
+  throw new Error("Unable to read UI and World Object Trees from the same session epoch.");
 }
 
 export class MockInspectorClient implements GuaInspectorClient {

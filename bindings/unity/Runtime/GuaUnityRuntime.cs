@@ -128,7 +128,10 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             var frameIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var source in FindObjectsByType<GuaWorldObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
                 .Where(item => item.gameObject.scene.IsValid() && item.gameObject.scene.isLoaded)
-                .OrderBy(item => HierarchyPath(item.transform), StringComparer.Ordinal))
+                .OrderBy(item => ScenePath(item.gameObject.scene), StringComparer.Ordinal)
+                .ThenBy(item => item.gameObject.scene.handle)
+                .ThenBy(item => HierarchyPath(item.transform), StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(source.Id))
                 {
@@ -170,6 +173,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         for (var current = transform; current != null; current = current.parent) parts.Push(current.GetSiblingIndex().ToString("D6", CultureInfo.InvariantCulture));
         return string.Join("/", parts);
     }
+
+    private static string ScenePath(Scene scene) => string.IsNullOrWhiteSpace(scene.path) ? scene.name : scene.path;
 
     private void CollectUiToolkit()
     {

@@ -18,6 +18,32 @@ describe("InspectorRecorder", () => {
     await expect(readSnapshot(client)).rejects.toThrow("temporary world failure");
   });
 
+  test("retries polled trees until their session epochs match", async () => {
+    const client = new MockInspectorClient();
+    let uiCalls = 0;
+    let worldCalls = 0;
+    const originalUi = client.getUiTree.bind(client);
+    const originalWorld = client.getWorldObjectTree.bind(client);
+    client.getUiTree = async () => ({ ...(await originalUi()), sessionEpoch: ++uiCalls === 1 ? 1 : 2 });
+    client.getWorldObjectTree = async () => {
+      worldCalls += 1;
+      return { ...(await originalWorld()), sessionEpoch: 2 };
+    };
+    const snapshot = await readSnapshot(client);
+    expect(snapshot.uiTree.sessionEpoch).toBe(2);
+    expect(snapshot.worldObjectTree.sessionEpoch).toBe(2);
+    expect([uiCalls, worldCalls]).toEqual([2, 2]);
+  });
+
+  test("never publishes a persistently mixed-epoch polled snapshot", async () => {
+    const client = new MockInspectorClient();
+    const originalUi = client.getUiTree.bind(client);
+    const originalWorld = client.getWorldObjectTree.bind(client);
+    client.getUiTree = async () => ({ ...(await originalUi()), sessionEpoch: 1 });
+    client.getWorldObjectTree = async () => ({ ...(await originalWorld()), sessionEpoch: 2 });
+    await expect(readSnapshot(client)).rejects.toThrow("same session epoch");
+  });
+
   test("coalesces snapshot-driven clock refreshes without starving updates", async () => {
     const releases: Array<() => void> = [];
     let calls = 0;
