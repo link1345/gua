@@ -55,6 +55,32 @@ describe("Unity WebGL same-page port", () => {
     await expect(result).resolves.toEqual({ screen: "title" });
   });
 
+  test("rejects incomplete or conflicting world state selectors before reaching Unity", async () => {
+    const { library, messages } = await loadUnityWebLibrary();
+    library.GuaUnityWebInstall("World Host", "owner-1", 100);
+    for (const command of [
+      { type: "query_world_objects", stateKey: "locked", stateType: 3 },
+      { type: "query_world_objects", stateKey: "locked", stateType: 2, stateNumber: 0, stateBool: false },
+      { type: "query_world_objects", stateKey: "locked", stateType: 3, stateBool: "false" },
+      { type: "query_world_objects", stateType: 0 },
+    ]) {
+      await expect(unityGlobals.__guaUnityWebPort!.invoke(command)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect(messages).toEqual([]);
+  });
+
+  test("preserves false world state values and sends raw field presence to Unity", async () => {
+    const { library, messages } = await loadUnityWebLibrary();
+    library.GuaUnityWebInstall("World Host", "owner-1", 100);
+    const pending = unityGlobals.__guaUnityWebPort!.invoke({
+      type: "query_world_objects", stateKey: "locked", stateType: 3, stateBool: false,
+    });
+    const envelope = JSON.parse(messages[0]!.payload) as { callId: number; commandFields: string[] };
+    expect(envelope.commandFields).toEqual(["type", "stateKey", "stateType", "stateBool"]);
+    library.GuaUnityWebResolve("owner-1", envelope.callId, JSON.stringify({ valid: true, matches: [] }), 0);
+    await expect(pending).resolves.toEqual({ valid: true, matches: [] });
+  });
+
   test("rejects pending calls when the runtime is replaced or destroyed", async () => {
     const { library } = await loadUnityWebLibrary();
     library.GuaUnityWebInstall("First Host", "owner-1", 100);

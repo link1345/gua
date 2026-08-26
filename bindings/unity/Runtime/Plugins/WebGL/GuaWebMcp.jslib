@@ -33,6 +33,29 @@ mergeInto(LibraryManager.library, {
       }
     };
 
+    const worldSelectorError = function (command) {
+      if (!command || command.type !== 'query_world_objects') return null;
+      const own = function (name) { return Object.prototype.hasOwnProperty.call(command, name); };
+      const stateFields = ['stateKey', 'stateType', 'stateString', 'stateNumber', 'stateBool'];
+      if (!stateFields.some(own)) return null;
+      if (!own('stateKey') || typeof command.stateKey !== 'string' || command.stateKey.length === 0 ||
+          !own('stateType') || !Number.isInteger(command.stateType) || command.stateType < 0 || command.stateType > 3) {
+        return 'World state criteria require a non-empty stateKey and a valid stateType.';
+      }
+      const expectedValueField = command.stateType === 0 ? null
+        : command.stateType === 1 ? 'stateString'
+        : command.stateType === 2 ? 'stateNumber' : 'stateBool';
+      for (const name of ['stateString', 'stateNumber', 'stateBool']) {
+        if (own(name) !== (name === expectedValueField)) return 'World state criterion fields conflict with stateType.';
+      }
+      if (expectedValueField === 'stateString' && typeof command.stateString !== 'string') return 'stateString must be a string.';
+      if (expectedValueField === 'stateNumber' && (typeof command.stateNumber !== 'number' || !Number.isFinite(command.stateNumber))) {
+        return 'stateNumber must be a finite number.';
+      }
+      if (expectedValueField === 'stateBool' && typeof command.stateBool !== 'boolean') return 'stateBool must be a boolean.';
+      return null;
+    };
+
     state.uninstall = function (code, message) {
       if (state.disposed) return;
       state.disposed = true;
@@ -60,6 +83,8 @@ mergeInto(LibraryManager.library, {
       invoke(command, options) {
         if (state.disposed) return Promise.reject({ code: 'engine_unsupported', message: 'The Unity WebGL Gua runtime is unavailable.' });
         if (command.type === 'get_screenshot') return Promise.reject({ code: 'engine_unsupported', message: 'Unity WebGL screenshot readback is not enabled.' });
+        const selectorError = worldSelectorError(command);
+        if (selectorError) return Promise.reject({ code: 'invalid_request', message: selectorError });
         const signal = options && options.signal;
         const requestedTimeoutMs = options && options.timeoutMs;
         if (signal && signal.aborted) return Promise.reject({ code: 'aborted', message: 'The Unity WebGL Gua call was aborted.' });
@@ -89,7 +114,7 @@ mergeInto(LibraryManager.library, {
             return;
           }
           try {
-            SendMessage(hostName, 'HandleWebRequest', JSON.stringify({ callId, command }));
+            SendMessage(hostName, 'HandleWebRequest', JSON.stringify({ callId, command, commandFields: Object.keys(command) }));
           } catch (_error) {
             const entry = takePending(callId);
             if (entry) entry.reject({ code: 'engine_unsupported', message: `Unity WebGL could not reach the Gua runtime '${hostName}'.` });

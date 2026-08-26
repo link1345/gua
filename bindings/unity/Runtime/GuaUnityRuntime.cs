@@ -135,7 +135,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         if (envelope.command.type == "query_world_objects")
         {
-            if (!TryWorldSelector(envelope.command, out var selector, out var error))
+            if (!TryWorldSelector(envelope.command, envelope.commandFields, out var selector, out var error))
             {
                 ResolveWebError(envelope.callId, "invalid_request", error);
                 return;
@@ -206,7 +206,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         _ => "invalid_request",
     };
     private static string? EmptyToNull(string value) => string.IsNullOrEmpty(value) ? null : value;
-    private static bool TryWorldSelector(WebCommand source, out GuaWorldSelector selector, out string error)
+    private static bool TryWorldSelector(WebCommand source, string[]? commandFields, out GuaWorldSelector selector, out string error)
     {
         selector = null!;
         error = string.Empty;
@@ -220,16 +220,31 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             error = "World boolean filters are invalid.";
             return false;
         }
+        var fields = new HashSet<string>(commandFields ?? Array.Empty<string>(), StringComparer.Ordinal);
+        var stateFieldCount = new[] { "stateKey", "stateType", "stateString", "stateNumber", "stateBool" }.Count(fields.Contains);
         GuaWorldStateCriterion? state = null;
-        if (!string.IsNullOrEmpty(source.stateKey))
+        if (stateFieldCount != 0)
         {
+            if (!fields.Contains("stateKey") || string.IsNullOrEmpty(source.stateKey) || !fields.Contains("stateType"))
+            {
+                error = "World state criteria require a non-empty stateKey and stateType.";
+                return false;
+            }
             object? value;
             switch (source.stateType)
             {
-                case 0: value = null; break;
-                case 1: value = source.stateString ?? string.Empty; break;
-                case 2 when double.IsFinite(source.stateNumber): value = source.stateNumber; break;
-                case 3: value = source.stateBool; break;
+                case 0 when stateFieldCount == 2:
+                    value = null;
+                    break;
+                case 1 when stateFieldCount == 3 && fields.Contains("stateString") && source.stateString != null:
+                    value = source.stateString;
+                    break;
+                case 2 when stateFieldCount == 3 && fields.Contains("stateNumber") && double.IsFinite(source.stateNumber):
+                    value = source.stateNumber;
+                    break;
+                case 3 when stateFieldCount == 3 && fields.Contains("stateBool"):
+                    value = source.stateBool;
+                    break;
                 default:
                     error = "World state criterion is invalid.";
                     return false;
@@ -254,7 +269,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         return action != 0;
     }
 
-    [Serializable] private sealed class WebEnvelope { public int callId; public WebCommand command; }
+    [Serializable] private sealed class WebEnvelope { public int callId; public WebCommand command; public string[] commandFields; }
     [Serializable] private sealed class WebCommand
     {
         public string type; public WebAction request;
