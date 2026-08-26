@@ -67,35 +67,58 @@ func attach(gua_adapter: RefCounted) -> bool:
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000;
-        const call = { reject, timer: 0, signal, aborted: null };
+        const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false };
         const finish = (settle) => {
           clearTimeout(call.timer);
           if (call.signal) call.signal.removeEventListener('abort', call.aborted);
           pending.delete(receipt.requestId);
+          if (call.settled) return;
+          call.settled = true;
           settle();
         };
-        const aborted = () => {
-          try { cancelAction(String(receipt.requestId)); } catch (_) {}
-          finish(() => reject(engineError('aborted', 'The Godot Gua call was aborted.')));
+        const rejectWithoutDropping = (error) => {
+          if (call.settled) return;
+          call.settled = true;
+          if (call.signal) call.signal.removeEventListener('abort', call.aborted);
+          reject(error);
         };
+        const readResult = () => JSON.parse(pollAction(String(receipt.requestId)));
+        const schedulePoll = () => {
+          clearTimeout(call.timer);
+          call.timer = setTimeout(poll, 0);
+        };
+        const cancelOrDrain = (error) => {
+          let cancellationResult;
+          try { cancellationResult = Number(cancelAction(String(receipt.requestId))); }
+          catch (_) { cancellationResult = -1; }
+          if (cancellationResult === 1) return finish(() => reject(error));
+          if (cancellationResult === 0) {
+            try { readResult(); } catch (_) {}
+            return finish(() => reject(error));
+          }
+          call.discardResult = true;
+          rejectWithoutDropping(error);
+          schedulePoll();
+        };
+        const aborted = () => cancelOrDrain(engineError('aborted', 'The Godot Gua call was aborted.'));
         call.aborted = aborted;
         pending.set(receipt.requestId, call);
         if (signal) signal.addEventListener('abort', aborted, { once: true });
         if (signal && signal.aborted) return aborted();
-        const poll = () => {
+        function poll() {
           if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
           try {
-            const result = JSON.parse(pollAction(String(receipt.requestId)));
+            const result = readResult();
             if (result) return finish(() => resolve(result));
+            if (call.discardResult) return schedulePoll();
             if (performance.now() >= deadline) {
-              try { cancelAction(String(receipt.requestId)); } catch (_) {}
-              return finish(() => reject(engineError('timeout', 'Timed out waiting for Godot host completion.')));
+              return cancelOrDrain(engineError('timeout', 'Timed out waiting for Godot host completion.'));
             }
-            call.timer = setTimeout(poll, 0);
+            schedulePoll();
           } catch (error) {
             return finish(() => reject(error && error.code ? error : engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
           }
-        };
+        }
         poll();
       });
     }

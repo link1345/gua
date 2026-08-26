@@ -393,7 +393,10 @@ Feature detection is required. Missing WebMCP, a missing engine bridge, invalid
 input, unsupported action, host failure, timeout, and cancellation are structured
 errors. Browser action timeouts and caller aborts propagate to the engine-owned
 in-page bridge, which cancels the correlated native request when it is still
-queued before returning the structured error. `get_screenshot` is registered only after the engine supplies a drawable
+queued before returning the structured error. If cancellation loses the race to
+host consumption, the caller still receives its timeout or cancellation error
+immediately, while the bridge continues request-specific polling until it drains
+the correlated completion. `get_screenshot` is registered only after the engine supplies a drawable
 frame readback path. Sensitive values may reach the host action consumer but are
 blank in completion results and absent from logs and error details.
 

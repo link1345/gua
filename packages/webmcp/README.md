@@ -20,7 +20,9 @@ resolve on enqueue; it resolves with the request-correlated completion emitted
 after the engine adapter applies the action. `performAction(request, { signal })`
 must cancel an accepted request that is still queued when the signal aborts;
 `registerGuaWebMcp` uses this to propagate caller cancellation and its configured
-action timeout into Godot or Unity. `getScreenshot` is an optional read
+action timeout into Godot or Unity. If the host already consumed the action, the
+caller remains cancelled while the engine bridge drains its eventual correlated
+completion. `getScreenshot` is an optional read
 of the latest published image, and the tool is not registered when the engine
 has no drawable-frame readback path.
 
