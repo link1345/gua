@@ -73,6 +73,12 @@ enum {
 };
 
 enum {
+    GUA_ACTION_CANCEL_IN_FLIGHT = -1,
+    GUA_ACTION_CANCEL_NOT_FOUND = 0,
+    GUA_ACTION_CANCELLED = 1
+};
+
+enum {
     GUA_ACTION_STATUS_SUCCEEDED = 1,
     GUA_ACTION_STATUS_FAILED = 2
 };
@@ -385,6 +391,8 @@ int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
 int gua_emit_click(gua_context_t* ctx, const char* node_id);
 int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event);
 int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+/* Cancels only a queued, not-yet-consumed request. Returns GUA_ACTION_CANCEL_* above. */
+int gua_cancel_action_request(gua_context_t* ctx, uint64_t request_id);
 int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_id, gua_action_request_t* out_request);
 int gua_emit_action_result(gua_context_t* ctx, const gua_action_result_t* result);
 int gua_poll_event_v2(gua_context_t* ctx, gua_event_v2_t* out_event);

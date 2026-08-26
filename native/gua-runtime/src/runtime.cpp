@@ -775,6 +775,13 @@ extern "C" int gua_runtime_enqueue_action(gua_runtime_t* runtime, const gua_acti
     return gua_enqueue_action(runtime->context, descriptor, out_request_id);
 }
 
+extern "C" int gua_runtime_cancel_action_request(gua_runtime_t* runtime, uint64_t request_id)
+{
+    if (!valid_runtime(runtime)) return GUA_ACTION_CANCEL_NOT_FOUND;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_cancel_action_request(runtime->context, request_id);
+}
+
 extern "C" int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const char* node_id, gua_action_request_t* out_request)
 {
     if (!valid_runtime(runtime)) return 0;

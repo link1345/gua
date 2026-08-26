@@ -161,6 +161,13 @@ public sealed class GuaRuntime : IDisposable
         }
     }
 
+    public GuaActionCancelResult CancelAction(ulong requestId)
+    {
+        ThrowIfDisposed();
+        if (requestId == 0) throw new ArgumentOutOfRangeException(nameof(requestId));
+        return (GuaActionCancelResult)Native.gua_runtime_cancel_action_request(_handle, requestId);
+    }
+
     public unsafe bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
     {
         ThrowIfDisposed();

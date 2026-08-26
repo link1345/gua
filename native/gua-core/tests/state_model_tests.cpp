@@ -394,6 +394,10 @@ int main()
     assert(gua_enqueue_action(context, &scroll, &action_ids[3]) == GUA_ACTION_ACCEPTED);
     assert(gua_enqueue_action(context, &key, &action_ids[4]) == GUA_ACTION_ACCEPTED);
     for (std::size_t i = 1; i < 5; ++i) assert(action_ids[i] > action_ids[i - 1]);
+    assert(gua_cancel_action_request(context, action_ids[0]) == GUA_ACTION_CANCELLED);
+    gua_action_request_t cancelled { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(context, GUA_ACTION_FOCUS, "name", &cancelled) == 0);
+    assert(gua_cancel_action_request(context, action_ids[0]) == GUA_ACTION_CANCEL_NOT_FOUND);
 
     const gua_action_request_descriptor_t secret { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SET_VALUE, "name", "secret-marker", 0, 0, 0, nullptr, 0, 1 };
     std::uint64_t request_id = 0;
@@ -403,6 +407,7 @@ int main()
     assert(gua_consume_action_request(context, GUA_ACTION_SET_VALUE, "name", &consumed) == 1);
     assert(consumed.request_id == request_id);
     assert(std::strcmp(consumed.value, "secret-marker") == 0);
+    assert(gua_cancel_action_request(context, request_id) == GUA_ACTION_CANCEL_IN_FLIGHT);
     const gua_action_result_t result { sizeof(gua_action_result_t), request_id, GUA_ACTION_SET_VALUE,
         GUA_ACTION_STATUS_SUCCEEDED, 0, "name", "secret-marker", 1 };
     assert(gua_emit_action_result(context, &result) == 1);

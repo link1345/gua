@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish gui-mcp to npm
+    name: Publish MCP packages to npm
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -56,6 +56,34 @@ jobs:
         with:
           node-version: 24.15.0
           registry-url: https://registry.npmjs.org
+
+      - name: Read WebMCP package version
+        id: webmcp_version
+        shell: bash
+        run: echo "version=$(node -p \"require('./packages/webmcp/package.json').version\")" >> "${GITHUB_OUTPUT}"
+
+      - name: Check whether WebMCP version is already published
+        id: webmcp_npm_version
+        shell: bash
+        run: |
+          package_name="gua-webmcp"
+          package_version="${{ steps.webmcp_version.outputs.version }}"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://registry.npmjs.org/${package_name}/${package_version}")"
+
+          case "${status}" in
+            200)
+              echo "published=true" >> "${GITHUB_OUTPUT}"
+              echo "${package_name}@${package_version} is already published; npm publish will be skipped."
+              ;;
+            404)
+              echo "published=false" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Unexpected npm registry response for ${package_name}@${package_version}: HTTP ${status}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Check whether npm version is already published
         id: npm_version
@@ -85,10 +113,24 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Check
-        run: bun run --filter gui-mcp check
+        run: |
+          bun run --filter gua-webmcp check
+          bun run --filter gua-webmcp test
+          bun run --filter gui-mcp check
 
       - name: Build
-        run: bun run --filter gui-mcp build
+        run: |
+          bun run --filter gua-webmcp build
+          bun run --filter gui-mcp build
+
+      - name: Verify WebMCP package contents
+        working-directory: packages/webmcp
+        run: npm pack --dry-run
+
+      - name: Publish WebMCP to npm
+        if: steps.webmcp_npm_version.outputs.published != 'true'
+        working-directory: packages/webmcp
+        run: npm publish --access public --tag latest
 
       - name: Prepare publish package
         id: prepare

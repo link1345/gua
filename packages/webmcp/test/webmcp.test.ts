@@ -85,6 +85,22 @@ describe("registerGuaWebMcp", () => {
     expect(registration.registeredTools).toContain("get_screenshot");
     const setValueSchema = page.tools.get("set_value")!.inputSchema as { properties: Record<string, unknown> };
     expect(setValueSchema.properties.secretKey).toBeUndefined();
+    expect(setValueSchema.properties.value).not.toHaveProperty("minLength");
+    for (const [toolName, propertyName] of [
+      ["click_node", "nodeId"],
+      ["focus_node", "nodeId"],
+      ["set_value", "nodeId"],
+      ["set_checked", "nodeId"],
+      ["select", "nodeId"],
+      ["select", "value"],
+      ["scroll", "nodeId"],
+      ["press_key", "key"],
+      ["press_key", "nodeId"],
+      ["wait_for_node", "nodeId"],
+    ] as const) {
+      const schema = page.tools.get(toolName)!.inputSchema as { properties: Record<string, { minLength?: number }> };
+      expect(schema.properties[propertyName]?.minLength).toBe(1);
+    }
     expect(page.tools.get("get_screenshot")!.description).toContain("latest screenshot published");
 
     const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };

@@ -1340,6 +1340,21 @@ extern "C" int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_d
     return GUA_ACTION_ACCEPTED;
 }
 
+extern "C" int gua_cancel_action_request(gua_context_t* ctx, uint64_t request_id)
+{
+    if (ctx == nullptr || request_id == 0) return GUA_ACTION_CANCEL_NOT_FOUND;
+    const std::lock_guard lock(ctx->mutex);
+    const auto pending = std::find_if(ctx->action_requests.begin(), ctx->action_requests.end(),
+        [&](const ActionRequest& request) { return request.request_id == request_id; });
+    if (pending != ctx->action_requests.end()) {
+        ctx->action_requests.erase(pending);
+        return GUA_ACTION_CANCELLED;
+    }
+    const auto in_flight = std::find_if(ctx->consumed_requests.begin(), ctx->consumed_requests.end(),
+        [&](const ActionRequest& request) { return request.request_id == request_id; });
+    return in_flight == ctx->consumed_requests.end() ? GUA_ACTION_CANCEL_NOT_FOUND : GUA_ACTION_CANCEL_IN_FLIGHT;
+}
+
 extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_id, gua_action_request_t* out_request)
 {
     if (ctx == nullptr || out_request == nullptr || out_request->struct_size < sizeof(gua_action_request_t)) return 0;

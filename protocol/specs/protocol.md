@@ -293,6 +293,12 @@ The core captures `sessionEpoch`, `frameSequence`, and `revision` when the adapt
 
 The v1 action names map directly to the additive C ABI action enum: `click`, `focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. Enqueue validation distinguishes `node_not_found`, `hidden`, `disabled`, `unsupported`, and `invalid_value`. Existing click functions remain compatibility wrappers over the generic queue.
 
+A caller that abandons an accepted action may cancel it by request ID while it
+is still queued. Cancellation returns `cancelled`, `not_found`, or `in_flight`;
+an in-flight request has already been handed to the host and must finish through
+the ordinary correlated result path. A successfully cancelled request is never
+later consumed if a node with the same ID reappears.
+
 `sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
 Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Control is `4`, and Meta/Command is `8`. Adapters must route both key-down and key-up through the host input pipeline and report success only after accepting the complete key gesture.
 - `text_input`

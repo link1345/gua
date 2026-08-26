@@ -149,7 +149,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     {
         if (!int.TryParse(callIdValue, NumberStyles.None, CultureInfo.InvariantCulture, out var callId)) return;
         foreach (var pair in webCalls.ToArray())
-            if (pair.Value == callId) webCalls.Remove(pair.Key);
+        {
+            if (pair.Value != callId) continue;
+            var result = runtime?.CancelAction(pair.Key) ?? GuaActionCancelResult.NotFound;
+            if (result == GuaActionCancelResult.InFlight) continue;
+            if (result == GuaActionCancelResult.NotFound) runtime?.TryPollActionEvent(pair.Key, out _);
+            webCalls.Remove(pair.Key);
+        }
     }
 
     private void FlushWebActionResults()

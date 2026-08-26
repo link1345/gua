@@ -99,7 +99,7 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 }
 
 function stringProperty(description: string): Record<string, unknown> {
-  return { type: "string", description };
+  return { type: "string", minLength: 1, description };
 }
 
 function numberProperty(description: string): Record<string, unknown> {
