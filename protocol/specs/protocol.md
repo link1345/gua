@@ -372,12 +372,16 @@ page calls one engine-owned in-page bridge; it does not open a WebSocket, select
 a remote endpoint, or introduce a Gua session ID. Browser tabs remain isolated
 by their ordinary JavaScript and engine instances.
 
-The browser-safe surface shares the definitions for `get_ui_tree`, v1 semantic
-actions, `wait_for_node`, and optional `get_screenshot` with `gui-mcp`. The
+The browser-safe surface shares the base tool names and semantics for
+`get_ui_tree`, v1 semantic actions, `wait_for_node`, and optional
+`get_screenshot` with `gui-mcp`. Transport-specific definitions may add
+requirements that do not cross the browser boundary; for example, `gui-mcp`
+requires `secretKey` for every sensitive `set_value` so recordings can retain a
+stable secret reference. The
 in-page engine contract reads the current protocol UI tree, performs an action
 and resolves only with its request-ID-correlated host completion, and may expose
-screenshot capture. JavaScript validates live visibility, enabled state, and the
-advertised action but never owns or recreates the semantic tree.
+the latest published screenshot. JavaScript validates live visibility, enabled
+state, and the advertised action but never owns or recreates the semantic tree.
 
 Feature detection is required. Missing WebMCP, a missing engine bridge, invalid
 input, unsupported action, host failure, timeout, and cancellation are structured

@@ -11,6 +11,8 @@ import {
 
 type Registered = {
   name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
   execute(input: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown>;
 };
 
@@ -81,6 +83,9 @@ describe("registerGuaWebMcp", () => {
     const registration = await registerGuaWebMcp(bridge, { document: page.document });
     expect(registration.supported).toBe(true);
     expect(registration.registeredTools).toContain("get_screenshot");
+    const setValueSchema = page.tools.get("set_value")!.inputSchema as { properties: Record<string, unknown> };
+    expect(setValueSchema.properties.secretKey).toBeUndefined();
+    expect(page.tools.get("get_screenshot")!.description).toContain("latest screenshot published");
 
     const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
     expect(requests).toEqual([{ action: "click", nodeId: "start" }]);
@@ -143,6 +148,39 @@ describe("registerGuaWebMcp", () => {
     await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 0 });
     const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
     expect(JSON.parse(result.content[0]!.text).error.code).toBe("timeout");
+  });
+
+  test("times out stalled semantic tree reads", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => new Promise(() => {}),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+    };
+    await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 0 });
+
+    for (const [name, input] of [
+      ["get_ui_tree", {}],
+      ["wait_for_node", { nodeId: "missing", timeoutMs: 0 }],
+      ["click_node", { nodeId: "start" }],
+    ] as const) {
+      const result = await page.tools.get(name)!.execute(input) as { content: Array<{ text: string }> };
+      expect(JSON.parse(result.content[0]!.text).error.code).toBe("timeout");
+    }
+  });
+
+  test("aborts a stalled screenshot read", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getScreenshot: async () => new Promise(() => {}),
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const controller = new AbortController();
+    const pending = page.tools.get("get_screenshot")!.execute({}, { signal: controller.signal });
+    controller.abort();
+    const result = await pending as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("aborted");
   });
 
   test("keeps registrations and state scoped to each document", async () => {

@@ -1,6 +1,10 @@
 import path from "node:path";
 
-import { guaWebMcpToolDefinitions } from "gua-webmcp";
+import {
+  guaWebMcpToolDefinitions,
+  type GuaToolDefinition,
+  type GuaWebMcpToolName,
+} from "gua-webmcp";
 
 import {
   GuaAutomationManager,
@@ -151,8 +155,8 @@ export const guaMcpTools = [
 
 export type GuaMcpTool = (typeof guaMcpTools)[number];
 
-const tools: McpTool[] = [
-  ...guaWebMcpToolDefinitions,
+export const guaMcpToolDefinitions: readonly McpTool[] = [
+  ...guaWebMcpToolDefinitions.map(toMcpToolDefinition),
   {
     name: "get_logs",
     description: "Read ordered runtime logs from the running game bridge.",
@@ -357,7 +361,7 @@ async function handleRequest(request: JsonRpcRequest, bridge: GuaBridgeClient, a
     case "ping":
       return {};
     case "tools/list":
-      return { tools };
+      return { tools: guaMcpToolDefinitions };
     case "tools/call":
       return callTool(request.params, bridge, automation);
     default:
@@ -1070,6 +1074,34 @@ function objectSchema(
     properties,
     required,
   };
+}
+
+function toMcpToolDefinition(definition: GuaToolDefinition<GuaWebMcpToolName>): McpTool {
+  if (definition.name === "set_value") {
+    return {
+      name: definition.name,
+      description: "Set a semantic UI node value. Sensitive MCP values require secretKey and are redacted from recordings and diagnostics.",
+      inputSchema: {
+        ...objectSchema({
+          nodeId: stringProperty("The target Gua node id."),
+          value: { type: "string", description: "The value to send to the host." },
+          sensitive: { type: "boolean", description: "Redact the value from results, recordings, and diagnostics." },
+          secretKey: stringProperty("Stable secret reference required when sensitive is true; never put plaintext in this field."),
+        }, ["nodeId", "value"]),
+        allOf: [{
+          if: { properties: { sensitive: { const: true } }, required: ["sensitive"] },
+          then: { required: ["secretKey"] },
+        }],
+      },
+    };
+  }
+  if (definition.name === "get_screenshot") {
+    return {
+      ...definition,
+      description: "Read the latest screenshot published by the running game bridge; this does not request a fresh capture.",
+    };
+  }
+  return definition;
 }
 
 function stringProperty(description: string): Record<string, unknown> {

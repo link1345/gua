@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { PNG } from "pngjs";
 
 import { GuaAutomationManager } from "../src/automation";
-import { guaMcpTools, parseClockRunForArguments } from "../src/index";
+import { guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
 
 const roots: string[] = [];
 
@@ -33,6 +33,20 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("get_visual_artifacts");
     expect(guaMcpTools).toContain("clock_pause");
     expect(guaMcpTools).toContain("clock_run_for");
+  });
+
+  test("publishes MCP-specific sensitive value and screenshot contracts", () => {
+    const setValue = guaMcpToolDefinitions.find((tool) => tool.name === "set_value")!;
+    const setValueSchema = setValue.inputSchema as {
+      properties: Record<string, unknown>;
+      allOf: Array<{ then: { required: string[] } }>;
+    };
+    expect(setValueSchema.properties.secretKey).toBeDefined();
+    expect(setValueSchema.allOf[0]?.then.required).toContain("secretKey");
+
+    const screenshot = guaMcpToolDefinitions.find((tool) => tool.name === "get_screenshot")!;
+    expect(screenshot.description).toContain("latest screenshot published");
+    expect(screenshot.description).toContain("does not request a fresh capture");
   });
 
   test("records, redacts, saves, and reloads semantic operations", async () => {

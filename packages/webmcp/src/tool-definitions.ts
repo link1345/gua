@@ -42,7 +42,6 @@ export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolN
       nodeId: stringProperty("The target Gua node id."),
       value: { type: "string", description: "The value to send to the host." },
       sensitive: { type: "boolean", description: "Redact the value from results and diagnostics." },
-      secretKey: stringProperty("Optional stable secret reference; never put plaintext in this field."),
     }, ["nodeId", "value"]),
   },
   {
@@ -90,7 +89,7 @@ export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolN
   },
   {
     name: "get_screenshot",
-    description: "Read an on-demand Gua screenshot from the running game bridge.",
+    description: "Read the latest screenshot published by the running game bridge.",
     inputSchema: objectSchema({}),
   },
 ];

@@ -17,6 +17,7 @@ on:
       - package.json
       - tsconfig.base.json
       - packages/mcp/**
+      - packages/webmcp/**
       - packages/bridge-ws/**
       - native/gua-ws-bridge/**
       - protocol/**

@@ -69,6 +69,8 @@ screenshotツールを登録します。`gui-mcp`もWebSocket接続も不要で�
 ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
 独自のブラウザセッションルーターは持ちません。
 組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
+現在のGodot WebアドオンはデバッグWeb Exportのみ対応しています。リリースExport対応は
+[Issue #75](https://github.com/link1345/gua/issues/75)で追跡しています。
 
 ## Godot 4.7対応
 

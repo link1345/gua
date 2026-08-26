@@ -67,6 +67,8 @@ optional screenshot tool against an engine-owned same-page bridge. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
 custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
+The current Godot Web addon supports debug Web exports only; release export
+support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
 
 ## Godot 4.7 support
 

@@ -2,6 +2,10 @@
 
 This sample uses the Gua Godot GDExtension from GDScript.
 
+The packaged Godot Web GDExtension currently supports debug Web exports only.
+Release Web export support is tracked in
+[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).
+
 ## Opt-in visual capture
 
 `GuaAutoAdapter.capture_viewport_screenshot()` reads the current viewport after a

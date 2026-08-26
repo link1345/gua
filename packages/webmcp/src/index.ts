@@ -156,10 +156,22 @@ async function executeTool(
 ): Promise<unknown> {
   try {
     throwIfAborted(signal);
-    if (name === "get_ui_tree") return toolResult(await bridge.getUiTree());
+    if (name === "get_ui_tree") {
+      return toolResult(await withTimeout(
+        bridge.getUiTree(),
+        defaultTimeoutMs,
+        signal,
+        "Timed out reading the current Gua semantic UI tree.",
+      ));
+    }
     if (name === "get_screenshot") {
       if (!bridge.getScreenshot) throw new GuaWebError("engine_unsupported", "The engine bridge does not support screenshots.");
-      return toolResult(await bridge.getScreenshot());
+      return toolResult(await withTimeout(
+        bridge.getScreenshot(),
+        defaultTimeoutMs,
+        signal,
+        "Timed out reading the latest Gua screenshot.",
+      ));
     }
     if (name === "wait_for_node") {
       const nodeId = requiredString(input, "nodeId");
@@ -167,7 +179,7 @@ async function executeTool(
       return toolResult(await waitForNode(bridge, nodeId, timeoutMs, pollIntervalMs, signal));
     }
     const request = actionRequest(name, input);
-    await validateAction(bridge, request);
+    await validateAction(bridge, request, defaultTimeoutMs, signal);
     throwIfAborted(signal);
     const completion = await withTimeout(
       bridge.performAction(request),
@@ -192,9 +204,20 @@ async function executeTool(
   }
 }
 
-async function validateAction(bridge: GuaBrowserBridge, request: GuaWebActionRequest): Promise<void> {
+async function validateAction(
+  bridge: GuaBrowserBridge,
+  request: GuaWebActionRequest,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   if (request.action === "press_key" && !request.nodeId) return;
-  const node = (await bridge.getUiTree()).nodes.find((candidate) => candidate.id === request.nodeId);
+  const tree = await withTimeout(
+    bridge.getUiTree(),
+    timeoutMs,
+    signal,
+    "Timed out reading the current Gua semantic UI tree before dispatch.",
+  );
+  const node = tree.nodes.find((candidate) => candidate.id === request.nodeId);
   if (!node) throw new GuaWebError("node_not_found", `Gua node not found: ${request.nodeId}`);
   if (!node.visible) throw new GuaWebError("hidden", `Gua node is hidden: ${request.nodeId}`);
   if (!node.enabled) throw new GuaWebError("disabled", `Gua node is disabled: ${request.nodeId}`);
@@ -207,7 +230,14 @@ async function waitForNode(bridge: GuaBrowserBridge, nodeId: string, timeoutMs: 
   const deadline = performance.now() + timeoutMs;
   do {
     throwIfAborted(signal);
-    const node = (await bridge.getUiTree()).nodes.find((candidate) => candidate.id === nodeId);
+    const remainingMs = Math.max(0, deadline - performance.now());
+    const tree = await withTimeout(
+      bridge.getUiTree(),
+      remainingMs,
+      signal,
+      `Timed out waiting for Gua node: ${nodeId}`,
+    );
+    const node = tree.nodes.find((candidate) => candidate.id === nodeId);
     if (node) return node;
     if (performance.now() >= deadline) break;
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - performance.now())), signal);
