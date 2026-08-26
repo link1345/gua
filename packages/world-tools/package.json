@@ -1,0 +1,6 @@
+{
+  "name": "@gua/world-tools", "version": "0.0.0", "private": true, "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "check": "tsc --noEmit", "test": "bun test" },
+  "devDependencies": { "typescript": "^5.5.0" }
+}

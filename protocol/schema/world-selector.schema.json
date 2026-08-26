@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/world-selector.schema.json",
+  "title": "Gua World Object Selector",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "$ref": "selector.schema.json#/$defs/stringCriterion" },
+    "kind": { "$ref": "selector.schema.json#/$defs/stringCriterion" },
+    "label": { "$ref": "selector.schema.json#/$defs/stringCriterion" },
+    "tag": { "$ref": "selector.schema.json#/$defs/stringCriterion" },
+    "scope": {
+      "type": "object", "required": ["parentId"], "additionalProperties": false,
+      "properties": { "parentId": { "type": "string", "minLength": 1 }, "directChild": { "type": "boolean", "default": false } }
+    },
+    "visibleToPlayer": { "type": "boolean" },
+    "active": { "type": "boolean" },
+    "state": {
+      "type": "object", "required": ["key", "value"], "additionalProperties": false,
+      "properties": { "key": { "type": "string", "minLength": 1 }, "value": { "type": ["string", "number", "boolean", "null"] } }
+    }
+  }
+}

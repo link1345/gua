@@ -5,7 +5,7 @@ using Gua.Core;
 
 namespace Gua.Testing.Godot;
 
-public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IDisposable
+public sealed partial class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IGuaWorldContext, IDisposable
 {
     private static readonly TimeSpan MinimumClockPauseResponseTimeout = TimeSpan.FromSeconds(11);
     private readonly Uri _bridgeUri;
@@ -172,7 +172,8 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             status.SessionEpoch, status.FrameSequence, status.Revision, status.NodeCount,
             status.PendingRequestCount, status.InFlightRequestCount, status.UnconsumedEventCount,
             status.LogCount, status.HasScreenshot, ActionOrNull(status.FirstPendingAction),
-            status.FirstPendingNodeId, ActionOrNull(status.FirstEventAction), status.FirstEventNodeId);
+            status.FirstPendingNodeId, ActionOrNull(status.FirstEventAction), status.FirstEventNodeId)
+        { WorldFrameSequence = status.WorldFrameSequence, WorldRevision = status.WorldRevision, WorldObjectCount = status.WorldObjectCount };
     }
 
     public GuaResetReport Reset(GuaResetOptions? options = null)
@@ -184,7 +185,7 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             type = "reset_context",
             expectedSessionEpoch = expectedEpoch,
             flags = (uint)options.Targets,
-            flagsVersion = 1,
+            flagsVersion = 2,
             strict = options.Strict,
         });
         return new GuaResetReport(
@@ -193,7 +194,8 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
             report.DiscardedNodeCount, report.DiscardedPendingRequestCount, report.DiscardedInFlightRequestCount,
             report.DiscardedEventCount, report.DiscardedLogCount, report.DiscardedScreenshot,
             ActionOrNull(report.FirstPendingAction), report.FirstPendingNodeId,
-            ActionOrNull(report.FirstEventAction), report.FirstEventNodeId);
+            ActionOrNull(report.FirstEventAction), report.FirstEventNodeId)
+        { DiscardedWorldObjectCount = report.DiscardedWorldObjectCount };
     }
 
     private static GuaActionType? ActionOrNull(int action) => action == 0 ? null : (GuaActionType)action;
@@ -656,11 +658,12 @@ public sealed class GuaRemoteContext : IGuaContext, IGuaClockContext, IGuaAsyncC
         ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount,
         uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount,
         uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId,
-        int FirstEventAction, string FirstEventNodeId);
+        int FirstEventAction, string FirstEventNodeId, ulong WorldFrameSequence = 0,
+        ulong WorldRevision = 0, uint WorldObjectCount = 0);
     private sealed record ResetReportResult(
         int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount,
         uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount,
         uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount,
         uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId,
-        int FirstEventAction, string FirstEventNodeId);
+        int FirstEventAction, string FirstEventNodeId, uint DiscardedWorldObjectCount = 0);
 }

@@ -32,7 +32,9 @@ request; such a late completion is benign and must not be retried.
 ## Game input adapter API
 
 Publish a complete action-map frame with `PublishGameInputActions`, then enable
-only the initialized `GuaGameInputCapabilities`. Local consumers create a
+only the initialized `GuaGameInputCapabilities` with `EnableGameInput` and a
+shutdown action that synchronously neutralizes every injected host value before
+the native runtime is destroyed. Local consumers create a
 `GuaGameInputSession`; `Dispose` queues owner-scoped neutral cleanup. Adapters
 call `TryConsumeGameInput`, inject the request on the host thread, and then call
 `CompleteGameInput`. Call `TickGameInputLeases` once per host frame with

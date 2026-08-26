@@ -1,4 +1,6 @@
 using TMPro;
+using Gua.Core;
+using Gua.Unity;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -31,5 +33,17 @@ public static class GuaRuntimeUiSample
         document.rootVisualElement.Add(new UnityEngine.UIElements.Label("Toolkit Ready") { name = "toolkit-label" });
         document.rootVisualElement.Add(new UnityEngine.UIElements.Button { name = "toolkit-button", text = "Toolkit Start" });
         document.rootVisualElement.Add(new TextField("Callsign") { name = "toolkit-input", value = "alpha" });
+
+        var doorObject = new GameObject("Door A");
+        doorObject.transform.position = new Vector3(640, 180, 0);
+        var door = doorObject.AddComponent<GuaWorldObject>();
+        door.Id = "door-a";
+        door.Kind = "door";
+        door.Label = "Door A";
+        door.Space = GuaWorldSpace.World2D;
+        door.VisibleToPlayer = true;
+        door.Tags = new[] { "east-corridor", "mission-critical" };
+        door.SetState("open", false);
+        door.SetState("locked", true);
     }
 }

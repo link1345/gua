@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/world-object-tree.schema.json",
+  "title": "Gua World Object Tree",
+  "type": "object",
+  "required": ["schemaVersion", "sessionEpoch", "frameSequence", "revision", "scene", "objects"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
+    "frameSequence": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "scene": { "type": "string", "minLength": 1 },
+    "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } }
+  },
+  "$defs": {
+    "stateValue": { "type": ["string", "number", "boolean", "null"] },
+    "position2d": {
+      "type": "object", "required": ["x", "y"], "additionalProperties": false,
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "position3d": {
+      "type": "object", "required": ["x", "y", "z"], "additionalProperties": false,
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
+    },
+    "object": {
+      "type": "object",
+      "required": ["id", "kind", "label", "space", "position", "visibleToPlayer", "active", "agentExposure", "tags", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parentId": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "space": { "enum": ["world2d", "world3d"] },
+        "position": { "oneOf": [{ "$ref": "#/$defs/position2d" }, { "$ref": "#/$defs/position3d" }] },
+        "visibleToPlayer": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "agentExposure": { "enum": ["auto", "private"] },
+        "domainId": { "type": "string", "minLength": 1 },
+        "relatedUiNodeId": { "type": "string", "minLength": 1 },
+        "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "state": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/stateValue" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "space": { "const": "world2d" } } }, "then": { "properties": { "position": { "$ref": "#/$defs/position2d" } } } },
+        { "if": { "properties": { "space": { "const": "world3d" } } }, "then": { "properties": { "position": { "$ref": "#/$defs/position3d" } } } }
+      ]
+    }
+  }
+}

@@ -41,10 +41,21 @@ public sealed class GuaGameInputSession : IDisposable
 
 public sealed partial class GuaRuntime
 {
-    public void EnableGameInput(GuaGameInputCapabilities capabilities)
+    private Action? gameInputShutdown;
+
+    public void EnableGameInput(GuaGameInputCapabilities capabilities, Action shutdown)
     {
         ThrowIfDisposed();
+        if (shutdown is null) throw new ArgumentNullException(nameof(shutdown));
+        gameInputShutdown = shutdown;
         Native.gua_runtime_set_game_input_capabilities(_handle, (uint)capabilities);
+    }
+
+    internal void ShutdownGameInputHost()
+    {
+        var shutdown = gameInputShutdown;
+        gameInputShutdown = null;
+        shutdown?.Invoke();
     }
 
     public void PublishGameInputActions(string context, IReadOnlyList<GuaGameInputActionDescriptor> actions)

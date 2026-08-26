@@ -107,6 +107,14 @@ workflows and diagrams.
 
 ## MCP and Inspector
 
+### World Object Tree
+
+Gua publishes explicitly opted-in game-world objects separately from the Semantic UI Tree. Each object has a stable ID, semantic kind, 2D or 3D position, host-defined player visibility, tags, and flat primitive state. Godot objects opt in through the `gua_world_object` group plus `gua_world_*` metadata; Unity objects use `GuaWorldObject`. Gua never dumps every scene node or GameObject automatically.
+
+The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=player` in the host process to expose only player-visible, non-private objects. Clients cannot elevate that profile. World v1 is observation-only; MCP exposes `get_world_object_tree`, `find_world_objects`, and `wait_for_world_object`, while Inspector displays a separate World Object Tree panel.
+
+Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
+
 ### Deterministic virtual time
 
 Gua can pause and advance game logic that uses GuaClock as its time source. It
@@ -571,6 +579,9 @@ The MCP tool surface is:
 
 ```text
 get_ui_tree
+get_world_object_tree
+find_world_objects
+wait_for_world_object
 click_node
 focus_node
 set_value
@@ -597,10 +608,10 @@ completion when the connected bridge supports it.
 
 ## Release automation
 
-GitHub Actions publishes runtime artifacts from `main` when a related protocol
-consumer changes. The Inspector, Godot plugin, and ImGui plugin are built
-together and attached to one versioned `gua-v*` GitHub Release. MCP and .NET
-packages continue to use their independent npm and NuGet publishing workflows.
+Pushing a manually created `gua-vX.Y.Z` tag runs the release workflows. The
+Inspector, Godot plugin, and ImGui plugin are built together and attached to the
+matching GitHub Release, while the MCP and .NET packages publish the same
+version to npm and NuGet. Changes pushed to `main` do not publish packages.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gui-mcp` package must be configured on npm with this repository, the
@@ -683,6 +694,16 @@ The adapter resolves the native `GuaContext` class through `ClassDB` on first
 use and verifies that required methods such as `consume_click_request` exist
 before dispatching Inspector click requests. If that check fails, rebuild
 `gua-godot`; the stale vendored DLL is the problem, not the game script.
+
+To publish a world object, opt a `Node2D` or `Node3D` in explicitly:
+
+```gdscript
+$Door.add_to_group(&"gua_world_object")
+$Door.set_meta(&"gua_world_id", "door-a")
+$Door.set_meta(&"gua_world_kind", "door")
+$Door.set_meta(&"gua_world_visible_to_player", true)
+$Door.set_meta(&"gua_world_state", {"locked": true})
+```
 
 Run the GDScript smoke check with:
 

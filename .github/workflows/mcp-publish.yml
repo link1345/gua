@@ -1,28 +1,12 @@
 name: MCP npm Publish
 
 on:
-  workflow_dispatch:
-    inputs:
-      major:
-        description: New major version (major upgrades only; leave empty for an automatic minor release)
-        required: false
-        type: string
   push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/mcp-publish.yml
-      - .github/scripts/next-release-version.ps1
-      - bun.lock
-      - package.json
-      - tsconfig.base.json
-      - packages/mcp/**
-      - packages/bridge-ws/**
-      - native/gua-ws-bridge/**
-      - protocol/**
+    tags:
+      - "gua-v[0-9]*"
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -43,9 +27,7 @@ jobs:
       - name: Determine release version
         id: version
         shell: pwsh
-        env:
-          REQUESTED_MAJOR: ${{ inputs.major }}
-        run: .github/scripts/next-release-version.ps1 -TagPrefix mcp -RequestedMajor $env:REQUESTED_MAJOR
+        run: .github/scripts/release-version-from-tag.ps1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -86,6 +68,13 @@ jobs:
           packageJson.version = process.env.PACKAGE_VERSION;
           delete packageJson.scripts;
           delete packageJson.devDependencies;
+          for (const section of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+            for (const [name, version] of Object.entries(packageJson[section] ?? {})) {
+              if (String(version).startsWith("workspace:")) {
+                throw new Error(`Published gui-mcp manifest retains workspace dependency ${name}@${version}`);
+              }
+            }
+          }
 
           fs.writeFileSync(
             path.join(process.env.PUBLISH_DIR, "package.json"),
@@ -104,9 +93,3 @@ jobs:
         run: |
           cd "${{ steps.prepare.outputs.publish_dir }}"
           npm publish --access public --tag latest
-
-      - name: Record published version
-        shell: pwsh
-        run: |
-          git tag '${{ steps.version.outputs.tag }}' $env:GITHUB_SHA
-          git push origin '${{ steps.version.outputs.tag }}'

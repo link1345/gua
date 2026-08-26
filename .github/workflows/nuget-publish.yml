@@ -1,35 +1,12 @@
 name: NuGet Publish
 
 on:
-  workflow_dispatch:
-    inputs:
-      major:
-        description: New major version (major upgrades only; leave empty for an automatic minor release)
-        required: false
-        type: string
   push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/nuget-publish.yml
-      - .github/scripts/next-release-version.ps1
-      - Directory.Build.props
-      - CMakeLists.txt
-      - CMakePresets.json
-      - bindings/dotnet/src/Gua.Core/**
-      - bindings/dotnet/src/Gua.Testing/**
-      - bindings/dotnet/src/Gua.Testing.Godot/**
-      - bindings/dotnet/src/Gua.Runtime/**
-      - bindings/dotnet/src/Gua.Testing.Unity/**
-      - bindings/dotnet/src/Gua.Testing.Visual/**
-      - bindings/dotnet/src/Gua.Testing.Recording/**
-      - bindings/dotnet/tests/Gua.Visual.Tests/**
-      - native/gua-core/**
-      - native/gua-runtime/**
-      - protocol/**
+    tags:
+      - "gua-v[0-9]*"
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -50,9 +27,7 @@ jobs:
       - name: Determine release version
         id: version
         shell: pwsh
-        env:
-          REQUESTED_MAJOR: ${{ inputs.major }}
-        run: .github/scripts/next-release-version.ps1 -TagPrefix nuget -RequestedMajor $env:REQUESTED_MAJOR
+        run: .github/scripts/release-version-from-tag.ps1
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -159,9 +134,3 @@ jobs:
               --skip-duplicate
           }
           Pop-Location
-
-      - name: Record published version
-        shell: pwsh
-        run: |
-          git tag '${{ steps.version.outputs.tag }}' $env:GITHUB_SHA
-          git push origin '${{ steps.version.outputs.tag }}'

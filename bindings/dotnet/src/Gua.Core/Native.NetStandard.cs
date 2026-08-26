@@ -32,6 +32,12 @@ internal static partial class Native
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern int gua_register_node_v3(nint context, in GuaNativeNodeDescriptorV3 descriptor);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_begin_world_frame(nint context, [MarshalAs(UnmanagedType.LPUTF8Str)] string scene);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_register_world_object_v1(nint context, in GuaNativeWorldObjectDescriptorV1 descriptor);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_end_world_frame(nint context);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_abort_world_frame(nint context);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_query_world_objects_json(nint context, in GuaNativeWorldSelectorV1 selector, int profile, byte* outJson, int outJsonSize);
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern nint gua_get_ui_tree_json(nint context);

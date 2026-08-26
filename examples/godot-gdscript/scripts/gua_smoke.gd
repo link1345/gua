@@ -118,8 +118,9 @@ func _run() -> void:
 	await process_frame
 	var extension := load("res://addons/gua/gua.gdextension")
 	var bare_context: Object = ClassDB.instantiate("GuaContext")
-	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1"):
-		_fail("A bare Godot GuaContext advertised the virtual clock without an adapter pump.")
+	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1") \
+			or bare_context.get_version_json().contains("world_object_tree_v1"):
+		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
 		return
 	bare_context = null
 
@@ -129,6 +130,18 @@ func _run() -> void:
 	if not missing_methods.has("consume_click_request"):
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
 		return
+
+	var door := Node2D.new()
+	door.name = "Door"
+	door.position = Vector2(640, 180)
+	door.add_to_group(&"gua_world_object")
+	door.set_meta(&"gua_world_id", "door-a")
+	door.set_meta(&"gua_world_kind", "door")
+	door.set_meta(&"gua_world_label", "Door A")
+	door.set_meta(&"gua_world_visible_to_player", true)
+	door.set_meta(&"gua_world_tags", ["east-corridor", "mission-critical"])
+	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
+	screen.add_child(door)
 
 	ui.attach(screen)
 	if not ui.configure_game_input_actions("gameplay", [
@@ -144,9 +157,66 @@ func _run() -> void:
 	if not game_input_actions.contains("\"button\"") or not game_input_actions.contains("\"axis1d\"") or not game_input_actions.contains("\"vector2\"") or not game_input_actions.contains("\"text\""):
 		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
 		return
+	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 101, "target": "move", "value_json": "{\"x\":1,\"y\":0}"}) != 0:
+		_fail("Gua smoke could not inject the first owner-scoped semantic value.")
+		return
+	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 202, "target": "move", "value_json": "{\"x\":0,\"y\":1}"}) != 0:
+		_fail("Gua smoke could not inject the second owner-scoped semantic value.")
+		return
+	ui._apply_game_input({"kind": 6, "operation": 10, "owner_id": 101})
+	if ui.get_game_input_action_value("move") != Vector2(0, 1):
+		_fail("Gua smoke released another owner's semantic value: %s" % ui.get_game_input_action_value("move"))
+		return
+	ui._apply_game_input({"kind": 4, "operation": 2, "owner_id": 202, "target": "left_stick_x", "value_json": "1", "device_index": 0})
+	ui._apply_game_input({"kind": 4, "operation": 3, "owner_id": 202, "target": "left_stick_x", "device_index": 0})
+	if not ui.held_gamepad_axes.is_empty():
+		_fail("Gua smoke retained a released gamepad axis.")
+		return
+	ui._apply_game_input({"kind": 6, "operation": 10, "owner_id": 202})
 	if not ui.context.get_version_json().contains("virtual_clock_v1"):
 		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
 		return
+	if not ui.context.get_version_json().contains("world_object_tree_v1"):
+		_fail("GuaAutoAdapter did not enable its pumped World Object Tree capability.")
+		return
+	var world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	var world_door = _find_world_object(world_tree, "door-a")
+	if world_door == null or world_door.get("kind", "") != "door" or world_door.get("space", "") != "world2d" \
+			or float(world_door.get("position", {}).get("x", -1)) != 640.0 or float(world_door.get("position", {}).get("y", -1)) != 180.0 \
+			or not world_door.get("visibleToPlayer", false) or not world_door.get("state", {}).get("locked", false):
+		_fail("Gua Godot adapter did not publish the shared Door fixture: %s" % world_tree)
+		return
+	var world_status: Dictionary = ui.context.get_context_status()
+	if world_status.get("world_frame_sequence", 0) != 1 or world_status.get("world_revision", 0) != 1 \
+			or world_status.get("world_object_count", 0) != 1:
+		_fail("Gua Godot status omitted World Object Tree metadata: %s" % world_status)
+		return
+	door.set_meta(&"gua_world_visible_to_player", "false")
+	ui._publish_world_frame("title")
+	var rejected_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(rejected_world_tree, "door-a") == null \
+			or rejected_world_tree.get("frameSequence", 0) != 1:
+		_fail("Gua accepted malformed world visibility metadata or replaced the prior frame: %s" % rejected_world_tree)
+		return
+	door.set_meta(&"gua_world_visible_to_player", true)
+	ui._publish_world_frame("title")
+	door.set_meta(&"gua_world_id", "")
+	ui._publish_world_frame("title")
+	var missing_id_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(missing_id_world_tree, "door-a") == null \
+			or missing_id_world_tree.get("frameSequence", 0) != 2:
+		_fail("Gua removed an opted-in object with malformed ID metadata: %s" % missing_id_world_tree)
+		return
+	door.set_meta(&"gua_world_id", "door-a")
+	ui._publish_world_frame("title")
+	door.set_meta(&"gua_world_state", {"code": 9007199254740993})
+	ui._publish_world_frame("title")
+	var imprecise_integer_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(imprecise_integer_world_tree, "door-a") == null \
+			or imprecise_integer_world_tree.get("frameSequence", 0) != 3:
+		_fail("Gua accepted a world state integer that loses precision in the C ABI: %s" % imprecise_integer_world_tree)
+		return
+	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
@@ -503,6 +573,10 @@ func _run() -> void:
 	if reset_report.get("result", 0) != 1 or after_reset.get("session_epoch", 0) != before_reset.get("session_epoch", 0) + 1:
 		_fail("Gua reset did not advance the session epoch: %s / %s" % [reset_report, after_reset])
 		return
+	if reset_report.get("discarded_world_object_count", 0) != 1 or after_reset.get("world_object_count", -1) != 0 \
+			or after_reset.get("world_frame_sequence", -1) != 0 or after_reset.get("world_revision", -1) != 0:
+		_fail("Gua Godot reset omitted World Object Tree metadata: %s / %s" % [reset_report, after_reset])
+		return
 	if after_reset.get("frame_sequence", -1) != 0 or after_reset.get("revision", -1) != 0:
 		_fail("Gua reset did not initialize frame/revision metadata: %s" % after_reset)
 		return
@@ -525,6 +599,13 @@ func _find_node(tree: Dictionary, id: String) -> Variant:
 	for node in tree.get("nodes", []):
 		if node.get("id", "") == id:
 			return node
+	return null
+
+
+func _find_world_object(tree: Dictionary, id: String) -> Variant:
+	for object in tree.get("objects", []):
+		if object.get("id", "") == id:
+			return object
 	return null
 
 

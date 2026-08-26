@@ -13,15 +13,24 @@ namespace Gua.Unity
 
 public sealed partial class GuaUnityRuntime
 {
+    private readonly struct OwnedSemanticValue
+    {
+        public OwnedSemanticValue(object? value, long sequence) { Value = value; Sequence = sequence; }
+        public object? Value { get; }
+        public long Sequence { get; }
+    }
+
     private readonly Dictionary<string, object?> gameInputValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<ulong, OwnedSemanticValue>> semanticValuesByOwner = new(StringComparer.Ordinal);
+    private long gameInputSequence;
     public static event Action<string, object?>? GameInputChanged;
 
 #if ENABLE_INPUT_SYSTEM
     private Keyboard? virtualKeyboard;
     private Mouse? virtualMouse;
     private Gamepad? virtualGamepad;
-    private readonly HashSet<ButtonControl> heldButtons = new();
-    private readonly HashSet<AxisControl> heldAxes = new();
+    private readonly Dictionary<ButtonControl, HashSet<ulong>> buttonOwners = new();
+    private readonly Dictionary<AxisControl, Dictionary<ulong, (float Value, long Sequence)>> axisValuesByOwner = new();
 #endif
 
     public static object? GetGameInputValue(string actionId, object? fallback = null) =>
@@ -44,7 +53,7 @@ public sealed partial class GuaUnityRuntime
                 GuaGameInputCapabilities.Gamepad | GuaGameInputCapabilities.Text;
         }
 #endif
-        runtime.EnableGameInput(capabilities);
+        runtime.EnableGameInput(capabilities, DisposeGameInput);
     }
 
     private void PumpGameInput()
@@ -73,22 +82,19 @@ public sealed partial class GuaUnityRuntime
     {
         if (request.Kind == GuaGameInputKind.Cleanup || request.Operation == GuaGameInputOperation.ReleaseAll)
         {
-            ReleaseAllInjectedInput();
+            ReleaseOwnerInjectedInput(request.OwnerId);
             return true;
         }
         if (request.Kind == GuaGameInputKind.Semantic)
         {
             if (request.Operation == GuaGameInputOperation.Press)
             {
-                SetSemantic(request.Target, true);
-                SetSemantic(request.Target, false);
+                PulseSemantic(request.Target, true);
                 return true;
             }
             if (request.Operation == GuaGameInputOperation.Release)
             {
-                object neutral = gameInputValues.TryGetValue(request.Target, out var current) && current is Vector2 ? Vector2.zero :
-                    current is double or float ? 0d : false;
-                SetSemantic(request.Target, neutral);
+                ReleaseSemantic(request.OwnerId, request.Target);
                 return true;
             }
             if (request.Operation != GuaGameInputOperation.Set) return false;
@@ -104,7 +110,8 @@ public sealed partial class GuaUnityRuntime
                     new Vector2(x.GetSingle(), y.GetSingle()),
                 _ => null,
             };
-            SetSemantic(request.Target, value);
+            if (value is string) PulseSemantic(request.Target, value);
+            else SetSemantic(request.OwnerId, request.Target, value);
             return value != null;
         }
 #if ENABLE_INPUT_SYSTEM
@@ -116,13 +123,12 @@ public sealed partial class GuaUnityRuntime
             {
                 InputSystem.QueueDeltaStateEvent(control, 1f);
                 InputSystem.Update();
-                InputSystem.QueueDeltaStateEvent(control, 0f);
+                InputSystem.QueueDeltaStateEvent(control, ButtonIsHeld(control) ? 1f : 0f);
             }
             else
             {
                 var pressed = request.Operation == GuaGameInputOperation.Down;
-                InputSystem.QueueDeltaStateEvent(control, pressed ? 1f : 0f);
-                if (pressed) heldButtons.Add(control); else heldButtons.Remove(control);
+                SetButtonOwner(control, request.OwnerId, pressed);
             }
             return true;
         }
@@ -144,27 +150,31 @@ public sealed partial class GuaUnityRuntime
             var button = PointerButton(request.Target);
             if (button == null) return false;
             var pressed = request.Operation == GuaGameInputOperation.Down;
-            InputSystem.QueueDeltaStateEvent(button, pressed ? 1f : 0f);
-            if (pressed) heldButtons.Add(button); else heldButtons.Remove(button);
+            SetButtonOwner(button, request.OwnerId, pressed);
             return true;
         }
         if (request.Kind == GuaGameInputKind.Gamepad && virtualGamepad != null)
         {
-            if (request.Operation == GuaGameInputOperation.Reset) { ReleaseAllInjectedInput(); return true; }
+            if (request.Operation == GuaGameInputOperation.Reset) { ReleaseOwnerGamepad(request.OwnerId); return true; }
             if (request.Operation == GuaGameInputOperation.Set)
             {
                 var axis = GamepadAxis(request.Target);
                 if (axis == null) return false;
                 using var value = JsonDocument.Parse(request.ValueJson);
-                InputSystem.QueueDeltaStateEvent(axis, value.RootElement.GetSingle());
-                heldAxes.Add(axis);
+                SetAxisOwner(axis, request.OwnerId, value.RootElement.GetSingle());
+                return true;
+            }
+            if (request.Operation == GuaGameInputOperation.Release)
+            {
+                var axis = GamepadAxis(request.Target);
+                if (axis == null) return false;
+                ReleaseAxisOwner(axis, request.OwnerId);
                 return true;
             }
             var button = GamepadButton(request.Target);
             if (button == null) return false;
             var pressed = request.Operation == GuaGameInputOperation.Down;
-            InputSystem.QueueDeltaStateEvent(button, pressed ? 1f : 0f);
-            if (pressed) heldButtons.Add(button); else heldButtons.Remove(button);
+            SetButtonOwner(button, request.OwnerId, pressed);
             return true;
         }
         if (request.Kind == GuaGameInputKind.TextInput && virtualKeyboard != null)
@@ -177,10 +187,41 @@ public sealed partial class GuaUnityRuntime
         return false;
     }
 
-    private void SetSemantic(string actionId, object? value)
+    private static object? NeutralSemantic(object? value) => value is Vector2 ? Vector2.zero : value is double or float ? 0d : value is string ? "" : false;
+
+    private void PublishSemantic(string actionId, object? value)
     {
         gameInputValues[actionId] = value;
         GameInputChanged?.Invoke(actionId, value);
+    }
+
+    private void PulseSemantic(string actionId, object? value)
+    {
+        gameInputValues.TryGetValue(actionId, out var previous);
+        PublishSemantic(actionId, value);
+        PublishSemantic(actionId, previous ?? NeutralSemantic(value));
+    }
+
+    private void SetSemantic(ulong ownerId, string actionId, object? value)
+    {
+        if (!semanticValuesByOwner.TryGetValue(actionId, out var owners))
+            semanticValuesByOwner[actionId] = owners = new();
+        owners[ownerId] = new OwnedSemanticValue(value, ++gameInputSequence);
+        PublishSemantic(actionId, value);
+    }
+
+    private void ReleaseSemantic(ulong ownerId, string actionId)
+    {
+        if (!semanticValuesByOwner.TryGetValue(actionId, out var owners)) return;
+        owners.Remove(ownerId);
+        object? value = null;
+        long sequence = long.MinValue;
+        foreach (var owned in owners.Values)
+            if (owned.Sequence > sequence) { value = owned.Value; sequence = owned.Sequence; }
+        if (owners.Count == 0) semanticValuesByOwner.Remove(actionId);
+        PublishSemantic(actionId, sequence == long.MinValue
+            ? NeutralSemantic(gameInputValues.TryGetValue(actionId, out var current) ? current : null)
+            : value);
     }
 
     private void DisposeGameInput()
@@ -196,13 +237,22 @@ public sealed partial class GuaUnityRuntime
 
     private void ReleaseAllInjectedInput()
     {
-        foreach (var action in new List<string>(gameInputValues.Keys))
-            SetSemantic(action, gameInputValues[action] is Vector2 ? Vector2.zero : gameInputValues[action] is double or float ? 0d : false);
+        semanticValuesByOwner.Clear();
+        foreach (var action in new List<string>(gameInputValues.Keys)) PublishSemantic(action, NeutralSemantic(gameInputValues[action]));
 #if ENABLE_INPUT_SYSTEM
-        foreach (var button in heldButtons) InputSystem.QueueDeltaStateEvent(button, 0f);
-        foreach (var axis in heldAxes) InputSystem.QueueDeltaStateEvent(axis, 0f);
-        heldButtons.Clear(); heldAxes.Clear();
+        foreach (var button in buttonOwners.Keys) InputSystem.QueueDeltaStateEvent(button, 0f);
+        foreach (var axis in axisValuesByOwner.Keys) InputSystem.QueueDeltaStateEvent(axis, 0f);
+        buttonOwners.Clear(); axisValuesByOwner.Clear();
         InputSystem.Update();
+#endif
+    }
+
+    private void ReleaseOwnerInjectedInput(ulong ownerId)
+    {
+        foreach (var action in new List<string>(semanticValuesByOwner.Keys)) ReleaseSemantic(ownerId, action);
+#if ENABLE_INPUT_SYSTEM
+        foreach (var button in new List<ButtonControl>(buttonOwners.Keys)) SetButtonOwner(button, ownerId, false);
+        foreach (var axis in new List<AxisControl>(axisValuesByOwner.Keys)) ReleaseAxisOwner(axis, ownerId);
 #endif
     }
 
@@ -224,7 +274,8 @@ public sealed partial class GuaUnityRuntime
     private AxisControl? GamepadAxis(string name) => name switch
     {
         "left_stick_x" => virtualGamepad?.leftStick.x, "left_stick_y" => virtualGamepad?.leftStick.y,
-        "right_stick_x" => virtualGamepad?.rightStick.x, "right_stick_y" => virtualGamepad?.rightStick.y, _ => null,
+        "right_stick_x" => virtualGamepad?.rightStick.x, "right_stick_y" => virtualGamepad?.rightStick.y,
+        "left_trigger" => virtualGamepad?.leftTrigger, "right_trigger" => virtualGamepad?.rightTrigger, _ => null,
     };
     private ButtonControl? GamepadButton(string name) => name switch
     {
@@ -237,6 +288,44 @@ public sealed partial class GuaUnityRuntime
         "dpad_up" => virtualGamepad?.dpad.up, "dpad_down" => virtualGamepad?.dpad.down,
         "dpad_left" => virtualGamepad?.dpad.left, "dpad_right" => virtualGamepad?.dpad.right, _ => null,
     };
+
+    private bool ButtonIsHeld(ButtonControl button) => buttonOwners.TryGetValue(button, out var owners) && owners.Count != 0;
+
+    private void SetButtonOwner(ButtonControl button, ulong ownerId, bool pressed)
+    {
+        if (!buttonOwners.TryGetValue(button, out var owners)) buttonOwners[button] = owners = new();
+        if (pressed) owners.Add(ownerId); else owners.Remove(ownerId);
+        if (owners.Count == 0) buttonOwners.Remove(button);
+        InputSystem.QueueDeltaStateEvent(button, owners.Count == 0 ? 0f : 1f);
+    }
+
+    private void SetAxisOwner(AxisControl axis, ulong ownerId, float value)
+    {
+        if (!axisValuesByOwner.TryGetValue(axis, out var owners)) axisValuesByOwner[axis] = owners = new();
+        owners[ownerId] = (value, ++gameInputSequence);
+        InputSystem.QueueDeltaStateEvent(axis, value);
+    }
+
+    private void ReleaseAxisOwner(AxisControl axis, ulong ownerId)
+    {
+        if (!axisValuesByOwner.TryGetValue(axis, out var owners)) return;
+        owners.Remove(ownerId);
+        var value = 0f;
+        var sequence = long.MinValue;
+        foreach (var owned in owners.Values)
+            if (owned.Sequence > sequence) { value = owned.Value; sequence = owned.Sequence; }
+        if (owners.Count == 0) axisValuesByOwner.Remove(axis);
+        InputSystem.QueueDeltaStateEvent(axis, value);
+    }
+
+    private void ReleaseOwnerGamepad(ulong ownerId)
+    {
+        if (virtualGamepad == null) return;
+        foreach (var button in new List<ButtonControl>(buttonOwners.Keys))
+            if (button.device == virtualGamepad) SetButtonOwner(button, ownerId, false);
+        foreach (var axis in new List<AxisControl>(axisValuesByOwner.Keys))
+            if (axis.device == virtualGamepad) ReleaseAxisOwner(axis, ownerId);
+    }
 #endif
 }
 

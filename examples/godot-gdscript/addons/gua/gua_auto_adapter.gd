@@ -7,7 +7,7 @@ signal game_input_action_changed(action_id: String, value: Variant)
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
 const RESET_CLOCK_FLAG := 1 << 6
-const RESET_DEFAULT_FLAGS := 79
+const RESET_DEFAULT_FLAGS := 207
 const CLOCK_CALLBACK_LIMIT := 1000000
 const CONTEXT_CLASS := "GuaContext"
 const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
@@ -47,6 +47,12 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_game_input_request",
 	"complete_game_input_request",
 	"tick_game_input_leases",
+	"begin_world_frame",
+	"register_world_object",
+	"end_world_frame",
+	"abort_world_frame",
+	"get_world_object_tree_json",
+	"enable_world_object_tree_adapter",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -73,10 +79,12 @@ var clock_run_callbacks_remaining := CLOCK_CALLBACK_LIMIT
 var clock_run_generation := -1
 var clock_execution_limit_reached := false
 var game_input_values: Dictionary = {}
+var semantic_values_by_owner: Dictionary = {}
 var held_physical_keys: Dictionary = {}
 var held_pointer_buttons: Dictionary = {}
 var held_gamepad_buttons: Dictionary = {}
 var held_gamepad_axes: Dictionary = {}
+var game_input_sequence := 0
 var raw_input_enabled := false
 var last_game_input_ticks_ms := Time.get_ticks_msec()
 
@@ -86,6 +94,11 @@ func attach(root_control: Control) -> void:
 	last_clock_ticks_ms = Time.get_ticks_msec()
 	last_game_input_ticks_ms = last_clock_ticks_ms
 	_ensure_context()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_release_all_injected_inputs()
 
 
 func update(screen: String) -> void:
@@ -141,6 +154,7 @@ func update(screen: String) -> void:
 	controls_by_id.clear()
 	_collect_control(root, "")
 	context.end_frame()
+	_publish_world_frame(screen)
 	_dispatch_click_requests()
 	_dispatch_action_requests()
 	_dispatch_game_input_requests()
@@ -166,6 +180,70 @@ func enable_raw_input() -> bool:
 
 func get_game_input_action_value(action_id: String, fallback: Variant = null) -> Variant:
 	return game_input_values.get(action_id, fallback)
+
+
+func _publish_world_frame(scene: String) -> void:
+	if root == null or root.get_tree() == null or not context.begin_world_frame(scene):
+		return
+	var objects := root.get_tree().get_nodes_in_group(&"gua_world_object")
+	objects.sort_custom(func(a: Node, b: Node) -> bool: return str(a.get_path()) < str(b.get_path()))
+	for node: Node in objects:
+		if not (node is Node2D or node is Node3D):
+			continue
+		if not node.has_meta(&"gua_world_id"):
+			push_error("Gua world object requires gua_world_id metadata: %s" % node.get_path())
+			context.abort_world_frame()
+			return
+		var object_id := str(node.get_meta(&"gua_world_id", ""))
+		if object_id.is_empty():
+			push_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path())
+			context.abort_world_frame()
+			return
+		var parent_id := ""
+		var ancestor := node.get_parent()
+		while ancestor != null:
+			if ancestor.is_in_group(&"gua_world_object") and ancestor.has_meta(&"gua_world_id"):
+				var candidate_parent_id := str(ancestor.get_meta(&"gua_world_id", ""))
+				if not candidate_parent_id.is_empty():
+					parent_id = candidate_parent_id
+					break
+			ancestor = ancestor.get_parent()
+		var position := Vector3.ZERO
+		var space := "world2d"
+		if node is Node3D:
+			position = (node as Node3D).global_position
+			space = "world3d"
+		else:
+			var position_2d := (node as Node2D).global_position
+			position = Vector3(position_2d.x, position_2d.y, 0.0)
+		var visible_to_player = node.get_meta(&"gua_world_visible_to_player", false)
+		var active = node.get_meta(&"gua_world_active", true)
+		if typeof(visible_to_player) != TYPE_BOOL or typeof(active) != TYPE_BOOL:
+			push_error("Gua world visibility/active metadata must be boolean: %s" % object_id)
+			context.abort_world_frame()
+			return
+		var descriptor := {
+			"id": object_id,
+			"parent_id": parent_id,
+			"kind": str(node.get_meta(&"gua_world_kind", "object")),
+			"label": str(node.get_meta(&"gua_world_label", node.name)),
+			"description": str(node.get_meta(&"gua_world_description", "")),
+			"space": space,
+			"position": position,
+			"visible_to_player": visible_to_player,
+			"active": active,
+			"agent_exposure": str(node.get_meta(&"gua_world_agent_exposure", "auto")),
+			"tags": node.get_meta(&"gua_world_tags", []),
+			"state": node.get_meta(&"gua_world_state", {}),
+			"domain_id": str(node.get_meta(&"gua_world_domain_id", "")),
+			"related_ui_node_id": str(node.get_meta(&"gua_world_related_ui_node_id", "")),
+		}
+		if not context.register_world_object(descriptor):
+			push_error("Failed to register Gua world object: %s" % object_id)
+			context.abort_world_frame()
+			return
+	if not context.end_world_frame():
+		push_error("Gua world frame was rejected")
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
@@ -477,6 +555,7 @@ func _ensure_context() -> bool:
 		return false
 
 	context.enable_virtual_clock_adapter()
+	context.enable_world_object_tree_adapter()
 
 	return true
 
@@ -767,21 +846,23 @@ func _apply_game_input(request: Dictionary) -> int:
 	var kind := int(request.get("kind", 0))
 	var operation := int(request.get("operation", 0))
 	var target := str(request.get("target", ""))
+	var owner_id := int(request.get("owner_id", 0))
 	if kind == 6 or operation == 10:
-		_release_all_injected_inputs()
+		_release_owner_injected_inputs(owner_id)
 		return 0
 	if kind == 1:
 		var value = JSON.parse_string(str(request.get("value_json", "null")))
 		if operation == 1:
-			_set_semantic_input(target, true)
-			_set_semantic_input(target, false)
+			_pulse_semantic_input(target, true)
 		elif operation == 2:
 			if value is Dictionary and value.has("x") and value.has("y"):
 				value = Vector2(float(value.x), float(value.y))
-			_set_semantic_input(target, value)
+			if value is String:
+				_pulse_semantic_input(target, value)
+			else:
+				_set_semantic_input_owner(owner_id, target, value)
 		elif operation == 3:
-			var current = game_input_values.get(target, false)
-			_set_semantic_input(target, Vector2.ZERO if current is Vector2 else (0.0 if current is float else false))
+			_release_semantic_input_owner(owner_id, target)
 		else:
 			return -4
 		return 0
@@ -791,13 +872,13 @@ func _apply_game_input(request: Dictionary) -> int:
 			return -6
 		if operation == 1:
 			_inject_key(keycode, true)
-			_inject_key(keycode, false)
+			_inject_key(keycode, _has_physical_key_holder(target))
 		elif operation == 4:
-			held_physical_keys[target] = keycode
+			held_physical_keys["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "keycode": keycode}
 			_inject_key(keycode, true)
 		elif operation in [3, 5]:
-			held_physical_keys.erase(target)
-			_inject_key(keycode, false)
+			held_physical_keys.erase("%d:%s" % [owner_id, target])
+			_inject_key(keycode, _has_physical_key_holder(target))
 		else:
 			return -4
 		return 0
@@ -828,31 +909,35 @@ func _apply_game_input(request: Dictionary) -> int:
 		if operation not in [3, 4, 5]:
 			return -4
 		if pressed:
-			held_pointer_buttons[target] = button
+			held_pointer_buttons["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "button": button}
 		else:
-			held_pointer_buttons.erase(target)
+			held_pointer_buttons.erase("%d:%s" % [owner_id, target])
 		var mouse := InputEventMouseButton.new()
 		mouse.button_index = button
-		mouse.pressed = pressed
+		mouse.pressed = _has_pointer_button_holder(target)
 		Input.parse_input_event(mouse)
 		return 0
 	if kind == 4:
 		var device := int(request.get("device_index", 0))
 		if operation == 9:
-			_release_gamepad(device)
+			_release_owner_gamepad(owner_id, device)
 			return 0
 		if operation == 2:
 			var axis := _gamepad_axis(target)
 			if axis < 0:
 				return -6
 			var value := clampf(float(JSON.parse_string(str(request.get("value_json", "0")))), -1.0, 1.0)
-			var axis_key := "%d:%s" % [device, target]
-			held_gamepad_axes[axis_key] = {"device": device, "axis": axis}
+			game_input_sequence += 1
+			var axis_key := "%d:%d:%s" % [owner_id, device, target]
+			held_gamepad_axes[axis_key] = {"owner": owner_id, "device": device, "target": target, "axis": axis, "value": value, "sequence": game_input_sequence}
 			var motion := InputEventJoypadMotion.new()
 			motion.device = device
 			motion.axis = axis
 			motion.axis_value = value
 			Input.parse_input_event(motion)
+			return 0
+		if operation == 3 and _gamepad_axis(target) >= 0:
+			_release_owner_gamepad_axis(owner_id, device, target)
 			return 0
 		var button_index := _gamepad_button(target)
 		if button_index < 0:
@@ -860,15 +945,15 @@ func _apply_game_input(request: Dictionary) -> int:
 		var pressed := operation == 4
 		if operation not in [3, 4, 5]:
 			return -4
-		var button_key := "%d:%s" % [device, target]
+		var button_key := "%d:%d:%s" % [owner_id, device, target]
 		if pressed:
-			held_gamepad_buttons[button_key] = {"device": device, "button": button_index}
+			held_gamepad_buttons[button_key] = {"owner": owner_id, "device": device, "target": target, "button": button_index}
 		else:
 			held_gamepad_buttons.erase(button_key)
 		var joy := InputEventJoypadButton.new()
 		joy.device = device
 		joy.button_index = button_index
-		joy.pressed = pressed
+		joy.pressed = _has_gamepad_button_holder(device, target)
 		Input.parse_input_event(joy)
 		return 0
 	if kind == 5:
@@ -889,12 +974,74 @@ func _set_semantic_input(action_id: String, value: Variant) -> void:
 	game_input_action_changed.emit(action_id, value)
 
 
+func _neutral_semantic_input(value: Variant) -> Variant:
+	if value is Vector2:
+		return Vector2.ZERO
+	if value is float or value is int:
+		return 0.0
+	if value is String:
+		return ""
+	return false
+
+
+func _pulse_semantic_input(action_id: String, value: Variant) -> void:
+	var previous = game_input_values.get(action_id, _neutral_semantic_input(value))
+	_set_semantic_input(action_id, value)
+	_set_semantic_input(action_id, previous)
+
+
+func _set_semantic_input_owner(owner_id: int, action_id: String, value: Variant) -> void:
+	if not semantic_values_by_owner.has(action_id):
+		semantic_values_by_owner[action_id] = {}
+	game_input_sequence += 1
+	var owners: Dictionary = semantic_values_by_owner[action_id]
+	owners[owner_id] = {"value": value, "sequence": game_input_sequence}
+	_set_semantic_input(action_id, value)
+
+
+func _release_semantic_input_owner(owner_id: int, action_id: String) -> void:
+	if not semantic_values_by_owner.has(action_id):
+		return
+	var owners: Dictionary = semantic_values_by_owner[action_id]
+	owners.erase(owner_id)
+	var sequence := -1
+	var value = _neutral_semantic_input(game_input_values.get(action_id, false))
+	for owned in owners.values():
+		if int(owned.get("sequence", -1)) > sequence:
+			sequence = int(owned.get("sequence", -1))
+			value = owned.get("value")
+	if owners.is_empty():
+		semantic_values_by_owner.erase(action_id)
+	_set_semantic_input(action_id, value)
+
+
 func _inject_key(keycode: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()
 	event.physical_keycode = keycode
 	event.keycode = keycode
 	event.pressed = pressed
 	Input.parse_input_event(event)
+
+
+func _has_physical_key_holder(target: String) -> bool:
+	for held in held_physical_keys.values():
+		if str(held.get("target", "")) == target:
+			return true
+	return false
+
+
+func _has_pointer_button_holder(target: String) -> bool:
+	for held in held_pointer_buttons.values():
+		if str(held.get("target", "")) == target:
+			return true
+	return false
+
+
+func _has_gamepad_button_holder(device: int, target: String) -> bool:
+	for held in held_gamepad_buttons.values():
+		if int(held.get("device", -1)) == device and str(held.get("target", "")) == target:
+			return true
+	return false
 
 
 func _keycode_from_w3c(code: String) -> Key:
@@ -927,7 +1074,7 @@ func _gamepad_button(name: String) -> int:
 
 
 func _gamepad_axis(name: String) -> int:
-	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"].find(name)
+	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y", "left_trigger", "right_trigger"].find(name)
 
 
 func _release_gamepad(device: int) -> void:
@@ -953,21 +1100,87 @@ func _release_gamepad(device: int) -> void:
 		held_gamepad_axes.erase(key)
 
 
-func _release_all_injected_inputs() -> void:
-	for key in held_physical_keys.values():
-		_inject_key(key, false)
-	held_physical_keys.clear()
-	for button in held_pointer_buttons.values():
+func _release_owner_gamepad_axis(owner_id: int, device: int, target: String) -> void:
+	held_gamepad_axes.erase("%d:%d:%s" % [owner_id, device, target])
+	var selected_value := 0.0
+	var selected_sequence := -1
+	var axis := _gamepad_axis(target)
+	for held in held_gamepad_axes.values():
+		if int(held.get("device", -1)) != device or str(held.get("target", "")) != target:
+			continue
+		if int(held.get("sequence", -1)) > selected_sequence:
+			selected_sequence = int(held.get("sequence", -1))
+			selected_value = float(held.get("value", 0.0))
+	var event := InputEventJoypadMotion.new()
+	event.device = device
+	event.axis = axis
+	event.axis_value = selected_value
+	Input.parse_input_event(event)
+
+
+func _release_owner_gamepad(owner_id: int, device: int) -> void:
+	for key in held_gamepad_buttons.keys():
+		var held: Dictionary = held_gamepad_buttons[key]
+		if int(held.get("owner", 0)) != owner_id or int(held.get("device", -1)) != device:
+			continue
+		var target := str(held.get("target", ""))
+		var button := int(held.get("button", -1))
+		held_gamepad_buttons.erase(key)
+		var event := InputEventJoypadButton.new()
+		event.device = device
+		event.button_index = button
+		event.pressed = _has_gamepad_button_holder(device, target)
+		Input.parse_input_event(event)
+	for key in held_gamepad_axes.keys():
+		var held: Dictionary = held_gamepad_axes[key]
+		if int(held.get("owner", 0)) == owner_id and int(held.get("device", -1)) == device:
+			_release_owner_gamepad_axis(owner_id, device, str(held.get("target", "")))
+
+
+func _release_owner_injected_inputs(owner_id: int) -> void:
+	for key in held_physical_keys.keys():
+		var held: Dictionary = held_physical_keys[key]
+		if int(held.get("owner", 0)) != owner_id:
+			continue
+		var target := str(held.get("target", ""))
+		var keycode: Key = int(held.get("keycode", KEY_NONE))
+		held_physical_keys.erase(key)
+		_inject_key(keycode, _has_physical_key_holder(target))
+	for key in held_pointer_buttons.keys():
+		var held: Dictionary = held_pointer_buttons[key]
+		if int(held.get("owner", 0)) != owner_id:
+			continue
+		var target := str(held.get("target", ""))
+		var button: MouseButton = int(held.get("button", MOUSE_BUTTON_NONE))
+		held_pointer_buttons.erase(key)
 		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = _has_pointer_button_holder(target)
+		Input.parse_input_event(event)
+	for device in range(4):
+		_release_owner_gamepad(owner_id, device)
+	for action_id in semantic_values_by_owner.keys():
+		_release_semantic_input_owner(owner_id, str(action_id))
+
+
+func _release_all_injected_inputs() -> void:
+	for held in held_physical_keys.values():
+		var keycode: Key = int(held.get("keycode", KEY_NONE))
+		_inject_key(keycode, false)
+	held_physical_keys.clear()
+	for held in held_pointer_buttons.values():
+		var event := InputEventMouseButton.new()
+		var button: MouseButton = int(held.get("button", MOUSE_BUTTON_NONE))
 		event.button_index = button
 		event.pressed = false
 		Input.parse_input_event(event)
 	held_pointer_buttons.clear()
 	for device in range(4):
 		_release_gamepad(device)
+	semantic_values_by_owner.clear()
 	for action_id in game_input_values.keys():
 		var current = game_input_values[action_id]
-		_set_semantic_input(action_id, Vector2.ZERO if current is Vector2 else (0.0 if current is float else false))
+		_set_semantic_input(action_id, _neutral_semantic_input(current))
 
 
 func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
