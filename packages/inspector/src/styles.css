@@ -114,20 +114,9 @@ button:disabled {
   display: grid;
   gap: 1px;
   grid-template-columns: minmax(240px, 0.85fr) minmax(300px, 1fr) minmax(380px, 1.35fr);
-  grid-template-areas:
-    "tree detail screenshot"
-    "world world clock"
-    "logs logs logs"
-    "automation automation automation";
-  grid-template-rows: minmax(360px, calc(100vh - 230px)) minmax(220px, auto) 181px auto;
+  grid-template-rows: minmax(360px, calc(100vh - 230px)) 181px;
   min-height: calc(100vh - 48px);
 }
-
-.gua-tree-panel { grid-area: tree; }
-.gua-world-panel { grid-area: world; }
-.gua-detail-panel { grid-area: detail; }
-.gua-screenshot-panel { grid-area: screenshot; }
-.gua-clock-panel { grid-area: clock; }
 
 .gua-panel {
   background: #171c22;
@@ -313,11 +302,11 @@ button:disabled {
 }
 
 .gua-log-panel {
-  grid-area: logs;
+  grid-column: 1 / -1;
 }
 
 .gua-automation-panel {
-  grid-area: automation;
+  grid-column: 1 / -1;
 }
 
 .gua-automation-grid {

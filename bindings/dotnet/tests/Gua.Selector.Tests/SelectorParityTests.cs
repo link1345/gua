@@ -17,268 +17,6 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
-    public void WorldObjectTreePublishesQueriesProjectsAndResetsIndependently()
-    {
-        using var context = new GuaContext();
-        context.BeginWorldFrame("corridor");
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
-            new GuaWorldPosition(640, 180), VisibleToPlayer: true, Tags: ["east-corridor"],
-            State: new Dictionary<string, object?> { ["open"] = false, ["locked"] = true }));
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World3D,
-            new GuaWorldPosition(1, 2, 3), VisibleToPlayer: true, ParentId: "door-a", AgentExposure: GuaAgentExposure.Private));
-        context.EndWorldFrame();
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(2));
-            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
-            Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Id: "secret"), GuaObservationProfile.Player).Matches, Is.Empty);
-            Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Kind: "door")).Matches.Single().State["locked"].GetBoolean(), Is.True);
-            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(2));
-        });
-
-        var reset = context.Reset();
-        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(2));
-        Assert.That(context.GetWorldObjectTree().Objects, Is.Empty);
-    }
-
-    [Test]
-    public async Task RemoteWorldObjectTreeKeepsTheHostPlayerProfileAndStateSelector()
-    {
-        var port = ReservePort();
-        using var runtime = new GuaRuntime();
-        runtime.EnableWorldObjectTreeAdapter();
-        runtime.SetObservationProfile(GuaObservationProfile.Player);
-        runtime.BeginWorldFrame("corridor");
-        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
-            new GuaWorldPosition(640, 180), VisibleToPlayer: true,
-            State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
-        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
-            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
-        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
-            new GuaWorldPosition(2, 2), VisibleToPlayer: false));
-        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
-            new GuaWorldPosition(3, 3), VisibleToPlayer: true, ParentId: "hidden-parent"));
-        runtime.EndWorldFrame();
-        Assert.That(runtime.StartInspectorBridge(port), Is.True);
-        try
-        {
-            Assert.Throws<InvalidOperationException>(() => runtime.SetObservationProfile(GuaObservationProfile.Debug));
-            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
-            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
-            Assert.That(remote.GetWorldObjectTree(GuaObservationProfile.Debug).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }),
-                "A transport argument must not elevate the host-fixed player profile.");
-            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "secret")).Matches, Is.Empty);
-            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "hidden-child")).Matches, Is.Empty);
-            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))).Matches.Single().Id, Is.EqualTo("door-a"));
-            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("priority", (byte)7))).Matches.Single().Id, Is.EqualTo("door-a"));
-            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("code", ""))).Matches.Single().Id, Is.EqualTo("door-a"));
-            Assert.Throws<ArgumentException>(() => remote.QueryWorldObjects(
-                new GuaWorldSelector(State: new GuaWorldStateCriterion("code", 9_007_199_254_740_993UL))));
-            using (var godotRemote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2)))
-                Assert.Throws<ArgumentException>(() => godotRemote.QueryWorldObjects(
-                    new GuaWorldSelector(State: new GuaWorldStateCriterion("code", 9_007_199_254_740_993UL))));
-            foreach (var invalid in new[] {
-                new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
-                new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: ""), new GuaWorldSelector(DirectChild: true) })
-                Assert.Throws<InvalidOperationException>(() => remote.QueryWorldObjects(invalid));
-            using (var malformed = new ClientWebSocket())
-            {
-                await malformed.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
-                foreach (var command in new[] {
-                    "{\"id\":101,\"type\":\"query_world_objects\",\"visibleToPlayer\":null}",
-                    "{\"id\":102,\"type\":\"query_world_objects\",\"visibleToPlayer\":\"true\"}",
-                    "{\"id\":103,\"type\":\"query_world_objects\",\"active\":null}",
-                    "{\"id\":104,\"type\":\"query_world_objects\",\"active\":\"true\"}",
-                    "{\"id\":105,\"type\":\"query_world_objects\",\"knd\":\"door\"}" })
-                    Assert.That((await SendRawCommandAsync(malformed, command)).GetProperty("ok").GetBoolean(), Is.False);
-            }
-            Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
-            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
-            Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1));
-
-            runtime.BeginWorldFrame("corridor");
-            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
-                new GuaWorldPosition(640, 180), VisibleToPlayer: true,
-                State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
-            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
-                new GuaWorldPosition(99, 99), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
-            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
-                new GuaWorldPosition(22, 22), VisibleToPlayer: false));
-            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
-                new GuaWorldPosition(33, 33), VisibleToPlayer: true, ParentId: "hidden-parent"));
-            runtime.EndWorldFrame();
-            Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1), "Hidden-only changes must not alter player diagnostics.");
-            Assert.That(remote.GetWorldObjectTree().Revision, Is.EqualTo(1));
-            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(1));
-        }
-        finally
-        {
-            runtime.StopInspectorBridge();
-        }
-    }
-
-    [Test]
-    public void RemotePlayerCountsIgnoreIdKeysInsideObjectState()
-    {
-        var port = ReservePort();
-        using var runtime = new GuaRuntime();
-        runtime.EnableWorldObjectTreeAdapter();
-        runtime.SetObservationProfile(GuaObservationProfile.Player);
-        runtime.BeginWorldFrame("count");
-        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("marker", "item", "Marker", GuaWorldSpace.World2D,
-            new GuaWorldPosition(1, 2), VisibleToPlayer: true, State: new Dictionary<string, object?> { ["id"] = "state-id" }));
-        runtime.EndWorldFrame();
-        Assert.That(runtime.StartInspectorBridge(port), Is.True);
-        try
-        {
-            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
-            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
-            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
-            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(1));
-        }
-        finally
-        {
-            runtime.StopInspectorBridge();
-        }
-    }
-
-    [Test]
-    public void DisabledRuntimeReturnsASchemaValidEmptyWorldTreeAtTheCurrentEpoch()
-    {
-        var port = ReservePort();
-        using var runtime = new GuaRuntime();
-        var tree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
-        Assert.Multiple(() => { Assert.That(tree.Scene, Is.EqualTo("unsupported")); Assert.That(tree.Objects, Is.Empty); });
-        Assert.That(runtime.StartInspectorBridge(port), Is.True);
-        try
-        {
-            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
-            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
-            var reset = remote.Reset();
-            Assert.That(remote.GetWorldObjectTree().SessionEpoch, Is.EqualTo(reset.SessionEpoch));
-            var localTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
-            Assert.That(localTree.SessionEpoch, Is.EqualTo(reset.SessionEpoch));
-        }
-        finally
-        {
-            runtime.StopInspectorBridge();
-        }
-    }
-
-    [Test]
-    public async Task PublishedSnapshotsKeepUiAndWorldTreesInOneEpochDuringReset()
-    {
-        var port = ReservePort();
-        var runtime = Native.gua_runtime_create();
-        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
-        try
-        {
-            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
-            using var notifications = new ClientWebSocket();
-            using var commands = new ClientWebSocket();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await notifications.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), timeout.Token);
-            await commands.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), timeout.Token);
-            await Task.Delay(20, timeout.Token);
-            ulong epoch = 1;
-            for (var index = 1; index <= 25; index++)
-            {
-                var reset = SendRawCommandAsync(commands,
-                    $$"""{"id":{{index}},"type":"reset_context","expectedSessionEpoch":{{epoch}},"flags":0,"flagsVersion":2,"strict":false}""");
-                await Task.Yield();
-                Native.gua_runtime_publish_inspector_snapshot(runtime);
-                var snapshot = await ReceiveSnapshotAsync(notifications, timeout.Token);
-                var uiEpoch = snapshot.GetProperty("uiTree").GetProperty("sessionEpoch").GetUInt64();
-                var worldEpoch = snapshot.GetProperty("worldObjectTree").GetProperty("sessionEpoch").GetUInt64();
-                Assert.That(worldEpoch, Is.EqualTo(uiEpoch));
-                var resetResponse = await reset;
-                epoch = resetResponse.GetProperty("result").GetProperty("sessionEpoch").GetUInt64();
-            }
-        }
-        finally
-        {
-            Native.gua_runtime_stop_inspector_bridge(runtime);
-            Native.gua_runtime_destroy(runtime);
-        }
-    }
-
-    [Test]
-    public void InvalidWorldDescriptorCanBeAbortedWithoutReplacingTheSnapshot()
-    {
-        using var context = new GuaContext();
-        context.BeginWorldFrame("stable");
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
-        context.EndWorldFrame();
-        context.BeginWorldFrame("invalid");
-        Assert.Throws<ArgumentException>(() => context.RegisterWorldObject(new GuaWorldObjectDescriptor("bad", "item", "Bad", GuaWorldSpace.World2D,
-            new GuaWorldPosition(0, 0), Tags: ["allocated"], State: new Dictionary<string, object?> { ["first"] = "allocated", ["bad"] = new object() })));
-        context.AbortWorldFrame();
-        Assert.That(context.GetWorldObjectTree().Objects.Single().Id, Is.EqualTo("door"));
-    }
-
-    [Test]
-    public void InvalidWorldSelectorStopsWaitingImmediately()
-    {
-        using var context = new GuaContext();
-        context.BeginWorldFrame("selector");
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
-        context.EndWorldFrame();
-        Assert.ThrowsAsync<ArgumentException>(async () => await context.WaitForWorldObjectAsync(
-            new GuaWorldSelector(Label: "[", LabelMatch: GuaMatchMode.Regex), TimeSpan.FromSeconds(5)));
-    }
-
-    [Test]
-    public void LocalWorldSelectorsRejectEmptyStringCriteria()
-    {
-        using var context = new GuaContext();
-        context.BeginWorldFrame("selector");
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
-        context.EndWorldFrame();
-
-        foreach (var invalid in new[] {
-            new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
-            new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: "") })
-            Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(invalid));
-    }
-
-    [Test]
-    public void ManagedWorldStateRejectsNumbersThatAliasInTheDoubleAbi()
-    {
-        const ulong imprecise = 9_007_199_254_740_993UL;
-        using var context = new GuaContext();
-        context.BeginWorldFrame("precision");
-        Assert.Throws<ArgumentException>(() => context.RegisterWorldObject(new GuaWorldObjectDescriptor(
-            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
-            State: new Dictionary<string, object?> { ["code"] = imprecise })));
-        context.AbortWorldFrame();
-        Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(
-            new GuaWorldSelector(State: new GuaWorldStateCriterion("code", imprecise))));
-        context.BeginWorldFrame("precision");
-        context.RegisterWorldObject(new GuaWorldObjectDescriptor(
-            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
-            State: new Dictionary<string, object?> { ["code"] = 9_007_199_254_740_992UL }));
-        context.EndWorldFrame();
-        Assert.That(context.GetWorldObjectTree().Objects.Single().State["code"].GetDouble(), Is.EqualTo(9_007_199_254_740_992d));
-        Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(
-            new GuaWorldSelector(State: new GuaWorldStateCriterion("decimal", 0.10000000000000001m))));
-
-        using var runtime = new GuaRuntime();
-        runtime.BeginWorldFrame("precision");
-        Assert.Throws<ArgumentException>(() => runtime.RegisterWorldObject(new GuaWorldObjectDescriptor(
-            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
-            State: new Dictionary<string, object?> { ["code"] = imprecise })));
-        runtime.AbortWorldFrame();
-    }
-
-    [Test]
-    public async Task RemoteWorldWaitsHonorCancellationWhileThePeerWithholdsAResponse()
-    {
-        await AssertRemoteWorldWaitCancellation((url, timeout) => new GuaWebSocketContext(url, timeout));
-        await AssertRemoteWorldWaitCancellation((url, timeout) => new GuaRemoteContext(url, timeout));
-    }
-
-    [Test]
     public void LocalClockControlsDrainTheContextsOwnedClock()
     {
         using var context = new GuaContext();
@@ -315,11 +53,9 @@ public sealed class SelectorParityTests
             Assert.That(resetStatus.DefaultStepMilliseconds, Is.EqualTo(1000.0 / 60.0));
             Assert.That(captured.IsAlive, Is.False, "Clock reset must release stale callback closures immediately.");
             Assert.That((uint)GuaResetTargets.Default, Is.EqualTo(15));
-            Assert.That((uint)GuaResetTargets.LegacySessionDefault, Is.EqualTo(79));
-            Assert.That((uint)GuaResetTargets.SessionDefault, Is.EqualTo(207));
+            Assert.That((uint)GuaResetTargets.SessionDefault, Is.EqualTo(79));
             Assert.That((uint)GuaResetTargets.All, Is.EqualTo(63));
             Assert.That((uint)GuaResetTargets.AllWithClock, Is.EqualTo(127));
-            Assert.That((uint)GuaResetTargets.AllCurrent, Is.EqualTo(255));
         });
 
         clock.Install(step: TimeSpan.FromMilliseconds(10));
@@ -1283,62 +1019,6 @@ public sealed class SelectorParityTests
         return port;
     }
 
-    private static async Task AssertRemoteWorldWaitCancellation(Func<string, TimeSpan, IGuaWorldContext> createContext)
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        using var serverCancellation = new CancellationTokenSource();
-        var server = RunSilentWebSocketServer(listener, serverCancellation.Token);
-        try
-        {
-            using var context = (IDisposable)createContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(5));
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-            var stopwatch = Stopwatch.StartNew();
-            Assert.That(async () => await ((IGuaWorldContext)context).WaitForWorldObjectAsync(
-                new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(5), cancellationToken: cancellation.Token),
-                Throws.InstanceOf<OperationCanceledException>());
-            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(1)));
-        }
-        finally
-        {
-            serverCancellation.Cancel();
-            listener.Stop();
-            await server;
-        }
-    }
-
-    private static async Task RunSilentWebSocketServer(TcpListener listener, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var client = await listener.AcceptTcpClientAsync(cancellationToken);
-            await using var stream = client.GetStream();
-            var header = new MemoryStream();
-            var oneByte = new byte[1];
-            while (header.Length < 16 * 1024)
-            {
-                if (await stream.ReadAsync(oneByte, cancellationToken) == 0) return;
-                header.WriteByte(oneByte[0]);
-                var bytes = header.GetBuffer();
-                var length = (int)header.Length;
-                if (length >= 4 && bytes[length - 4] == '\r' && bytes[length - 3] == '\n' && bytes[length - 2] == '\r' && bytes[length - 1] == '\n') break;
-            }
-            var request = Encoding.ASCII.GetString(header.ToArray());
-            var key = request.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
-                .Single(line => line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase))
-                .Split(':', 2)[1].Trim();
-            var accept = Convert.ToBase64String(System.Security.Cryptography.SHA1.HashData(
-                Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
-            var response = Encoding.ASCII.GetBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
-            await stream.WriteAsync(response, cancellationToken);
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested) { }
-        catch (SocketException) when (cancellationToken.IsCancellationRequested) { }
-    }
-
     [Test]
     public async Task RemoteResetDistinguishesLegacyAggregateMasksFromCurrentExplicitMasks()
     {
@@ -1593,24 +1273,6 @@ public sealed class SelectorParityTests
         }
     }
 
-    private static async Task<JsonElement> ReceiveSnapshotAsync(ClientWebSocket socket, CancellationToken cancellationToken)
-    {
-        var buffer = new byte[4096];
-        while (true)
-        {
-            using var response = new MemoryStream();
-            WebSocketReceiveResult received;
-            do
-            {
-                received = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-                response.Write(buffer, 0, received.Count);
-            } while (!received.EndOfMessage);
-            using var document = JsonDocument.Parse(response.ToArray());
-            if (document.RootElement.TryGetProperty("type", out var type) && type.GetString() == "snapshot")
-                return document.RootElement.GetProperty("snapshot").Clone();
-        }
-    }
-
     private sealed class AsyncOnlyClockContext : IGuaContext, IGuaAsyncClockContext
     {
         private GuaClockStatus status = new(false, false, 0, 1000.0 / 60.0, 0, 0);
@@ -1678,8 +1340,6 @@ public sealed class SelectorParityTests
         internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void gua_runtime_stop_inspector_bridge(nint runtime);
-        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
-        internal static extern void gua_runtime_publish_inspector_snapshot(nint runtime);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void gua_runtime_set_virtual_clock_enabled(nint runtime, int enabled);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]

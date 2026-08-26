@@ -26,18 +26,11 @@ cannot escape that directory.
 AI clients can inspect the tree and invoke all protocol v1 semantic actions:
 
 - `get_ui_tree`, `wait_for_node`, `get_screenshot`, `get_logs`
-- `get_world_object_tree`, `find_world_objects`, `wait_for_world_object`
 - `click_node`, `focus_node`, `set_value`, `set_checked`, `select`, `scroll`, `press_key`
 - `run_test` for a small wait/click sequence
 
 When the bridge returns a `requestId`, action tools poll the correlated host
 completion event. Enqueue acceptance alone is not reported as completion.
-
-World tools are read-only and use the observation profile fixed by the host. Set
-`GUA_OBSERVATION_PROFILE=player` on the native host for player-facing MCP use;
-tool arguments cannot elevate it to debug. `find_world_objects` accepts ID,
-kind, label, tag, parent scope, visibility, active, and primitive state criteria.
-There is deliberately no world action tool.
 
 ## Recording and replay
 

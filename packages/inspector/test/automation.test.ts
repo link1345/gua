@@ -1,49 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, validateRecording } from "../src/automation";
-import { MockInspectorClient, createCoalescedAsyncRunner, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
+import { MockInspectorClient, createCoalescedAsyncRunner } from "../src/core";
 
 describe("InspectorRecorder", () => {
-  test("computes every level of the world object hierarchy", () => {
-    const object = (id: string, parentId?: string): GuaWorldObject => ({ id, parentId, kind: "object", label: id,
-      space: "world2d", position: { x: 0, y: 0 }, visibleToPlayer: true, active: true,
-      agentExposure: "auto", tags: [], state: {} });
-    const depths = worldObjectDepths([object("root"), object("child", "root"), object("grandchild", "child"), object("leaf", "grandchild")]);
-    expect([...depths.values()]).toEqual([0, 1, 2, 3]);
-  });
-
-  test("surfaces world tree fetch failures instead of replacing displayed state", async () => {
-    const client = new MockInspectorClient();
-    client.getWorldObjectTree = async () => { throw new Error("temporary world failure"); };
-    await expect(readSnapshot(client)).rejects.toThrow("temporary world failure");
-  });
-
-  test("retries polled trees until their session epochs match", async () => {
-    const client = new MockInspectorClient();
-    let uiCalls = 0;
-    let worldCalls = 0;
-    const originalUi = client.getUiTree.bind(client);
-    const originalWorld = client.getWorldObjectTree.bind(client);
-    client.getUiTree = async () => ({ ...(await originalUi()), sessionEpoch: ++uiCalls === 1 ? 1 : 2 });
-    client.getWorldObjectTree = async () => {
-      worldCalls += 1;
-      return { ...(await originalWorld()), sessionEpoch: 2 };
-    };
-    const snapshot = await readSnapshot(client);
-    expect(snapshot.uiTree.sessionEpoch).toBe(2);
-    expect(snapshot.worldObjectTree.sessionEpoch).toBe(2);
-    expect([uiCalls, worldCalls]).toEqual([2, 2]);
-  });
-
-  test("never publishes a persistently mixed-epoch polled snapshot", async () => {
-    const client = new MockInspectorClient();
-    const originalUi = client.getUiTree.bind(client);
-    const originalWorld = client.getWorldObjectTree.bind(client);
-    client.getUiTree = async () => ({ ...(await originalUi()), sessionEpoch: 1 });
-    client.getWorldObjectTree = async () => ({ ...(await originalWorld()), sessionEpoch: 2 });
-    await expect(readSnapshot(client)).rejects.toThrow("same session epoch");
-  });
-
   test("coalesces snapshot-driven clock refreshes without starving updates", async () => {
     const releases: Array<() => void> = [];
     let calls = 0;

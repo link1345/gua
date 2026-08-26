@@ -15,7 +15,7 @@ public enum GuaScreenshotAvailability
 
 public readonly record struct GuaScreenshotRequest(ulong RequestId, ulong SessionEpoch, ulong AfterFrameSequence);
 
-public sealed partial class GuaRuntime : IDisposable
+public sealed class GuaRuntime : IDisposable
 {
     private nint _handle;
 

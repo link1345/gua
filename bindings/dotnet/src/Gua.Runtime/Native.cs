@@ -14,8 +14,6 @@ internal static unsafe class Native
     [StructLayout(LayoutKind.Sequential)] internal unsafe struct LegacyEvent { internal int Type; internal fixed byte NodeId[128]; }
     [StructLayout(LayoutKind.Sequential)] internal struct ClockStatus { internal uint StructSize; internal int Installed, Paused; internal double NowMs, DefaultStepMs, PendingMs; internal ulong Generation; }
     [StructLayout(LayoutKind.Sequential)] internal struct ClockStep { internal uint StructSize; internal double DeltaMs; internal int FinalStep; internal ulong Generation; }
-    [StructLayout(LayoutKind.Sequential)] internal struct WorldState { internal uint StructSize; internal nint Key; internal int Type; internal nint StringValue; internal double NumberValue; internal int BoolValue; }
-    [StructLayout(LayoutKind.Sequential)] internal struct WorldObject { internal uint StructSize; internal nint Id, ParentId, Kind, Label, Description; internal int Space; internal double X, Y, Z; internal int VisibleToPlayer, Active, AgentExposure; internal nint DomainId, RelatedUiNodeId, Tags; internal uint TagCount; internal nint StateValues; internal uint StateValueCount; }
 
 #if !NETSTANDARD2_1
     static Native() => NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
@@ -46,11 +44,6 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_begin_frame(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string screen);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_end_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_register_node_v3(nint runtime, in NodeV3 node);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_begin_world_frame(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string scene);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_register_world_object_v1(nint runtime, in WorldObject descriptor);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_end_world_frame(nint runtime);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_abort_world_frame(nint runtime);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_world_object_tree_json(nint runtime, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_action_request(nint runtime, int action, [MarshalAs(UnmanagedType.LPUTF8Str)] string? nodeId, ref ActionRequest request);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_emit_action_result(nint runtime, in ActionResult result);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_screenshot_request(nint runtime, ref ScreenshotRequest request);
@@ -68,8 +61,6 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_adapter_version(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string adapter, [MarshalAs(UnmanagedType.LPUTF8Str)] string version);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_godot_plugin_version(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string version);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_virtual_clock_enabled(nint runtime, int enabled);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_world_object_tree_enabled(nint runtime, int enabled);
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_set_observation_profile(nint runtime, int profile);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_click_request(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_emit_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id);

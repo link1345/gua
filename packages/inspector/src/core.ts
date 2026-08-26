@@ -33,8 +33,6 @@ export interface GuaUiTree {
   screen: string;
   nodes: GuaNode[];
 }
-export interface GuaWorldObject { id: string; parentId?: string; kind: string; label: string; space: "world2d" | "world3d"; position: { x: number; y: number; z?: number }; visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private"; tags: string[]; state: Record<string, string | number | boolean | null> }
-export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
 
 export interface GuaLogEntry {
   sequence: number;
@@ -57,7 +55,6 @@ export interface InspectorPanel {
 
 export interface InspectorSnapshot {
   uiTree: GuaUiTree;
-  worldObjectTree: GuaWorldObjectTree;
   logs: GuaLogEntry[];
   screenshot: GuaScreenshot;
 }
@@ -68,7 +65,6 @@ export interface InspectorState extends InspectorSnapshot {
 
 export interface GuaInspectorClient {
   getUiTree(): Promise<GuaUiTree>;
-  getWorldObjectTree(): Promise<GuaWorldObjectTree>;
   getLogs(): Promise<GuaLogEntry[]>;
   getScreenshot(): Promise<GuaScreenshot>;
   getContextStatus(): Promise<GuaContextStatus>;
@@ -84,7 +80,6 @@ export interface GuaInspectorClient {
 
 export type GuaInspectorCommand =
   | { id: number; type: "get_ui_tree" }
-  | { id: number; type: "get_world_object_tree" }
   | { id: number; type: "get_logs" }
   | { id: number; type: "get_screenshot" }
   | { id: number; type: "get_context_status" }
@@ -102,7 +97,6 @@ export type GuaInspectorCommand =
 
 type GuaInspectorCommandInput =
   | { type: "get_ui_tree" }
-  | { type: "get_world_object_tree" }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
   | { type: "get_context_status" }
@@ -145,7 +139,6 @@ export function createInspectorState(snapshot?: Partial<InspectorSnapshot>): Ins
   };
   return {
     uiTree,
-    worldObjectTree: snapshot?.worldObjectTree ?? { schemaVersion: 1, sessionEpoch: 1, frameSequence: 0, revision: 0, scene: "unknown", objects: [] },
     logs: snapshot?.logs ?? [],
     screenshot: snapshot?.screenshot ?? { dataUri: "", width: 0, height: 0 },
     selectedNodeId: uiTree.nodes[0]?.id ?? null,
@@ -154,15 +147,11 @@ export function createInspectorState(snapshot?: Partial<InspectorSnapshot>): Ins
 
 export function parseInspectorSnapshot(input: {
   uiTreeJson: string;
-  worldObjectTreeJson?: string;
   logsJson?: string;
   screenshotJson?: string;
 }): InspectorSnapshot {
   return {
     uiTree: parseJson<GuaUiTree>(input.uiTreeJson, "Gua UI tree"),
-    worldObjectTree: input.worldObjectTreeJson === undefined
-      ? { schemaVersion: 1, sessionEpoch: 1, frameSequence: 0, revision: 0, scene: "unknown", objects: [] }
-      : parseJson<GuaWorldObjectTree>(input.worldObjectTreeJson, "Gua World Object Tree"),
     logs: input.logsJson === undefined ? [] : parseJson<GuaLogEntry[]>(input.logsJson, "Gua logs"),
     screenshot: input.screenshotJson === undefined
       ? { dataUri: "", width: 0, height: 0 }
@@ -194,35 +183,14 @@ export function getSelectedNode(state: InspectorState): GuaNode | null {
   return state.uiTree.nodes.find((node) => node.id === state.selectedNodeId) ?? null;
 }
 
-export function worldObjectDepths(objects: GuaWorldObject[]): Map<string, number> {
-  const byId = new Map(objects.map((object) => [object.id, object]));
-  const depths = new Map<string, number>();
-  const depthOf = (object: GuaWorldObject, visiting = new Set<string>()): number => {
-    const cached = depths.get(object.id);
-    if (cached !== undefined) return cached;
-    if (object.parentId === undefined || !byId.has(object.parentId) || visiting.has(object.id)) return 0;
-    visiting.add(object.id);
-    const depth = depthOf(byId.get(object.parentId)!, visiting) + 1;
-    visiting.delete(object.id);
-    depths.set(object.id, depth);
-    return depth;
-  };
-  for (const object of objects) depths.set(object.id, depthOf(object));
-  return depths;
-}
-
 export async function readSnapshot(client: GuaInspectorClient): Promise<InspectorSnapshot> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [uiTree, worldObjectTree, logs, screenshot] = await Promise.all([
-      client.getUiTree(),
-      client.getWorldObjectTree(),
-      client.getLogs(),
-      client.getScreenshot(),
-    ]);
-    if (uiTree.sessionEpoch === undefined || uiTree.sessionEpoch === worldObjectTree.sessionEpoch)
-      return { uiTree, worldObjectTree, logs, screenshot };
-  }
-  throw new Error("Unable to read UI and World Object Trees from the same session epoch.");
+  const [uiTree, logs, screenshot] = await Promise.all([
+    client.getUiTree(),
+    client.getLogs(),
+    client.getScreenshot(),
+  ]);
+
+  return { uiTree, logs, screenshot };
 }
 
 export class MockInspectorClient implements GuaInspectorClient {
@@ -317,7 +285,6 @@ export class MockInspectorClient implements GuaInspectorClient {
       ],
     };
   }
-  async getWorldObjectTree(): Promise<GuaWorldObjectTree> { return { schemaVersion: 1, sessionEpoch: 1, frameSequence: this.frameSequence, revision: 1, scene: this.screen, objects: [{ id: "door-a", kind: "door", label: "Door A", space: "world2d", position: { x: 640, y: 180 }, visibleToPlayer: true, active: true, agentExposure: "auto", tags: ["east-corridor"], state: { open: false, locked: true } }] }; }
 
   async getLogs(): Promise<GuaLogEntry[]> {
     return this.logs;
@@ -456,7 +423,6 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   async getUiTree(): Promise<GuaUiTree> {
     return this.request<GuaUiTree>({ type: "get_ui_tree" });
   }
-  async getWorldObjectTree(): Promise<GuaWorldObjectTree> { return this.request({ type: "get_world_object_tree" }); }
 
   async getLogs(): Promise<GuaLogEntry[]> {
     return this.request<GuaLogEntry[]>({ type: "get_logs" });

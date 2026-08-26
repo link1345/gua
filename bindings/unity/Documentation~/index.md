@@ -9,22 +9,3 @@ Supported in the initial release: Windows x64, Unity 6000.0 or newer, and Mono.
 The package contains precompiled managed assemblies and Windows Editor/Player
 native libraries. IL2CPP, other operating systems, IMGUI, and EditorWindow UI
 automation are outside the supported range.
-
-## World objects
-
-Add `GuaWorldObject` only to scene objects that are safe to observe. Assign a
-stable `Id`, semantic `Kind`, 2D/3D space, player visibility, exposure, tags,
-and primitive state explicitly:
-
-```csharp
-var door = gameObject.AddComponent<Gua.Unity.GuaWorldObject>();
-door.Id = "door-a";
-door.Kind = "door";
-door.Space = Gua.Core.GuaWorldSpace.World2D;
-door.VisibleToPlayer = true;
-door.SetState("locked", true);
-```
-
-The adapter publishes global transform positions each frame and links the
-nearest opted-in ancestor. It does not expose ordinary GameObjects or UI objects
-automatically. Do not place secrets in labels, tags, or state.

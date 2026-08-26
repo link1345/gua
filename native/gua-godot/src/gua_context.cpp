@@ -3,28 +3,10 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace {
-
-bool exactly_representable_as_double(std::int64_t value)
-{
-    const std::uint64_t magnitude = value < 0
-        ? static_cast<std::uint64_t>(-(value + 1)) + 1U
-        : static_cast<std::uint64_t>(value);
-    constexpr std::uint64_t max_consecutive_integer = 1ULL << 53U;
-    if (magnitude <= max_consecutive_integer) return true;
-
-    std::uint64_t reduced = magnitude;
-    unsigned discarded_bits = 0;
-    while (reduced > max_consecutive_integer) {
-        reduced >>= 1U;
-        ++discarded_bits;
-    }
-    return (magnitude & ((1ULL << discarded_bits) - 1U)) == 0;
-}
 
 const char* event_type_name(int type)
 {
@@ -276,63 +258,6 @@ bool GuaContext::register_node_v2(const Dictionary& source)
     return gua_runtime_register_node_v3(runtime_, &detailed) != 0;
 }
 
-bool GuaContext::begin_world_frame(const String& scene)
-{
-    const CharString value = scene.utf8();
-    return gua_runtime_begin_world_frame(runtime_, value.get_data()) != 0;
-}
-
-bool GuaContext::register_world_object(const Dictionary& source)
-{
-    const auto reject = [this]() { gua_runtime_abort_world_frame(runtime_); return false; };
-    if (!source.has("id") || !source.has("kind") || !source.has("label") || !source.has("position") || !source.has("space")) return reject();
-    if ((source.has("visible_to_player") && static_cast<Variant>(source["visible_to_player"]).get_type() != Variant::BOOL) ||
-        (source.has("active") && static_cast<Variant>(source["active"]).get_type() != Variant::BOOL)) return reject();
-    const String id = source["id"], parent = source.get("parent_id", String()), kind = source["kind"], label = source["label"];
-    const String description = source.get("description", String()), domain = source.get("domain_id", String()), related = source.get("related_ui_node_id", String());
-    const CharString id8 = id.utf8(), parent8 = parent.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), description8 = description.utf8(), domain8 = domain.utf8(), related8 = related.utf8();
-    const Vector3 position = source["position"];
-    const Array tags = source.get("tags", Array());
-    std::vector<CharString> tag_strings; std::vector<const char*> tag_pointers;
-    tag_strings.reserve(tags.size()); tag_pointers.reserve(tags.size());
-    for (int i = 0; i < tags.size(); ++i) tag_strings.push_back(String(tags[i]).utf8());
-    for (const auto& value : tag_strings) tag_pointers.push_back(value.get_data());
-    const Dictionary state = source.get("state", Dictionary());
-    const Array keys = state.keys();
-    std::vector<CharString> state_keys, state_strings; std::vector<gua_world_state_value_v1_t> state_values;
-    state_keys.reserve(keys.size()); state_strings.reserve(keys.size()); state_values.reserve(keys.size());
-    for (int i = 0; i < keys.size(); ++i) { state_keys.push_back(String(keys[i]).utf8()); state_strings.emplace_back(); }
-    for (int i = 0; i < keys.size(); ++i) {
-        const Variant value = state[keys[i]]; gua_world_state_value_v1_t item { sizeof(gua_world_state_value_v1_t), state_keys[i].get_data() };
-        if (value.get_type() == Variant::NIL) item.type = GUA_WORLD_VALUE_NULL;
-        else if (value.get_type() == Variant::BOOL) { item.type = GUA_WORLD_VALUE_BOOLEAN; item.bool_value = static_cast<bool>(value) ? 1 : 0; }
-        else if (value.get_type() == Variant::INT) {
-            const auto integer = static_cast<std::int64_t>(value);
-            if (!exactly_representable_as_double(integer)) return reject();
-            item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(integer);
-        }
-        else if (value.get_type() == Variant::FLOAT) { item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(value); }
-        else if (value.get_type() == Variant::STRING || value.get_type() == Variant::STRING_NAME) { state_strings[i] = String(value).utf8(); item.type = GUA_WORLD_VALUE_STRING; item.string_value = state_strings[i].get_data(); }
-        else return reject();
-        state_values.push_back(item);
-    }
-    const String space = source["space"], exposure = source.get("agent_exposure", String("auto"));
-    if ((space != "world2d" && space != "world3d") || (exposure != "auto" && exposure != "private")) return reject();
-    const gua_world_object_descriptor_v1_t descriptor { sizeof(gua_world_object_descriptor_v1_t), id8.get_data(), parent.is_empty() ? nullptr : parent8.get_data(), kind8.get_data(), label8.get_data(),
-        description.is_empty() ? nullptr : description8.get_data(), space == "world3d" ? GUA_WORLD_SPACE_3D : GUA_WORLD_SPACE_2D,
-        position.x, position.y, position.z, static_cast<bool>(source.get("visible_to_player", false)) ? 1 : 0,
-        static_cast<bool>(source.get("active", true)) ? 1 : 0,
-        exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO,
-        domain.is_empty() ? nullptr : domain8.get_data(), related.is_empty() ? nullptr : related8.get_data(),
-        tag_pointers.data(), static_cast<uint32_t>(tag_pointers.size()), state_values.data(), static_cast<uint32_t>(state_values.size()) };
-    return gua_runtime_register_world_object_v1(runtime_, &descriptor) != 0;
-}
-
-bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }
-bool GuaContext::abort_world_frame() { return gua_runtime_abort_world_frame(runtime_) != 0; }
-String GuaContext::get_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_world_object_tree_json); }
-void GuaContext::enable_world_object_tree_adapter() { gua_runtime_set_world_object_tree_enabled(runtime_, 1); }
-
 String GuaContext::get_ui_tree_json() const
 {
     return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
@@ -508,9 +433,6 @@ Dictionary GuaContext::get_context_status() const
     result["first_pending_node_id"] = String::utf8(status.first_pending_node_id);
     result["first_event_action"] = action_name(status.first_event_action);
     result["first_event_node_id"] = String::utf8(status.first_event_node_id);
-    result["world_frame_sequence"] = status.world_frame_sequence;
-    result["world_revision"] = status.world_revision;
-    result["world_object_count"] = status.world_object_count;
     return result;
 }
 
@@ -518,7 +440,7 @@ Dictionary GuaContext::reset_context(const Dictionary& source)
 {
     const gua_reset_options_t options {
         sizeof(gua_reset_options_t),
-        static_cast<uint32_t>(static_cast<int64_t>(source.get("flags", GUA_RESET_DEFAULT_V3))),
+        static_cast<uint32_t>(static_cast<int64_t>(source.get("flags", GUA_RESET_DEFAULT_V2))),
         source.get("strict", false) ? 1 : 0,
         static_cast<uint64_t>(static_cast<int64_t>(source.get("expected_session_epoch", 0))),
         GUA_RESET_FLAGS_VERSION_CURRENT,
@@ -542,7 +464,6 @@ Dictionary GuaContext::reset_context(const Dictionary& source)
     result["first_pending_node_id"] = String::utf8(report.first_pending_node_id);
     result["first_event_action"] = action_name(report.first_event_action);
     result["first_event_node_id"] = String::utf8(report.first_event_node_id);
-    result["discarded_world_object_count"] = report.discarded_world_object_count;
     return result;
 }
 
@@ -581,12 +502,6 @@ void GuaContext::_bind_methods()
         DEFVAL(true),
         DEFVAL(true));
     ClassDB::bind_method(D_METHOD("register_node_v2", "descriptor"), &GuaContext::register_node_v2);
-    ClassDB::bind_method(D_METHOD("begin_world_frame", "scene"), &GuaContext::begin_world_frame);
-    ClassDB::bind_method(D_METHOD("register_world_object", "descriptor"), &GuaContext::register_world_object);
-    ClassDB::bind_method(D_METHOD("end_world_frame"), &GuaContext::end_world_frame);
-    ClassDB::bind_method(D_METHOD("abort_world_frame"), &GuaContext::abort_world_frame);
-    ClassDB::bind_method(D_METHOD("get_world_object_tree_json"), &GuaContext::get_world_object_tree_json);
-    ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);

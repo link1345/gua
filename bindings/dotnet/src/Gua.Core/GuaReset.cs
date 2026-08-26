@@ -11,15 +11,10 @@ public enum GuaResetTargets : uint
     Logs = 1 << 4,
     Screenshot = 1 << 5,
     Clock = 1 << 6,
-    WorldObjects = 1 << 7,
     Default = Nodes | Requests | Events | History,
-    LegacySessionDefault = Default | Clock,
-    SessionDefault = LegacySessionDefault | WorldObjects,
+    SessionDefault = Default | Clock,
     All = Default | Logs | Screenshot,
-    /// <summary>Legacy full-reset mask retained for compatibility; does not include World Object Tree state.</summary>
     AllWithClock = All | Clock,
-    /// <summary>Current full-reset mask including clock and World Object Tree state.</summary>
-    AllCurrent = AllWithClock | WorldObjects,
 }
 
 public enum GuaResetResult
@@ -50,9 +45,6 @@ public sealed record GuaContextStatus(
     GuaActionType? FirstEventAction,
     string FirstEventNodeId)
 {
-    public ulong WorldFrameSequence { get; init; }
-    public ulong WorldRevision { get; init; }
-    public uint WorldObjectCount { get; init; }
     public bool IsClean => PendingRequestCount == 0 && InFlightRequestCount == 0 && UnconsumedEventCount == 0;
 }
 
@@ -72,7 +64,4 @@ public sealed record GuaResetReport(
     GuaActionType? FirstPendingAction,
     string FirstPendingNodeId,
     GuaActionType? FirstEventAction,
-    string FirstEventNodeId)
-{
-    public uint DiscardedWorldObjectCount { get; init; }
-}
+    string FirstEventNodeId);

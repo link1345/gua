@@ -4,8 +4,6 @@
   "title": "Gua Command",
   "oneOf": [
     { "$ref": "#/$defs/getUiTree" },
-    { "$ref": "#/$defs/getWorldObjectTree" },
-    { "$ref": "#/$defs/queryWorldObjects" },
     { "$ref": "#/$defs/nodeCommand" },
     { "$ref": "#/$defs/pressKey" },
     { "$ref": "#/$defs/valueAction" },
@@ -28,42 +26,6 @@
       "properties": {
         "type": { "const": "get_ui_tree" }
       }
-    },
-    "getWorldObjectTree": {
-      "type": "object", "required": ["type"], "additionalProperties": false,
-      "properties": { "type": { "const": "get_world_object_tree" } }
-    },
-    "queryWorldObjects": {
-      "type": "object", "required": ["type"], "additionalProperties": false,
-      "properties": {
-        "type": { "const": "query_world_objects" },
-        "worldId": { "type": "string", "minLength": 1 }, "worldIdMatch": { "type": "integer", "minimum": 0, "maximum": 2 },
-        "kind": { "type": "string", "minLength": 1 }, "kindMatch": { "type": "integer", "minimum": 0, "maximum": 2 },
-        "label": { "type": "string", "minLength": 1 }, "labelMatch": { "type": "integer", "minimum": 0, "maximum": 2 },
-        "tag": { "type": "string", "minLength": 1 }, "tagMatch": { "type": "integer", "minimum": 0, "maximum": 2 },
-        "parentId": { "type": "string", "minLength": 1 }, "directChild": { "type": "integer", "enum": [0, 1] },
-        "visibleToPlayer": { "type": "integer", "minimum": 0, "maximum": 2 }, "active": { "type": "integer", "minimum": 0, "maximum": 2 },
-        "stateKey": { "type": "string", "minLength": 1 }, "stateType": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "stateString": { "type": "string" }, "stateNumber": { "type": "number" }, "stateBool": { "type": "boolean" }
-      },
-      "oneOf": [
-        { "not": { "anyOf": [
-          { "required": ["stateKey"] }, { "required": ["stateType"] }, { "required": ["stateString"] },
-          { "required": ["stateNumber"] }, { "required": ["stateBool"] }
-        ] } },
-        { "required": ["stateKey", "stateType"], "properties": { "stateType": { "const": 0 } },
-          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateNumber"] }, { "required": ["stateBool"] }] } },
-        { "required": ["stateKey", "stateType", "stateString"], "properties": { "stateType": { "const": 1 } },
-          "not": { "anyOf": [{ "required": ["stateNumber"] }, { "required": ["stateBool"] }] } },
-        { "required": ["stateKey", "stateType", "stateNumber"], "properties": { "stateType": { "const": 2 } },
-          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateBool"] }] } },
-        { "required": ["stateKey", "stateType", "stateBool"], "properties": { "stateType": { "const": 3 } },
-          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateNumber"] }] } }
-      ],
-      "allOf": [
-        { "if": { "required": ["directChild"], "properties": { "directChild": { "const": 1 } } },
-          "then": { "required": ["parentId"] } }
-      ]
     },
     "nodeCommand": {
       "type": "object",
@@ -144,8 +106,8 @@
       "properties": {
         "type": { "const": "reset_context" },
         "expectedSessionEpoch": { "type": "integer", "minimum": 1 },
-        "flags": { "type": "integer", "minimum": 0, "maximum": 255, "default": 207 },
-        "flagsVersion": { "type": "integer", "enum": [1, 2], "default": 2 },
+        "flags": { "type": "integer", "minimum": 0, "maximum": 127, "default": 79 },
+        "flagsVersion": { "const": 1 },
         "strict": { "type": "boolean", "default": false }
       }
     },

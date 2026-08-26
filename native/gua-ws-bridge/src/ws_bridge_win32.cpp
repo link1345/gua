@@ -32,7 +32,6 @@ struct Command {
     std::string node_id;
     std::string key;
     gua::ws::QuerySelector selector;
-    gua::ws::WorldQuerySelector world_selector;
     std::string value;
     float delta_x = 0;
     float delta_y = 0;
@@ -44,8 +43,8 @@ struct Command {
     unsigned long long expected_session_epoch = 0;
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
-    unsigned int reset_flags = 207;
-    unsigned int reset_flags_version = 2;
+    unsigned int reset_flags = 79;
+    unsigned int reset_flags_version = 1;
     bool reset_flags_version_valid = true;
     bool strict = false;
     double initial_time_ms = 0;
@@ -54,7 +53,6 @@ struct Command {
     bool duration_ms_valid = false;
     double step_ms = 0;
     bool step_ms_present = false;
-    bool world_selector_valid = true;
 };
 
 struct ClientConnection {
@@ -666,105 +664,10 @@ bool json_has_field(std::string_view json, std::string_view field)
     return json_top_level_field_start(json, field).has_value();
 }
 
-bool json_has_non_null_field(std::string_view json, std::string_view field)
-{
-    const auto start = json_top_level_field_start(json, field);
-    return start.has_value() && json.substr(*start, 4) != "null";
-}
-
-bool valid_optional_non_empty_string(std::string_view json, std::string_view field)
-{
-    if (!json_has_field(json, field)) return true;
-    const auto value = json_string_field(json, field);
-    return value.has_value() && !value->empty();
-}
-
-bool valid_optional_int_range(std::string_view json, std::string_view field, int minimum, int maximum)
-{
-    if (!json_has_field(json, field)) return true;
-    const auto value = json_int_field(json, field);
-    return value.has_value() && *value >= minimum && *value <= maximum;
-}
-
-std::string unsupported_world_object_tree_json(std::string_view ui_tree_json)
-{
-    const auto session_epoch = json_uint64_field(ui_tree_json, "sessionEpoch").value_or(1);
-    return "{\"schemaVersion\":1,\"sessionEpoch\":" + std::to_string(session_epoch) +
-        ",\"frameSequence\":0,\"revision\":0,\"scene\":\"unsupported\",\"objects\":[]}";
-}
-
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
 {
     const auto start = json_top_level_field_start(json, field);
     return start.has_value() ? json.substr(*start, 4) == "true" : fallback;
-}
-
-std::optional<bool> json_bool_field_optional(std::string_view json, std::string_view field)
-{
-    const auto start = json_top_level_field_start(json, field);
-    if (!start.has_value()) return std::nullopt;
-    if (json.substr(*start, 4) == "true") return true;
-    if (json.substr(*start, 5) == "false") return false;
-    return std::nullopt;
-}
-
-template <std::size_t Size>
-bool json_has_only_top_level_fields(std::string_view json, const std::array<std::string_view, Size>& allowed)
-{
-    const std::size_t root = json.find_first_not_of(" \t\r\n");
-    if (root == std::string_view::npos || json[root] != '{') return false;
-
-    int object_depth = 0;
-    int array_depth = 0;
-    bool in_string = false;
-    bool escaped = false;
-    bool root_closed = false;
-    std::size_t root_end = root;
-    for (std::size_t index = root; index < json.size(); ++index) {
-        const char ch = json[index];
-        if (in_string) {
-            if (escaped) escaped = false;
-            else if (ch == '\\') escaped = true;
-            else if (ch == '"') in_string = false;
-            continue;
-        }
-        if (ch == '"') {
-            std::size_t previous = index;
-            while (previous > root && std::isspace(static_cast<unsigned char>(json[previous - 1U]))) --previous;
-            const bool top_level_key = object_depth == 1 && array_depth == 0 && previous > root &&
-                (json[previous - 1U] == '{' || json[previous - 1U] == ',');
-            if (!top_level_key) {
-                in_string = true;
-                continue;
-            }
-
-            std::size_t end = index + 1U;
-            bool key_escaped = false;
-            for (; end < json.size(); ++end) {
-                if (key_escaped) key_escaped = false;
-                else if (json[end] == '\\') key_escaped = true;
-                else if (json[end] == '"') break;
-            }
-            if (end == json.size()) return false;
-            const auto key = json.substr(index + 1U, end - index - 1U);
-            if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) return false;
-            const std::size_t colon = json.find_first_not_of(" \t\r\n", end + 1U);
-            if (colon == std::string_view::npos || json[colon] != ':') return false;
-            index = end;
-            continue;
-        }
-        if (ch == '{') ++object_depth;
-        else if (ch == '}') {
-            if (--object_depth == 0) {
-                root_closed = true;
-                root_end = index;
-                break;
-            }
-            if (object_depth < 0) return false;
-        } else if (ch == '[') ++array_depth;
-        else if (ch == ']' && --array_depth < 0) return false;
-    }
-    return root_closed && json.find_first_not_of(" \t\r\n", root_end + 1U) == std::string_view::npos;
 }
 
 Command parse_command(std::string_view json)
@@ -786,51 +689,6 @@ Command parse_command(std::string_view json)
     command.selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
     command.selector.visible = json_int_field(json, "visible").value_or(0);
     command.selector.enabled = json_int_field(json, "enabled").value_or(0);
-    command.world_selector.id = json_string_field(json, "worldId").value_or("");
-    command.world_selector.id_match = json_int_field(json, "worldIdMatch").value_or(0);
-    command.world_selector.kind = json_string_field(json, "kind").value_or("");
-    command.world_selector.kind_match = json_int_field(json, "kindMatch").value_or(0);
-    command.world_selector.label = json_string_field(json, "label").value_or("");
-    command.world_selector.label_match = json_int_field(json, "labelMatch").value_or(0);
-    command.world_selector.tag = json_string_field(json, "tag").value_or("");
-    command.world_selector.tag_match = json_int_field(json, "tagMatch").value_or(0);
-    command.world_selector.parent_id = json_string_field(json, "parentId").value_or("");
-    const auto world_direct_child = json_int_field(json, "directChild");
-    command.world_selector.direct_child = world_direct_child.value_or(0) == 1;
-    command.world_selector.visible_to_player = json_int_field(json, "visibleToPlayer").value_or(0);
-    command.world_selector.active = json_int_field(json, "active").value_or(0);
-    command.world_selector.state_key = json_string_field(json, "stateKey").value_or("");
-    command.world_selector.state_type = json_int_field(json, "stateType").value_or(-1);
-    command.world_selector.state_string = json_string_field(json, "stateString").value_or("");
-    command.world_selector.state_number = json_number_field(json, "stateNumber").value_or(0);
-    command.world_selector.state_bool = json_bool_field(json, "stateBool");
-    constexpr std::array world_query_fields { std::string_view("id"), std::string_view("type"), std::string_view("worldId"),
-        std::string_view("worldIdMatch"), std::string_view("kind"), std::string_view("kindMatch"), std::string_view("label"),
-        std::string_view("labelMatch"), std::string_view("tag"), std::string_view("tagMatch"), std::string_view("parentId"),
-        std::string_view("directChild"), std::string_view("visibleToPlayer"), std::string_view("active"), std::string_view("stateKey"),
-        std::string_view("stateType"), std::string_view("stateString"), std::string_view("stateNumber"), std::string_view("stateBool") };
-    command.world_selector_valid = (command.type != "query_world_objects" || json_has_only_top_level_fields(json, world_query_fields)) &&
-        valid_optional_non_empty_string(json, "worldId") &&
-        valid_optional_non_empty_string(json, "kind") && valid_optional_non_empty_string(json, "label") &&
-        valid_optional_non_empty_string(json, "tag") && valid_optional_non_empty_string(json, "parentId") &&
-        valid_optional_int_range(json, "worldIdMatch", 0, 2) && valid_optional_int_range(json, "kindMatch", 0, 2) &&
-        valid_optional_int_range(json, "labelMatch", 0, 2) && valid_optional_int_range(json, "tagMatch", 0, 2) &&
-        valid_optional_int_range(json, "directChild", 0, 1) &&
-        valid_optional_int_range(json, "visibleToPlayer", 0, 2) && valid_optional_int_range(json, "active", 0, 2) &&
-        (!command.world_selector.direct_child || !command.world_selector.parent_id.empty());
-    const bool state_key_present = json_has_field(json, "stateKey");
-    const bool state_type_present = json_has_field(json, "stateType");
-    const bool state_string_present = json_has_field(json, "stateString");
-    const bool state_number_present = json_has_field(json, "stateNumber");
-    const bool state_bool_present = json_has_field(json, "stateBool");
-    const bool any_state = state_key_present || state_type_present || state_string_present || state_number_present || state_bool_present;
-    command.world_selector_valid = command.world_selector_valid && (!any_state ||
-        (state_key_present && !command.world_selector.state_key.empty() && state_type_present &&
-            command.world_selector.state_type >= 0 && command.world_selector.state_type <= 3 &&
-            ((command.world_selector.state_type == 0 && !state_string_present && !state_number_present && !state_bool_present) ||
-             (command.world_selector.state_type == 1 && state_string_present && json_string_field(json, "stateString").has_value() && !state_number_present && !state_bool_present) ||
-             (command.world_selector.state_type == 2 && state_number_present && json_number_field(json, "stateNumber").has_value() && !state_string_present && !state_bool_present) ||
-             (command.world_selector.state_type == 3 && state_bool_present && json_bool_field_optional(json, "stateBool").has_value() && !state_string_present && !state_number_present))));
     command.value = json_string_field(json, "value").value_or("");
     command.delta_x = static_cast<float>(json_number_field(json, "deltaX").value_or(0));
     command.delta_y = static_cast<float>(json_number_field(json, "deltaY").value_or(0));
@@ -843,11 +701,11 @@ Command parse_command(std::string_view json)
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
     const bool reset_flags_present = json_has_field(json, "flags");
-    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(207));
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
     const auto reset_flags_version = json_int_field(json, "flagsVersion");
-    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 2));
+    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 1));
     command.reset_flags_version_valid = !json_has_field(json, "flagsVersion") ||
-        (reset_flags_version.has_value() && (*reset_flags_version == 1 || *reset_flags_version == 2));
+        (reset_flags_version.has_value() && *reset_flags_version == 1);
     command.strict = json_bool_field(json, "strict");
     const auto initial_time_ms = json_number_field(json, "initialTimeMs");
     command.initial_time_ms = initial_time_ms.value_or(0);
@@ -992,17 +850,13 @@ public:
 
         std::string message;
         try {
-            std::string snapshot;
-            if (handlers_.get_snapshot_json) {
-                snapshot = handlers_.get_snapshot_json();
-            } else {
-                const std::string ui_tree = handlers_.get_ui_tree_json();
-                const std::string world_tree = handlers_.get_world_object_tree_json
-                    ? handlers_.get_world_object_tree_json() : unsupported_world_object_tree_json(ui_tree);
-                snapshot = "{\"uiTree\":" + ui_tree + ",\"worldObjectTree\":" + world_tree +
-                    ",\"logs\":" + handlers_.get_logs_json() + ",\"screenshot\":" + handlers_.get_screenshot_json() + '}';
-            }
-            message = "{\"type\":\"snapshot\",\"snapshot\":" + snapshot + '}';
+            message = "{\"type\":\"snapshot\",\"snapshot\":{\"uiTree\":"
+                + handlers_.get_ui_tree_json()
+                + ",\"logs\":"
+                + handlers_.get_logs_json()
+                + ",\"screenshot\":"
+                + handlers_.get_screenshot_json()
+                + "}}";
         } catch (const std::exception& error) {
             std::cerr << "Gua bridge snapshot failed: " << error.what() << std::endl;
             return;
@@ -1153,11 +1007,6 @@ private:
             if (command.type == "get_ui_tree") {
                 return ok_response(command.id, handlers_.get_ui_tree_json());
             }
-            if (command.type == "get_world_object_tree") {
-                return handlers_.get_world_object_tree_json
-                    ? ok_response(command.id, handlers_.get_world_object_tree_json())
-                    : ok_response(command.id, unsupported_world_object_tree_json(handlers_.get_ui_tree_json()));
-            }
             if (command.type == "get_logs") {
                 return ok_response(command.id, handlers_.get_logs_json());
             }
@@ -1203,12 +1052,6 @@ private:
                 }
                 return ok_response(command.id, handlers_.query_nodes_json(command.selector));
             }
-            if (command.type == "query_world_objects") {
-                if (!command.world_selector_valid) return error_response(command.id, "invalid world selector");
-                return handlers_.query_world_objects_json
-                    ? ok_response(command.id, handlers_.query_world_objects_json(command.world_selector))
-                    : error_response(command.id, "unsupported");
-            }
             if (command.type == "get_context_status") {
                 return handlers_.get_context_status_json
                     ? ok_response(command.id, handlers_.get_context_status_json())
@@ -1217,7 +1060,7 @@ private:
             if (command.type == "reset_context") {
                 if (!handlers_.reset_context_json) return error_response(command.id, "reset_context is not supported by this bridge");
                 if (command.expected_session_epoch == 0) return error_response(command.id, "reset_context requires expectedSessionEpoch");
-                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires a supported flagsVersion when supplied");
+                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires flagsVersion 1 when supplied");
                 return ok_response(command.id, handlers_.reset_context_json(
                     command.expected_session_epoch, command.reset_flags, command.reset_flags_version, command.strict));
             }

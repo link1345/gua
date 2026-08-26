@@ -520,7 +520,7 @@ public:
             ". Payload values are redacted.");
     }
 
-    [[nodiscard]] gua_reset_report_t reset(bool strict = false, std::uint32_t flags = GUA_RESET_DEFAULT_V3) const
+    [[nodiscard]] gua_reset_report_t reset(bool strict = false, std::uint32_t flags = GUA_RESET_DEFAULT_V2) const
     {
         const auto status = inspect();
         const gua_reset_options_t options {

@@ -39,12 +39,6 @@ void gua_runtime_register_node(
 );
 int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_node_descriptor_v2_t* descriptor);
 int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descriptor_v3_t* descriptor);
-int gua_runtime_begin_world_frame(gua_runtime_t* runtime, const char* scene);
-int gua_runtime_register_world_object_v1(gua_runtime_t* runtime, const gua_world_object_descriptor_v1_t* descriptor);
-int gua_runtime_end_world_frame(gua_runtime_t* runtime);
-int gua_runtime_abort_world_frame(gua_runtime_t* runtime);
-int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
-int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
 
 const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -79,10 +73,6 @@ void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* ve
 void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version);
 /* Adapter opt-in: enable only when the host pumps and consumes clock steps. */
 void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, int enabled);
-/* Adapter opt-in: enable only after the host publishes world frames. */
-void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled);
-/* Host-owned ceiling; transports cannot override this profile per request. */
-int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int profile);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);
 int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, gua_node_state_v2_t* out_state);
 int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size);

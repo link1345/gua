@@ -6,12 +6,11 @@ import type {
   GuaUiTree,
   GuaClockStatus,
   GuaContextStatus,
-  GuaWorldObjectTree,
 } from "@gua/inspector/core";
 
 const defaultPort = 8765;
 const port = Number.parseInt(Bun.env.GUA_BRIDGE_PORT ?? Bun.argv[2] ?? `${defaultPort}`, 10);
-type GuaInspectorResult = GuaUiTree | GuaWorldObjectTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | null;
+type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | null;
 
 export function handleMessage(message: string | Buffer, target: DemoRuntime = runtime): GuaInspectorResponse {
   if (typeof message !== "string") {
@@ -29,8 +28,6 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
     switch (command.type) {
       case "get_ui_tree":
         return ok(command.id, target.getUiTree());
-      case "get_world_object_tree":
-        return ok(command.id, { schemaVersion: 1, sessionEpoch: 1, frameSequence: 0, revision: 0, scene: "demo", objects: [] });
       case "get_logs":
         return ok(command.id, target.getLogs());
       case "get_screenshot":
