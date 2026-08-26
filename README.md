@@ -592,10 +592,10 @@ completion when the connected bridge supports it.
 
 ## Release automation
 
-GitHub Actions publishes runtime artifacts from `main` when a related protocol
-consumer changes. The Inspector, Godot plugin, and ImGui plugin are built
-together and attached to one versioned `gua-v*` GitHub Release. MCP and .NET
-packages continue to use their independent npm and NuGet publishing workflows.
+Pushing a manually created `gua-vX.Y.Z` tag runs the release workflows. The
+Inspector, Godot plugin, and ImGui plugin are built together and attached to the
+matching GitHub Release, while the MCP and .NET packages publish the same
+version to npm and NuGet. Changes pushed to `main` do not publish packages.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gui-mcp` package must be configured on npm with this repository, the
