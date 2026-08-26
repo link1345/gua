@@ -7,6 +7,7 @@ var adapter_ref: WeakRef
 var get_tree_callback: JavaScriptObject
 var enqueue_callback: JavaScriptObject
 var poll_callback: JavaScriptObject
+var cancel_callback: JavaScriptObject
 var bridge_owner_id := ""
 
 
@@ -21,37 +22,74 @@ func attach(gua_adapter: RefCounted) -> bool:
 	get_tree_callback = JavaScriptBridge.create_callback(_get_tree)
 	enqueue_callback = JavaScriptBridge.create_callback(_enqueue_action)
 	poll_callback = JavaScriptBridge.create_callback(_poll_action)
+	cancel_callback = JavaScriptBridge.create_callback(_cancel_action)
 	window.__guaGodotGetTree = get_tree_callback
 	window.__guaGodotEnqueueAction = enqueue_callback
 	window.__guaGodotPollAction = poll_callback
+	window.__guaGodotCancelAction = cancel_callback
 	bridge_owner_id = str(get_instance_id())
 	JavaScriptBridge.eval("""
 (() => {
   const engineError = (code, message) => Object.assign(new Error(message), { code });
-  globalThis.__guaGodotWebPort = {
+  const previousPort = globalThis.__guaGodotWebPort;
+  if (previousPort && typeof previousPort.__guaUninstall === 'function') previousPort.__guaUninstall();
+  const getTree = globalThis.__guaGodotGetTree;
+  const enqueueAction = globalThis.__guaGodotEnqueueAction;
+  const pollAction = globalThis.__guaGodotPollAction;
+  const cancelAction = globalThis.__guaGodotCancelAction;
+  const pending = new Map();
+  let disposed = false;
+  const port = {
     __guaOwnerId: "%s",
+    __guaUninstall() {
+      if (disposed) return;
+      disposed = true;
+      for (const [requestId, call] of pending) {
+        clearTimeout(call.timer);
+        try { cancelAction(String(requestId)); } catch (_) {}
+        call.reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.'));
+      }
+      pending.clear();
+    },
     async invoke(command) {
+      if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
       if (!command || typeof command.type !== 'string') throw engineError('invalid_request', 'Missing Gua in-page command.');
       if (command.type === 'get_ui_tree') {
-        const tree = JSON.parse(globalThis.__guaGodotGetTree());
+        const tree = JSON.parse(getTree());
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
         return tree;
       }
       if (command.type !== 'perform_action') throw engineError('engine_unsupported', `Godot Web command is unsupported: ${command.type}`);
-      const receipt = JSON.parse(globalThis.__guaGodotEnqueueAction(JSON.stringify(command.request)));
+      const receipt = JSON.parse(enqueueAction(JSON.stringify(command.request)));
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000;
+        const call = { reject, timer: 0 };
+        pending.set(receipt.requestId, call);
+        const finish = (settle) => {
+          clearTimeout(call.timer);
+          pending.delete(receipt.requestId);
+          settle();
+        };
         const poll = () => {
-          const result = JSON.parse(globalThis.__guaGodotPollAction(String(receipt.requestId)));
-          if (result) return resolve(result);
-          if (performance.now() >= deadline) return reject(engineError('timeout', 'Timed out waiting for Godot host completion.'));
-          setTimeout(poll, 0);
+          if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
+          try {
+            const result = JSON.parse(pollAction(String(receipt.requestId)));
+            if (result) return finish(() => resolve(result));
+            if (performance.now() >= deadline) {
+              try { cancelAction(String(receipt.requestId)); } catch (_) {}
+              return finish(() => reject(engineError('timeout', 'Timed out waiting for Godot host completion.')));
+            }
+            call.timer = setTimeout(poll, 0);
+          } catch (error) {
+            return finish(() => reject(error && error.code ? error : engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
+          }
         };
         poll();
       });
     }
   };
+  globalThis.__guaGodotWebPort = port;
 })();
 """ % bridge_owner_id)
 	return true
@@ -63,16 +101,19 @@ func detach() -> void:
 (() => {
   const port = globalThis.__guaGodotWebPort;
   if (!port || port.__guaOwnerId !== "%s") return;
+  port.__guaUninstall();
   delete globalThis.__guaGodotWebPort;
   delete globalThis.__guaGodotGetTree;
   delete globalThis.__guaGodotEnqueueAction;
   delete globalThis.__guaGodotPollAction;
+  delete globalThis.__guaGodotCancelAction;
 })();
 """ % bridge_owner_id)
 	bridge_owner_id = ""
 	get_tree_callback = null
 	enqueue_callback = null
 	poll_callback = null
+	cancel_callback = null
 	adapter_ref = null
 
 
@@ -122,6 +163,14 @@ func _poll_action(arguments: Array) -> String:
 	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
 	var result: Dictionary = adapter.poll_action_result(request_id)
 	return "null" if result.is_empty() else JSON.stringify(result)
+
+
+func _cancel_action(arguments: Array) -> int:
+	var adapter := _adapter()
+	if adapter == null:
+		return 0
+	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
+	return adapter.cancel_action_request(request_id)
 
 
 func _adapter() -> RefCounted:

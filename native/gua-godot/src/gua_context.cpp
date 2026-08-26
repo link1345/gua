@@ -325,6 +325,12 @@ Dictionary GuaContext::enqueue_action(const Dictionary& source)
     return result;
 }
 
+int GuaContext::cancel_action_request(uint64_t request_id)
+{
+    if (request_id == 0) return GUA_ACTION_CANCEL_NOT_FOUND;
+    return gua_runtime_cancel_action_request(runtime_, request_id);
+}
+
 Dictionary GuaContext::consume_action_request(const String& action, const String& node_id)
 {
     const CharString node_utf8 = node_id.utf8();
@@ -532,6 +538,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);
     ClassDB::bind_method(D_METHOD("poll_event"), &GuaContext::poll_event);
     ClassDB::bind_method(D_METHOD("enqueue_action", "request"), &GuaContext::enqueue_action);
+    ClassDB::bind_method(D_METHOD("cancel_action_request", "request_id"), &GuaContext::cancel_action_request);
     ClassDB::bind_method(D_METHOD("consume_action_request", "action", "node_id"), &GuaContext::consume_action_request);
     ClassDB::bind_method(D_METHOD("emit_action_result", "result"), &GuaContext::emit_action_result);
     ClassDB::bind_method(D_METHOD("poll_event_v2"), &GuaContext::poll_event_v2);

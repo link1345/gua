@@ -171,6 +171,48 @@ describe("registerGuaWebMcp", () => {
     expect(result.content[0]!.text).toContain("[REDACTED]");
   });
 
+  test("redacts JSON syntax characters without corrupting structured failures", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([{ ...button("password"), actions: ["set_value"] }]),
+      performAction: async () => { throw new GuaWebError("action_failed", "Rejected value", { received: '"', nested: ['before"after'] }); },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: '"', sensitive: true }) as { isError: boolean; content: Array<{ text: string }> };
+    const payload = JSON.parse(result.content[0]!.text);
+    expect(result.isError).toBe(true);
+    expect(payload.error.details).toEqual({ received: "[REDACTED]", nested: ["before[REDACTED]after"] });
+  });
+
+  test("removes wait polling abort listeners after each completed delay", async () => {
+    const page = modelDocument();
+    let reads = 0;
+    const bridge = bridgeWithTree({
+      get sessionEpoch() { return 1; },
+      get frameSequence() { return reads; },
+      get revision() { return reads; },
+      screen: "title",
+      get nodes() { return ++reads >= 4 ? [button("later")] : []; },
+    });
+    await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 1 });
+    const controller = new AbortController();
+    const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+    const originalRemove = controller.signal.removeEventListener.bind(controller.signal);
+    let activeListeners = 0;
+    controller.signal.addEventListener = ((...args: Parameters<AbortSignal["addEventListener"]>) => {
+      activeListeners += 1;
+      return originalAdd(...args);
+    }) as AbortSignal["addEventListener"];
+    controller.signal.removeEventListener = ((...args: Parameters<AbortSignal["removeEventListener"]>) => {
+      activeListeners -= 1;
+      return originalRemove(...args);
+    }) as AbortSignal["removeEventListener"];
+
+    const result = await page.tools.get("wait_for_node")!.execute({ nodeId: "later", timeoutMs: 100 }, { signal: controller.signal }) as { isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(activeListeners).toBe(0);
+  });
+
   test("returns a structured timeout when host completion never arrives", async () => {
     const page = modelDocument();
     const bridge: GuaBrowserBridge = {

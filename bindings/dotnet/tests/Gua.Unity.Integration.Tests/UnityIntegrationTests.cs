@@ -73,6 +73,17 @@ public sealed class UnityIntegrationTests
         Assert.That(initialTree.Nodes.Single(node => node.Id == "disabled-canvas-button").Visible, Is.False,
             "Children of a disabled uGUI Canvas must remain in the tree as hidden nodes.");
 
+        const string sensitiveValue = "unity-web-secret";
+        var sensitiveError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "sample-input", sensitiveValue, Sensitive: true),
+            out var sensitiveRequestId);
+        Assert.That(sensitiveError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveRequestId, out var sensitiveResult), Is.True);
+        Assert.That(sensitiveResult.Succeeded, Is.True, $"Sensitive uGUI set_value failed: {sensitiveResult.Error}");
+        Assert.That(sensitiveResult.Value, Is.Empty);
+        Assert.That(WaitForRedactedNode(host, "sample-input", sensitiveValue), Is.True,
+            "Sensitive Unity controls must omit their plaintext from semantic snapshots.");
+
         var integerSlider = initialTree.Nodes.Single(node => node.Role == "slider" && node.Label == "integer-slider");
         var integerSliderError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "7"), out var integerSliderRequestId);
         Assert.That(integerSliderError, Is.EqualTo(GuaActionError.None));
@@ -230,6 +241,24 @@ public sealed class UnityIntegrationTests
             using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
             foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
                 if (node.GetProperty("id").GetString() == id && node.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String && predicate(value.GetString() ?? "")) return true;
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForRedactedNode(UnitySceneTestHost host, string id, string secret)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var json = host.Context.GetUiTreeJson();
+            using var tree = JsonDocument.Parse(json);
+            foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
+            {
+                if (node.GetProperty("id").GetString() != id) continue;
+                if (!node.TryGetProperty("text", out _) && !node.TryGetProperty("value", out _) &&
+                    !json.Contains(secret, StringComparison.Ordinal)) return true;
+            }
             Thread.Sleep(20);
         }
         return false;

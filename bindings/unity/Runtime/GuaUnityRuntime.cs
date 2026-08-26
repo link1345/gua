@@ -25,6 +25,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
     private readonly Dictionary<object, string> clickTargetIds = new();
+    private readonly HashSet<string> sensitiveTargetIds = new(StringComparer.Ordinal);
     private readonly Dictionary<Button, UnityEngine.Events.UnityAction> uGuiClickHandlers = new();
     private readonly Dictionary<UnityEngine.UIElements.Button, Action> visualClickHandlers = new();
     private readonly HashSet<object> suppressedClicks = new();
@@ -257,11 +258,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             : $"{id}/{EscapeId(explicitId)}");
         var role = VisualRole(element);
         var label = VisualLabel(element);
+        var sensitive = sensitiveTargetIds.Contains(resolved);
+        if (sensitive) label = string.IsNullOrWhiteSpace(element.name) ? resolved : element.name;
         var visible = hostVisible && element.resolvedStyle.display != DisplayStyle.None && element.resolvedStyle.visibility == Visibility.Visible;
         var enabled = element.enabledInHierarchy;
         var registered = Register(resolved, role, label, VisualBounds(element), visible, enabled, parentId,
-            text: role is "text" or "textbox" ? label : null,
-            value: VisualValue(element), focused: ReferenceEquals(frameFocusTarget, element),
+            text: !sensitive && (role is "text" or "textbox") ? label : null,
+            value: sensitive ? null : VisualValue(element), focused: ReferenceEquals(frameFocusTarget, element),
             checkedValue: element is UnityEngine.UIElements.Toggle toggle ? toggle.value : null,
             selectedValue: null, range: VisualRange(element), target: new Target(element, role));
         if (registered && element is UnityEngine.UIElements.Button button) ObserveClick(button, resolved);
@@ -319,17 +322,20 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var value = UGuiValue(selectable);
         if (GuaUnityAdapterRegistry.TryDescribe(transform, out var tmpTarget, out var tmpRole, out var tmpLabel, out var tmpValue))
         { actionTarget = tmpTarget; role = tmpRole; label = tmpLabel; value = tmpValue; }
+        var selectableContentLabel = label;
+        var sensitive = sensitiveTargetIds.Contains(id);
+        if (sensitive) label = transform.name;
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
         var suppressAsSelectableLabel = selectable == null && role == "text" && ancestorSelectableLabel != null &&
             string.Equals(label, ancestorSelectableLabel, StringComparison.Ordinal);
         var registered = !suppressAsSelectableLabel && Register(id, role, label, bounds, visible, enabled, parentId,
-            text: role is "text" or "textbox" ? label : null, value: value,
+            text: !sensitive && (role is "text" or "textbox") ? label : null, value: sensitive ? null : value,
             focused: ReferenceEquals(frameFocusTarget, transform.gameObject),
             checkedValue: checkedValue, selectedValue: null, range: range, target: new Target(actionTarget, role, visible, enabled));
         if (registered && actionTarget is Button button) ObserveClick(button, id);
         var childParentId = suppressAsSelectableLabel ? parentId : id;
-        var childSelectableLabel = selectable != null ? label : ancestorSelectableLabel;
+        var childSelectableLabel = selectable != null ? selectableContentLabel : ancestorSelectableLabel;
         for (var i = 0; i < transform.childCount; i++)
             CollectTransform(transform.GetChild(i), childParentId, localCanvas, visited, childSelectableLabel, visible);
     }
@@ -367,6 +373,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             try
             {
                 var success = Apply(pair.Value.Value, request, out var resultValue, out var failure);
+                if (success && request.Action == GuaActionType.SetValue && request.Sensitive)
+                    sensitiveTargetIds.Add(pair.Key);
                 runtime.EmitActionResult(request, success, success ? GuaActionError.None : failure, resultValue);
             }
             catch (Exception error)

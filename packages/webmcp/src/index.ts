@@ -319,8 +319,18 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.")); }, { once: true });
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      settle();
+    };
+    const aborted = () => finish(() => reject(new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.")));
+    const timer = setTimeout(() => finish(resolve), milliseconds);
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) aborted();
   });
 }
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number, signal: AbortSignal | undefined, message: string): Promise<T> {
@@ -341,10 +351,17 @@ function normalizeError(error: unknown, secret?: string): GuaWebError {
   let message = error instanceof Error ? error.message : "The engine bridge failed.";
   if (secret) message = message.split(secret).join("[REDACTED]");
   if (error instanceof GuaWebError) {
-    const details = secret && error.details
-      ? JSON.parse(JSON.stringify(error.details).split(secret).join("[REDACTED]")) as Record<string, unknown>
-      : error.details;
+    const details = secret && error.details ? redactStrings(error.details, secret) as Record<string, unknown> : error.details;
     return new GuaWebError(error.code, message, details);
   }
   return new GuaWebError("action_failed", message);
+}
+
+function redactStrings(value: unknown, secret: string): unknown {
+  if (typeof value === "string") return value.split(secret).join("[REDACTED]");
+  if (Array.isArray(value)) return value.map((item) => redactStrings(item, secret));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactStrings(item, secret)]));
+  }
+  return value;
 }

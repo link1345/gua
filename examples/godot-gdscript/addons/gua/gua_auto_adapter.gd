@@ -26,6 +26,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"emit_click",
 	"poll_event",
 	"enqueue_action",
+	"cancel_action_request",
 	"consume_action_request",
 	"emit_action_result",
 	"poll_event_v2",
@@ -259,6 +260,12 @@ func enqueue_action(request: Dictionary) -> Dictionary:
 	if not _ensure_context():
 		return {"error_code": -1, "request_id": 0}
 	return context.enqueue_action(request)
+
+
+func cancel_action_request(request_id: int) -> int:
+	if not _ensure_context():
+		return 0
+	return context.cancel_action_request(request_id)
 
 
 func poll_event_v2() -> Dictionary:
