@@ -62,7 +62,7 @@ func attach(gua_adapter: RefCounted) -> bool:
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000;
-        const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false, cancelOrDrain: null };
+        const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false, drainDeadline: 0, cancelOrDrain: null };
         const finish = (settle) => {
           clearTimeout(call.timer);
           if (call.signal) call.signal.removeEventListener('abort', call.aborted);
@@ -77,10 +77,14 @@ func attach(gua_adapter: RefCounted) -> bool:
           if (call.signal) call.signal.removeEventListener('abort', call.aborted);
           reject(error);
         };
-        const readResult = () => JSON.parse(pollAction(String(receipt.requestId)));
+        const readResult = () => {
+          const result = JSON.parse(pollAction(String(receipt.requestId)));
+          if (result && result.code) throw engineError(result.code, result.message || 'The Godot Gua adapter is unavailable.');
+          return result;
+        };
         const schedulePoll = () => {
           clearTimeout(call.timer);
-          call.timer = setTimeout(poll, 0);
+          call.timer = setTimeout(poll, call.discardResult ? 10 : 0);
         };
         const cancelOrDrain = (error) => {
           let cancellationResult;
@@ -92,6 +96,7 @@ func attach(gua_adapter: RefCounted) -> bool:
             return finish(() => reject(error));
           }
           call.discardResult = true;
+          call.drainDeadline = performance.now() + 5000;
           rejectWithoutDropping(error);
           schedulePoll();
         };
@@ -106,7 +111,10 @@ func attach(gua_adapter: RefCounted) -> bool:
           try {
             const result = readResult();
             if (result) return finish(() => resolve(result));
-            if (call.discardResult) return schedulePoll();
+            if (call.discardResult) {
+              if (performance.now() >= call.drainDeadline) return finish(() => {});
+              return schedulePoll();
+            }
             if (performance.now() >= deadline) {
               return cancelOrDrain(engineError('timeout', 'Timed out waiting for Godot host completion.'));
             }
@@ -189,7 +197,7 @@ func _enqueue_action(arguments: Array) -> String:
 func _poll_action(arguments: Array) -> String:
 	var adapter := _adapter()
 	if adapter == null:
-		return "null"
+		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
 	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
 	var result: Dictionary = adapter.poll_action_result(request_id)
 	return "null" if result.is_empty() else JSON.stringify(result)

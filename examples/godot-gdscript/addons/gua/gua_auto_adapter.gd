@@ -527,7 +527,8 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		descriptor["scroll_max_y"] = scroll.get_v_scroll_bar().max_value
 	if control is Range:
 		var range := control as Range
-		descriptor["range_value"] = range.value
+		if not (control.has_meta(META_SENSITIVE) and control.get_meta(META_SENSITIVE)):
+			descriptor["range_value"] = range.value
 		descriptor["range_min"] = range.min_value
 		descriptor["range_max"] = range.max_value
 	if control is OptionButton:

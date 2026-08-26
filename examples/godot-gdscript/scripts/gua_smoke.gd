@@ -327,6 +327,15 @@ func _run() -> void:
 	if ui.get_ui_tree_json().contains("secret-marker"):
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
 		return
+	var sensitive_range := ui.enqueue_action({"action": "set_value", "node_id": "volume", "value": "37", "sensitive": true})
+	ui.update("title")
+	var sensitive_range_event := ui.poll_event_v2()
+	ui.update("title")
+	var sensitive_range_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "volume")
+	if sensitive_range_event.get("request_id", 0) != sensitive_range.get("request_id", 0) \
+			or sensitive_range_node == null or sensitive_range_node.get("state", {}).has("rangeValue"):
+		_fail("Gua smoke leaked a sensitive range value: %s / %s" % [sensitive_range_event, sensitive_range_node])
+		return
 
 	var preinstall_schedule_count := [0]
 	ui.clock_schedule(20.0, func(): preinstall_schedule_count[0] += 1)

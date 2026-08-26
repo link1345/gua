@@ -203,7 +203,7 @@ async function executeTool(
       throw new GuaWebError("invalid_request", "The engine bridge returned no request-correlated completion.");
     }
     if (!completion.succeeded) {
-      throw new GuaWebError("action_failed", `The host rejected ${request.action} for ${request.nodeId ?? "current focus"}.`, {
+      throw new GuaWebError(completionErrorCode(completion.error), `The host rejected ${request.action} for ${request.nodeId ?? "current focus"}.`, {
         requestId: completion.requestId,
         hostError: completion.error ?? "unknown",
       });
@@ -389,6 +389,30 @@ function normalizeError(error: unknown, secret?: string): GuaWebError {
     return new GuaWebError(error.code, message, details);
   }
   return new GuaWebError("action_failed", message);
+}
+
+function completionErrorCode(error: GuaWebActionCompletion["error"]): GuaWebErrorCode {
+  switch (error) {
+    case -2:
+    case "-2":
+    case "node_not_found":
+      return "node_not_found";
+    case -3:
+    case "-3":
+    case "hidden":
+      return "hidden";
+    case -4:
+    case "-4":
+    case "disabled":
+      return "disabled";
+    case -5:
+    case "-5":
+    case "unsupported":
+    case "unsupported_action":
+      return "unsupported_action";
+    default:
+      return "action_failed";
+  }
 }
 
 function redactStrings(value: unknown, secret: string): unknown {

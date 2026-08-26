@@ -88,6 +88,28 @@ describe("Godot Web same-page port", () => {
     expect(cancelled).toEqual(["17"]);
   });
 
+  test("stops uninstall drain polling when the Godot producer disappears", async () => {
+    const cancelled: string[] = [];
+    let polls = 0;
+    const port = await installGodotWebPort(cancelled, {
+      cancellationResult: -1,
+      pollAction: () => JSON.stringify(++polls >= 2
+        ? { code: "engine_unsupported", message: "The Godot Gua adapter is no longer available." }
+        : null),
+    });
+    const pending = port
+      .invoke({ type: "perform_action", request: { action: "click", nodeId: "start" } })
+      .catch((error) => error);
+
+    port.__guaUninstall();
+
+    await expect(pending).resolves.toMatchObject({ code: "engine_unsupported" });
+    await waitFor(() => polls >= 2);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(polls).toBe(2);
+    expect(cancelled).toEqual(["17"]);
+  });
+
   test("drains an already-emitted completion when uninstall cancellation reports not found", async () => {
     const cancelled: string[] = [];
     let polls = 0;

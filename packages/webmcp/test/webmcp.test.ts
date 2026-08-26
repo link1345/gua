@@ -127,6 +127,26 @@ describe("registerGuaWebMcp", () => {
     expect(JSON.parse(result.content[0]!.text).error.code).toBe("hidden");
   });
 
+  test.each([
+    [-2, "node_not_found"],
+    [-3, "hidden"],
+    [-4, "disabled"],
+    [-5, "unsupported_action"],
+    ["unsupported_action", "unsupported_action"],
+    [-6, "action_failed"],
+  ] as const)("preserves host completion error %s as %s", async (hostError, expectedCode) => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([button()]),
+      performAction: async () => ({ requestId: 42, action: "click", nodeId: "start", succeeded: false, error: hostError }),
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+
+    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
+
+    expect(JSON.parse(result.content[0]!.text).error).toMatchObject({ code: expectedCode, details: { hostError } });
+  });
+
   test("waits on fresh snapshots and redacts sensitive completion values", async () => {
     const page = modelDocument();
     let reads = 0;
