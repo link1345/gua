@@ -51,6 +51,65 @@ int action_type(const godot::String& name)
     return 0;
 }
 
+int field_mode(const godot::String& name)
+{
+    if (name == "keep") return GUA_AGENT_FIELD_KEEP;
+    if (name == "omit") return GUA_AGENT_FIELD_OMIT;
+    if (name == "redact") return GUA_AGENT_FIELD_REDACT;
+    if (name == "replace") return GUA_AGENT_FIELD_REPLACE;
+    if (name == "quantize") return GUA_AGENT_FIELD_QUANTIZE;
+    return -1;
+}
+
+struct AgentPolicyStorage {
+    std::vector<godot::CharString> paths, strings;
+    std::vector<gua_agent_field_rule_v1_t> rules;
+    gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t) };
+};
+
+bool agent_policy(const godot::Dictionary& source, AgentPolicyStorage& storage)
+{
+    const godot::String exposure = source.get("agent_exposure", godot::String("auto"));
+    if (exposure != "auto" && exposure != "private") return false;
+    storage.policy.exposure = exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO;
+    const godot::Array rules = source.get("agent_field_rules", godot::Array());
+    storage.paths.reserve(rules.size()); storage.strings.reserve(rules.size()); storage.rules.reserve(rules.size());
+    for (int index = 0; index < rules.size(); ++index) {
+        if (static_cast<godot::Variant>(rules[index]).get_type() != godot::Variant::DICTIONARY) return false;
+        const godot::Dictionary rule = rules[index];
+        const godot::String path = rule.get("path", godot::String()), mode_name = rule.get("mode", godot::String("keep"));
+        const int mode = field_mode(mode_name);
+        if (path.is_empty() || mode < 0) return false;
+        const godot::Variant replacement = rule.get("replacement", godot::Variant());
+        int replacement_type = GUA_WORLD_VALUE_NULL;
+        if (replacement.get_type() == godot::Variant::STRING) replacement_type = GUA_WORLD_VALUE_STRING;
+        else if (replacement.get_type() == godot::Variant::INT || replacement.get_type() == godot::Variant::FLOAT) replacement_type = GUA_WORLD_VALUE_NUMBER;
+        else if (replacement.get_type() == godot::Variant::BOOL) replacement_type = GUA_WORLD_VALUE_BOOLEAN;
+        else if (replacement.get_type() != godot::Variant::NIL) return false;
+        storage.paths.push_back(path.utf8());
+        storage.strings.push_back(replacement_type == GUA_WORLD_VALUE_STRING ? godot::String(replacement).utf8() : godot::CharString());
+        storage.rules.push_back(gua_agent_field_rule_v1_t { sizeof(gua_agent_field_rule_v1_t), nullptr, mode, replacement_type, nullptr,
+            replacement_type == GUA_WORLD_VALUE_NUMBER ? static_cast<double>(replacement) : 0.0,
+            replacement_type == GUA_WORLD_VALUE_BOOLEAN && static_cast<bool>(replacement) ? 1 : 0,
+            static_cast<double>(rule.get("quantum", 0.0)) });
+    }
+    for (std::size_t index = 0; index < storage.rules.size(); ++index) {
+        storage.rules[index].path = storage.paths[index].get_data();
+        if (storage.rules[index].mode == GUA_AGENT_FIELD_REPLACE && storage.rules[index].replacement_type == GUA_WORLD_VALUE_STRING)
+            storage.rules[index].string_value = storage.strings[index].get_data();
+    }
+    const godot::Array actions = source.get("agent_allowed_actions", godot::Array());
+    storage.policy.has_allowed_actions = source.get("agent_allowed_actions_set", false) ? 1 : 0;
+    for (int index = 0; index < actions.size(); ++index) {
+        const int action = action_type(godot::String(actions[index]));
+        if (action == 0) return false;
+        storage.policy.allowed_actions |= 1ULL << static_cast<unsigned int>(action);
+    }
+    storage.policy.field_rules = storage.rules.data();
+    storage.policy.field_rule_count = static_cast<uint32_t>(storage.rules.size());
+    return true;
+}
+
 const char* action_name(int action)
 {
     switch (action) {
@@ -273,7 +332,10 @@ bool GuaContext::register_node_v2(const Dictionary& source)
         source.get("scroll_x", 0.0), source.get("scroll_y", 0.0), source.get("scroll_max_x", 0.0), source.get("scroll_max_y", 0.0),
         source.get("range_value", 0.0), source.get("range_min", 0.0), source.get("range_max", 0.0), source.get("selected_index", -1)
     };
-    return gua_runtime_register_node_v3(runtime_, &detailed) != 0;
+    AgentPolicyStorage policy;
+    if (!agent_policy(source, policy)) return false;
+    const gua_node_descriptor_v4_t secured { sizeof(gua_node_descriptor_v4_t), detailed, policy.policy };
+    return gua_runtime_register_node_v4(runtime_, &secured) != 0;
 }
 
 bool GuaContext::begin_world_frame(const String& scene)
@@ -325,7 +387,12 @@ bool GuaContext::register_world_object(const Dictionary& source)
         exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO,
         domain.is_empty() ? nullptr : domain8.get_data(), related.is_empty() ? nullptr : related8.get_data(),
         tag_pointers.data(), static_cast<uint32_t>(tag_pointers.size()), state_values.data(), static_cast<uint32_t>(state_values.size()) };
-    return gua_runtime_register_world_object_v1(runtime_, &descriptor) != 0;
+    AgentPolicyStorage policy;
+    Dictionary policy_source = source;
+    policy_source["agent_allowed_actions_set"] = source.has("agent_allowed_actions");
+    if (!agent_policy(policy_source, policy)) return reject();
+    const gua_world_object_descriptor_v2_t secured { sizeof(gua_world_object_descriptor_v2_t), descriptor, policy.policy };
+    return gua_runtime_register_world_object_v2(runtime_, &secured) != 0;
 }
 
 bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }

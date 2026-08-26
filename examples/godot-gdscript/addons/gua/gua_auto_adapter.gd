@@ -185,7 +185,10 @@ func _publish_world_frame(scene: String) -> void:
 			"position": position,
 			"visible_to_player": visible_to_player,
 			"active": active,
-			"agent_exposure": str(node.get_meta(&"gua_world_agent_exposure", "auto")),
+			"agent_exposure": str(node.get_meta(&"gua_agent_exposure", node.get_meta(&"gua_world_agent_exposure", "auto"))),
+			"agent_field_rules": node.get_meta(&"gua_agent_field_rules", node.get_meta(&"gua_world_agent_field_rules", [])),
+			"agent_allowed_actions": node.get_meta(&"gua_agent_allowed_actions", node.get_meta(&"gua_world_agent_allowed_actions", [])),
+			"agent_allowed_actions_set": node.has_meta(&"gua_agent_allowed_actions") or node.has_meta(&"gua_world_agent_allowed_actions"),
 			"tags": node.get_meta(&"gua_world_tags", []),
 			"state": node.get_meta(&"gua_world_state", {}),
 			"domain_id": str(node.get_meta(&"gua_world_domain_id", "")),
@@ -539,6 +542,10 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		"visible": control.is_visible_in_tree(),
 		"enabled": _control_enabled(control),
 		"focused": _control_focused(control),
+		"agent_exposure": str(control.get_meta(&"gua_agent_exposure", "auto")),
+		"agent_field_rules": control.get_meta(&"gua_agent_field_rules", []),
+		"agent_allowed_actions": control.get_meta(&"gua_agent_allowed_actions", []),
+		"agent_allowed_actions_set": control.has_meta(&"gua_agent_allowed_actions"),
 	}
 	if not parent_id.is_empty():
 		descriptor["parent_id"] = parent_id
@@ -637,7 +644,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0)
+			var error_code := -2 if not _agent_action_allowed(button, "click") else (-3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -657,7 +664,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0)
+			var error_code := -2 if not _agent_action_allowed(tab_container, "click") else (-3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -710,7 +717,24 @@ func _dispatch_action_requests() -> void:
 		})
 
 
+func _agent_action_allowed(target: Node, action: String) -> bool:
+	var current: Node = target
+	var target_node := true
+	while current != null:
+		if str(current.get_meta(&"gua_agent_exposure", "auto")) == "private":
+			return false
+		if target_node and current.has_meta(&"gua_agent_allowed_actions"):
+			var allowed: Array = current.get_meta(&"gua_agent_allowed_actions", [])
+			if not allowed.has(action):
+				return false
+		target_node = false
+		current = current.get_parent()
+	return true
+
+
 func _apply_action(control: Control, action: String, request: Dictionary) -> int:
+	if not _agent_action_allowed(control, action):
+		return -2
 	if not control.is_visible_in_tree():
 		return -3
 	if not _control_enabled(control):
@@ -801,6 +825,8 @@ func _select_derived_item(target: Dictionary) -> int:
 	var index := int(target["index"])
 	if target.has("list"):
 		var item_list := target["list"] as ItemList
+		if not _agent_action_allowed(item_list, "select"):
+			return -2
 		if not item_list.is_visible_in_tree():
 			return -3
 		if item_list.is_item_disabled(index):
@@ -809,6 +835,8 @@ func _select_derived_item(target: Dictionary) -> int:
 		item_list.item_selected.emit(index)
 		return 0
 	var tab_container := target["container"] as TabContainer
+	if not _agent_action_allowed(tab_container, "select"):
+		return -2
 	if not tab_container.is_visible_in_tree():
 		return -3
 	if tab_container.is_tab_disabled(index):

@@ -224,6 +224,35 @@ enum {
 };
 
 enum {
+    GUA_AGENT_FIELD_KEEP = 0,
+    GUA_AGENT_FIELD_OMIT = 1,
+    GUA_AGENT_FIELD_REDACT = 2,
+    GUA_AGENT_FIELD_REPLACE = 3,
+    GUA_AGENT_FIELD_QUANTIZE = 4
+};
+
+typedef struct gua_agent_field_rule_v1_t {
+    uint32_t struct_size;
+    const char* path;
+    int mode;
+    /* Uses GUA_WORLD_VALUE_* primitive tags. */
+    int replacement_type;
+    const char* string_value;
+    double number_value;
+    int bool_value;
+    double quantum;
+} gua_agent_field_rule_v1_t;
+
+typedef struct gua_agent_policy_v1_t {
+    uint32_t struct_size;
+    int exposure;
+    int has_allowed_actions;
+    uint64_t allowed_actions;
+    const gua_agent_field_rule_v1_t* field_rules;
+    uint32_t field_rule_count;
+} gua_agent_policy_v1_t;
+
+enum {
     GUA_OBSERVATION_PROFILE_DEBUG = 0,
     GUA_OBSERVATION_PROFILE_PLAYER = 1
 };
@@ -265,6 +294,12 @@ typedef struct gua_world_object_descriptor_v1_t {
     const gua_world_state_value_v1_t* state_values;
     uint32_t state_value_count;
 } gua_world_object_descriptor_v1_t;
+
+typedef struct gua_world_object_descriptor_v2_t {
+    uint32_t struct_size;
+    gua_world_object_descriptor_v1_t base;
+    gua_agent_policy_v1_t agent_policy;
+} gua_world_object_descriptor_v2_t;
 
 typedef struct gua_world_selector_v1_t {
     uint32_t struct_size;
@@ -350,6 +385,12 @@ typedef struct gua_node_descriptor_v3_t {
     int64_t selected_index;
 } gua_node_descriptor_v3_t;
 
+typedef struct gua_node_descriptor_v4_t {
+    uint32_t struct_size;
+    gua_node_descriptor_v3_t base;
+    gua_agent_policy_v1_t agent_policy;
+} gua_node_descriptor_v4_t;
+
 typedef struct gua_node_state_v3_t {
     uint32_t struct_size;
     gua_node_state_v2_t base;
@@ -418,10 +459,12 @@ void gua_register_node(
 );
 int gua_register_node_v2(gua_context_t* ctx, const gua_node_descriptor_v2_t* descriptor);
 int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor);
+int gua_register_node_v4(gua_context_t* ctx, const gua_node_descriptor_v4_t* descriptor);
 
 const char* gua_get_ui_tree_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_copy_ui_tree_json(gua_context_t* ctx, char* out_json, int out_json_size);
+int gua_copy_ui_tree_json_for_profile(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
 void gua_add_log(gua_context_t* ctx, int level, const char* message);
 const char* gua_get_logs_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -437,6 +480,7 @@ int gua_set_diagnostics_environment_json(gua_context_t* ctx, const char* environ
 const char* gua_get_diagnostics_json(gua_context_t* ctx);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_copy_diagnostics_json(gua_context_t* ctx, char* out_json, int out_json_size);
+int gua_copy_diagnostics_json_for_profile(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
 /* Returns version/capability JSON. The required byte size includes the trailing NUL. */
 int gua_copy_version_json(char* out_json, int out_json_size);
 int gua_clock_install(gua_context_t* ctx, double initial_time_ms, double step_ms);
@@ -451,14 +495,20 @@ int gua_clock_consume_step(gua_context_t* ctx, gua_clock_step_t* out_step);
 int gua_get_node_state(gua_context_t* ctx, const char* node_id, gua_node_state_t* out_state);
 /* Returns 0 rather than a partial state when a v2 string does not fit its fixed output buffer. */
 int gua_get_node_state_v2(gua_context_t* ctx, const char* node_id, gua_node_state_v2_t* out_state);
+int gua_get_node_state_v2_for_profile(gua_context_t* ctx, const char* node_id, int observation_profile, gua_node_state_v2_t* out_state);
 int gua_get_node_state_v3(gua_context_t* ctx, const char* node_id, gua_node_state_v3_t* out_state);
 int gua_find_node_by_id(gua_context_t* ctx, const char* node_id, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_role(gua_context_t* ctx, const char* role, const char* name, char* out_node_id, int out_node_id_size);
 int gua_find_node_by_text(gua_context_t* ctx, const char* text, char* out_node_id, int out_node_id_size);
+int gua_find_node_by_id_for_profile(gua_context_t* ctx, const char* node_id, int observation_profile, char* out_node_id, int out_node_id_size);
+int gua_find_node_by_role_for_profile(gua_context_t* ctx, const char* role, const char* name, int observation_profile, char* out_node_id, int out_node_id_size);
+int gua_find_node_by_text_for_profile(gua_context_t* ctx, const char* text, int observation_profile, char* out_node_id, int out_node_id_size);
 /* Returns the required JSON byte size including the trailing NUL. The result contains valid, matches, and optional error fields. */
 int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t* selector, char* out_json, int out_json_size);
+int gua_query_nodes_json_for_profile(gua_context_t* ctx, const gua_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size);
 int gua_begin_world_frame(gua_context_t* ctx, const char* scene);
 int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor);
+int gua_register_world_object_v2(gua_context_t* ctx, const gua_world_object_descriptor_v2_t* descriptor);
 int gua_end_world_frame(gua_context_t* ctx);
 int gua_abort_world_frame(gua_context_t* ctx);
 int gua_copy_world_object_tree_json(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
@@ -468,12 +518,17 @@ int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
 int gua_emit_click(gua_context_t* ctx, const char* node_id);
 int gua_poll_event(gua_context_t* ctx, gua_event_t* out_event);
 int gua_enqueue_action(gua_context_t* ctx, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+int gua_enqueue_action_for_profile(gua_context_t* ctx, const gua_action_request_descriptor_t* descriptor, int observation_profile, uint64_t* out_request_id);
 int gua_consume_action_request(gua_context_t* ctx, int action, const char* node_id, gua_action_request_t* out_request);
 int gua_emit_action_result(gua_context_t* ctx, const gua_action_result_t* result);
 int gua_poll_event_v2(gua_context_t* ctx, gua_event_v2_t* out_event);
 int gua_poll_event_v2_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v2_t* out_event);
+int gua_poll_event_v2_for_profile(gua_context_t* ctx, int observation_profile, gua_event_v2_t* out_event);
+int gua_poll_event_v2_for_request_and_profile(gua_context_t* ctx, uint64_t request_id, int observation_profile, gua_event_v2_t* out_event);
 int gua_poll_event_v3(gua_context_t* ctx, gua_event_v3_t* out_event);
 int gua_poll_event_v3_for_request(gua_context_t* ctx, uint64_t request_id, gua_event_v3_t* out_event);
+int gua_poll_event_v3_for_profile(gua_context_t* ctx, int observation_profile, gua_event_v3_t* out_event);
+int gua_poll_event_v3_for_request_and_profile(gua_context_t* ctx, uint64_t request_id, int observation_profile, gua_event_v3_t* out_event);
 int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status);
 int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report);
 

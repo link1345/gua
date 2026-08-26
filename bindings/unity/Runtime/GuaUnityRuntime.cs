@@ -146,7 +146,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                     source.VisibleToPlayer, source.Active, parentId, source.Description,
                     source.AgentExposure, source.Tags, source.State,
                     string.IsNullOrEmpty(source.DomainId) ? null : source.DomainId,
-                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId));
+                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId,
+                    source.GetComponent<GuaAgentPolicyComponent>()?.Policy));
             }
             runtime.EndWorldFrame();
             published = true;
@@ -279,7 +280,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (!ids.Add(id)) { runtime!.AddLog(3, $"Duplicate Unity Gua id ignored: {id}"); return false; }
         runtime!.RegisterNode(new GuaNodeDescriptor(id, role, label, bounds, visible, enabled, parentId, text, value,
             Focused: focused, Checked: checkedValue, Selected: selectedValue,
-            RangeValue: range.value, RangeMin: range.min, RangeMax: range.max));
+            RangeValue: range.value, RangeMin: range.min, RangeMax: range.max,
+            AgentPolicy: GuaUnityAdapterRegistry.PolicyFor(target.Value)));
         targets[id] = new Target(target.Value, target.Role, visible, enabled);
         return true;
     }
@@ -290,14 +292,19 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         foreach (var action in SupportedActions(pair.Value.Role))
         while (runtime!.TryConsumeAction(action, pair.Key, out var request))
         {
-            if (!pair.Value.Visible)
+            if (!pair.Value.Visible || !IsCurrentlyVisible(pair.Value.Value))
             {
                 runtime.EmitActionResult(request, false, GuaActionError.Hidden);
                 continue;
             }
-            if (!pair.Value.Enabled)
+            if (!pair.Value.Enabled || !IsCurrentlyEnabled(pair.Value.Value))
             {
                 runtime.EmitActionResult(request, false, GuaActionError.Disabled);
+                continue;
+            }
+            if (!IsAgentAuthorizedNow(pair.Value.Value, request.Action))
+            {
+                runtime.EmitActionResult(request, false, GuaActionError.NodeNotFound);
                 continue;
             }
             var suppressObservedClick = request.Action == GuaActionType.Click && clickTargetIds.ContainsKey(pair.Value.Value);
@@ -324,9 +331,10 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             var focused = targets.Values.FirstOrDefault(target => IsFrameFocused(target.Value));
             string? value = null;
             var failure = GuaActionError.Unsupported;
-            if (focused != null && !focused.Visible) failure = GuaActionError.Hidden;
-            else if (focused != null && !focused.Enabled) failure = GuaActionError.Disabled;
-            var ok = focused != null && focused.Visible && focused.Enabled && Apply(focused.Value, global, out value, out failure);
+            if (focused != null && (!focused.Visible || !IsCurrentlyVisible(focused.Value))) failure = GuaActionError.Hidden;
+            else if (focused != null && (!focused.Enabled || !IsCurrentlyEnabled(focused.Value))) failure = GuaActionError.Disabled;
+            else if (focused != null && !IsAgentAuthorizedNow(focused.Value, global.Action)) failure = GuaActionError.NodeNotFound;
+            var ok = focused != null && failure == GuaActionError.Unsupported && Apply(focused.Value, global, out value, out failure);
             runtime.EmitActionResult(global, ok, ok ? GuaActionError.None : failure, value);
         }
     }
@@ -586,6 +594,36 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         Component component => ReferenceEquals(frameFocusTarget, component.gameObject),
         _ => false,
     };
+    private static bool IsCurrentlyVisible(object target) => target switch
+    {
+        VisualElement visual => visual.panel != null && visual.visible && visual.resolvedStyle.display != DisplayStyle.None,
+        ListItemTarget item => item.List.panel != null && item.List.visible && item.List.resolvedStyle.display != DisplayStyle.None,
+        Behaviour behaviour => behaviour.isActiveAndEnabled && behaviour.gameObject.activeInHierarchy,
+        Component component => component.gameObject.activeInHierarchy,
+        _ => false,
+    };
+    private static bool IsCurrentlyEnabled(object target) => target switch
+    {
+        VisualElement visual => visual.enabledInHierarchy,
+        ListItemTarget item => item.List.enabledInHierarchy,
+        Selectable selectable => selectable.IsInteractable(),
+        Behaviour behaviour => behaviour.isActiveAndEnabled,
+        Component component => component.gameObject.activeInHierarchy,
+        _ => false,
+    };
+    private static bool IsAgentAuthorizedNow(object target, GuaActionType action)
+    {
+        var policy = GuaUnityAdapterRegistry.PolicyFor(target);
+        if (policy?.Exposure == GuaAgentExposure.Private ||
+            (policy?.AllowedActions != null && !policy.AllowedActions.Contains(action))) return false;
+        if (target is Component component)
+            for (var parent = component.transform.parent; parent != null; parent = parent.parent)
+                if (parent.GetComponent<GuaAgentPolicyComponent>()?.Policy.Exposure == GuaAgentExposure.Private) return false;
+        if (target is VisualElement visual)
+            for (var parent = visual.parent; parent != null; parent = parent.parent)
+                if (GuaUnityAdapterRegistry.PolicyFor(parent)?.Exposure == GuaAgentExposure.Private) return false;
+        return true;
+    }
     private sealed class ListItemTarget
     {
         internal ListItemTarget(ListView list, int index) { List = list; Index = index; }

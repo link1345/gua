@@ -17,6 +17,32 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void AgentPolicyProjectsUiFieldsAndKeepsDebugTreeComplete()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("policy");
+        context.RegisterNode(new GuaNodeDescriptor("public", "button", "Secret label", new GuaBounds(17, 2, 20, 10),
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [
+                new("label", GuaAgentFieldMode.Redact),
+                new("bounds.x", GuaAgentFieldMode.Quantize, Quantum: 10),
+            ], AllowedActions: [GuaActionType.Focus])));
+        context.RegisterNode(new GuaNodeDescriptor("private", "button", "Private label", new GuaBounds(0, 0, 1, 1),
+            AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Private)));
+        context.EndFrame();
+
+        var debug = context.GetUiTreeJson(GuaObservationProfile.Debug);
+        var player = context.GetUiTreeJson(GuaObservationProfile.Player);
+        Assert.Multiple(() =>
+        {
+            Assert.That(debug, Does.Contain("Secret label").And.Contain("Private label"));
+            Assert.That(player, Does.Contain("[redacted]").And.Contain("\"x\":10.000"));
+            Assert.That(player, Does.Not.Contain("Private label"));
+            Assert.That(player, Does.Contain("\"actions\":[\"focus\"]"));
+            Assert.That(context.GetDiagnosticsJson(GuaObservationProfile.Player), Does.Not.Contain("Private label"));
+        });
+    }
+
+    [Test]
     public void WorldObjectTreePublishesQueriesProjectsAndResetsIndependently()
     {
         using var context = new GuaContext();

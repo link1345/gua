@@ -32,8 +32,11 @@ internal static partial class Native
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern int gua_register_node_v3(nint context, in GuaNativeNodeDescriptorV3 descriptor);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int gua_register_node_v4(nint context, in GuaNativeNodeDescriptorV4 descriptor);
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_begin_world_frame(nint context, [MarshalAs(UnmanagedType.LPUTF8Str)] string scene);
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_register_world_object_v1(nint context, in GuaNativeWorldObjectDescriptorV1 descriptor);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_register_world_object_v2(nint context, in GuaNativeWorldObjectDescriptorV2 descriptor);
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_end_world_frame(nint context);
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_abort_world_frame(nint context);
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
@@ -44,6 +47,8 @@ internal static partial class Native
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int gua_copy_ui_tree_json(nint context, byte* outJson, int outJsonSize);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int gua_copy_ui_tree_json_for_profile(nint context, int profile, byte* outJson, int outJsonSize);
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern void gua_add_log(nint context, int level, [MarshalAs(UnmanagedType.LPUTF8Str)] string message);
@@ -71,6 +76,8 @@ internal static partial class Native
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int gua_copy_diagnostics_json(nint context, byte* outJson, int outJsonSize);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int gua_copy_diagnostics_json_for_profile(nint context, int profile, byte* outJson, int outJsonSize);
 
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int gua_copy_version_json(byte* outJson, int outJsonSize);
