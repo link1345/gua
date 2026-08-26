@@ -215,13 +215,45 @@ describe("registerGuaWebMcp", () => {
 
   test("returns a structured timeout when host completion never arrives", async () => {
     const page = modelDocument();
+    let engineSignal: AbortSignal | undefined;
     const bridge: GuaBrowserBridge = {
       getUiTree: async () => tree([button()]),
-      performAction: async () => new Promise(() => {}),
+      performAction: async (_request, options) => {
+        engineSignal = options?.signal;
+        return await new Promise((_resolve, reject) => options?.signal?.addEventListener(
+          "abort", () => reject(new GuaWebError("aborted", "Engine action cancelled.")), { once: true },
+        ));
+      },
     };
     await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 0 });
     const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
     expect(JSON.parse(result.content[0]!.text).error.code).toBe("timeout");
+    expect(engineSignal?.aborted).toBe(true);
+  });
+
+  test("propagates caller aborts to an enqueued engine action", async () => {
+    const page = modelDocument();
+    let engineSignal: AbortSignal | undefined;
+    let markActionStarted!: () => void;
+    const actionStarted = new Promise<void>((resolve) => { markActionStarted = resolve; });
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([button()]),
+      performAction: async (_request, options) => {
+        engineSignal = options?.signal;
+        markActionStarted();
+        return await new Promise((_resolve, reject) => options?.signal?.addEventListener(
+          "abort", () => reject(new GuaWebError("aborted", "Engine action cancelled.")), { once: true },
+        ));
+      },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const controller = new AbortController();
+    const pending = page.tools.get("click_node")!.execute({ nodeId: "start" }, { signal: controller.signal });
+    await actionStarted;
+    controller.abort();
+    const result = await pending as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("aborted");
+    expect(engineSignal?.aborted).toBe(true);
   });
 
   test("times out stalled semantic tree reads", async () => {
@@ -273,9 +305,11 @@ describe("registerGuaWebMcp", () => {
 describe("Gua same-page engine port", () => {
   test("maps protocol commands without a transport or session router", async () => {
     const commands: unknown[] = [];
+    const signals: Array<AbortSignal | undefined> = [];
     const bridge = createGuaInPageBridge({
-      async invoke(command) {
+      async invoke(command, options) {
         commands.push(command);
+        signals.push(options?.signal);
         if (command.type === "get_ui_tree") return JSON.stringify(tree([button()]));
         if (command.type === "perform_action") return {
           requestId: 7, action: command.request.action, nodeId: command.request.nodeId,
@@ -285,11 +319,13 @@ describe("Gua same-page engine port", () => {
       },
     });
     expect((await bridge.getUiTree()).nodes[0]?.id).toBe("start");
-    expect((await bridge.performAction({ action: "click", nodeId: "start" })).requestId).toBe(7);
+    const controller = new AbortController();
+    expect((await bridge.performAction({ action: "click", nodeId: "start" }, { signal: controller.signal })).requestId).toBe(7);
     expect(commands).toEqual([
       { type: "get_ui_tree" },
       { type: "perform_action", request: { action: "click", nodeId: "start" } },
     ]);
+    expect(signals).toEqual([undefined, controller.signal]);
   });
 
   test("preserves protocol top-level node text and value", async () => {

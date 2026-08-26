@@ -391,7 +391,9 @@ state, and the advertised action but never owns or recreates the semantic tree.
 
 Feature detection is required. Missing WebMCP, a missing engine bridge, invalid
 input, unsupported action, host failure, timeout, and cancellation are structured
-errors. `get_screenshot` is registered only after the engine supplies a drawable
+errors. Browser action timeouts and caller aborts propagate to the engine-owned
+in-page bridge, which cancels the correlated native request when it is still
+queued before returning the structured error. `get_screenshot` is registered only after the engine supplies a drawable
 frame readback path. Sensitive values may reach the host action consumer but are
 blank in completion results and absent from logs and error details.
 

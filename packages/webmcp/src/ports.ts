@@ -1,8 +1,8 @@
-import { GuaWebError, type GuaBrowserBridge, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest } from "./index.js";
+import { GuaWebError, type GuaBridgeCallOptions, type GuaBrowserBridge, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest } from "./index.js";
 
 export interface GuaInPagePort {
   /** A same-page engine call. No network transport or session routing is permitted here. */
-  invoke(command: GuaInPageCommand): Promise<unknown>;
+  invoke(command: GuaInPageCommand, options?: GuaBridgeCallOptions): Promise<unknown>;
 }
 
 export type GuaInPageCommand =
@@ -15,7 +15,7 @@ export interface GuaInPageBridgeOptions { screenshot?: boolean }
 export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
   const bridge: GuaBrowserBridge = {
     getUiTree: async () => parseTree(await invoke(port, { type: "get_ui_tree" })),
-    performAction: async (request) => parseCompletion(await invoke(port, { type: "perform_action", request })),
+    performAction: async (request, callOptions) => parseCompletion(await invoke(port, { type: "perform_action", request }, callOptions)),
   };
   if (options.screenshot) bridge.getScreenshot = async () => parseScreenshot(await invoke(port, { type: "get_screenshot" }));
   return bridge;
@@ -37,8 +37,8 @@ function globalPort(name: string, engine: string): GuaInPagePort {
   return port;
 }
 
-async function invoke(port: GuaInPagePort, command: GuaInPageCommand): Promise<unknown> {
-  try { return await port.invoke(command); }
+async function invoke(port: GuaInPagePort, command: GuaInPageCommand, options?: GuaBridgeCallOptions): Promise<unknown> {
+  try { return await port.invoke(command, options); }
   catch (error) {
     if (error instanceof GuaWebError) throw error;
     const record = asRecord(error);

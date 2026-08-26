@@ -15,13 +15,22 @@ mergeInto(LibraryManager.library, {
       try { SendMessage(hostName, 'HandleWebCancellation', String(callId)); } catch (_error) { }
     };
 
+    const takePending = function (callId) {
+      const entry = pending.get(callId);
+      if (!entry) return null;
+      pending.delete(callId);
+      clearTimeout(entry.timer);
+      if (entry.signal) entry.signal.removeEventListener('abort', entry.aborted);
+      return entry;
+    };
+
     const rejectPending = function (code, message) {
-      for (const [callId, entry] of pending.entries()) {
-        clearTimeout(entry.timer);
+      for (const callId of Array.from(pending.keys())) {
+        const entry = takePending(callId);
+        if (!entry) continue;
         cancelHostCall(callId);
         entry.reject({ code, message });
       }
-      pending.clear();
     };
 
     state.uninstall = function (code, message) {
@@ -37,10 +46,8 @@ mergeInto(LibraryManager.library, {
     globalThis.__guaUnityWebState = state;
     globalThis.__guaUnityWebResolveInternal = function (resolvedOwnerId, callId, payload, failed) {
       if (resolvedOwnerId !== ownerId || state.disposed) return;
-      const entry = pending.get(callId);
+      const entry = takePending(callId);
       if (!entry) return;
-      pending.delete(callId);
-      clearTimeout(entry.timer);
       try {
         const value = JSON.parse(payload);
         if (failed) entry.reject(value); else entry.resolve(value);
@@ -50,24 +57,37 @@ mergeInto(LibraryManager.library, {
     };
     globalThis.__guaUnityWebPort = {
       __guaOwnerId: ownerId,
-      invoke(command) {
+      invoke(command, options) {
         if (state.disposed) return Promise.reject({ code: 'engine_unsupported', message: 'The Unity WebGL Gua runtime is unavailable.' });
         if (command.type === 'get_screenshot') return Promise.reject({ code: 'engine_unsupported', message: 'Unity WebGL screenshot readback is not enabled.' });
+        const signal = options && options.signal;
+        if (signal && signal.aborted) return Promise.reject({ code: 'aborted', message: 'The Unity WebGL Gua call was aborted.' });
         const callId = globalThis.__guaUnityWebNextCallId || 1;
         globalThis.__guaUnityWebNextCallId = callId + 1;
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
-            if (!pending.delete(callId)) return;
+            const entry = takePending(callId);
+            if (!entry) return;
             cancelHostCall(callId);
-            reject({ code: 'timeout', message: 'Timed out waiting for Unity WebGL host completion.' });
+            entry.reject({ code: 'timeout', message: 'Timed out waiting for Unity WebGL host completion.' });
           }, callTimeoutMs);
-          pending.set(callId, { resolve, reject, timer });
+          const aborted = function () {
+            const entry = takePending(callId);
+            if (!entry) return;
+            cancelHostCall(callId);
+            entry.reject({ code: 'aborted', message: 'The Unity WebGL Gua call was aborted.' });
+          };
+          pending.set(callId, { resolve, reject, timer, signal, aborted });
+          if (signal) signal.addEventListener('abort', aborted, { once: true });
+          if (signal && signal.aborted) {
+            aborted();
+            return;
+          }
           try {
             SendMessage(hostName, 'HandleWebRequest', JSON.stringify({ callId, command }));
           } catch (_error) {
-            clearTimeout(timer);
-            pending.delete(callId);
-            reject({ code: 'engine_unsupported', message: `Unity WebGL could not reach the Gua runtime '${hostName}'.` });
+            const entry = takePending(callId);
+            if (entry) entry.reject({ code: 'engine_unsupported', message: `Unity WebGL could not reach the Gua runtime '${hostName}'.` });
           }
         });
       }

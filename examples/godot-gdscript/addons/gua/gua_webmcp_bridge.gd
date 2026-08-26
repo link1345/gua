@@ -46,14 +46,17 @@ func attach(gua_adapter: RefCounted) -> bool:
       disposed = true;
       for (const [requestId, call] of pending) {
         clearTimeout(call.timer);
+        if (call.signal) call.signal.removeEventListener('abort', call.aborted);
         try { cancelAction(String(requestId)); } catch (_) {}
         call.reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.'));
       }
       pending.clear();
     },
-    async invoke(command) {
+    async invoke(command, options) {
       if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
       if (!command || typeof command.type !== 'string') throw engineError('invalid_request', 'Missing Gua in-page command.');
+      const signal = options && options.signal;
+      if (signal && signal.aborted) throw engineError('aborted', 'The Godot Gua call was aborted.');
       if (command.type === 'get_ui_tree') {
         const tree = JSON.parse(getTree());
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
@@ -64,13 +67,21 @@ func attach(gua_adapter: RefCounted) -> bool:
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000;
-        const call = { reject, timer: 0 };
-        pending.set(receipt.requestId, call);
+        const call = { reject, timer: 0, signal, aborted: null };
         const finish = (settle) => {
           clearTimeout(call.timer);
+          if (call.signal) call.signal.removeEventListener('abort', call.aborted);
           pending.delete(receipt.requestId);
           settle();
         };
+        const aborted = () => {
+          try { cancelAction(String(receipt.requestId)); } catch (_) {}
+          finish(() => reject(engineError('aborted', 'The Godot Gua call was aborted.')));
+        };
+        call.aborted = aborted;
+        pending.set(receipt.requestId, call);
+        if (signal) signal.addEventListener('abort', aborted, { once: true });
+        if (signal && signal.aborted) return aborted();
         const poll = () => {
           if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
           try {

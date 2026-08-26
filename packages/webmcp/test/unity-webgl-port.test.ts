@@ -6,7 +6,7 @@ type UnityWebLibrary = {
   GuaUnityWebResolve(ownerId: string, callId: number, payload: string, failed: number): void;
 };
 
-type UnityWebPort = { invoke(command: unknown): Promise<unknown> };
+type UnityWebPort = { invoke(command: unknown, options?: { signal?: AbortSignal }): Promise<unknown> };
 
 const unityGlobals = globalThis as typeof globalThis & {
   __guaUnityWebPort?: UnityWebPort;
@@ -77,5 +77,19 @@ describe("Unity WebGL same-page port", () => {
     await expect(unityGlobals.__guaUnityWebPort!.invoke({ type: "get_ui_tree" }))
       .rejects.toMatchObject({ code: "timeout" });
     expect(messages.at(-1)).toMatchObject({ hostName: "Missing Host", methodName: "HandleWebCancellation" });
+  });
+
+  test("cancels the Unity host call when the bridge signal aborts", async () => {
+    const { library, messages } = await loadUnityWebLibrary();
+    library.GuaUnityWebInstall("Abort Host", "owner-1", 1000);
+    const controller = new AbortController();
+    const pending = unityGlobals.__guaUnityWebPort!
+      .invoke({ type: "perform_action", request: { action: "click", nodeId: "start" } }, { signal: controller.signal })
+      .catch((error) => error);
+
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ code: "aborted" });
+    expect(messages.map((message) => message.methodName)).toEqual(["HandleWebRequest", "HandleWebCancellation"]);
   });
 });

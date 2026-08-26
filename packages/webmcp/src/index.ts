@@ -64,10 +64,12 @@ export interface GuaWebActionCompletion {
   revision?: number;
 }
 
+export interface GuaBridgeCallOptions { signal?: AbortSignal }
+
 /** Implemented by the engine adapter in the same page. performAction resolves only after host completion. */
 export interface GuaBrowserBridge {
   getUiTree(): Promise<GuaUiTree>;
-  performAction(request: GuaWebActionRequest): Promise<GuaWebActionCompletion>;
+  performAction(request: GuaWebActionRequest, options?: GuaBridgeCallOptions): Promise<GuaWebActionCompletion>;
   getScreenshot?(): Promise<GuaScreenshot>;
 }
 
@@ -189,8 +191,9 @@ async function executeTool(
     const request = actionRequest(name, input);
     await validateAction(bridge, request, defaultTimeoutMs, signal);
     throwIfAborted(signal);
-    const completion = await withTimeout(
-      bridge.performAction(request),
+    const completion = await performActionWithCancellation(
+      bridge,
+      request,
       defaultTimeoutMs,
       signal,
       `Timed out waiting for ${request.action} host completion.`,
@@ -211,6 +214,36 @@ async function executeTool(
   } catch (error) {
     const normalized = normalizeError(error, input.sensitive === true ? String(input.value ?? "") : undefined);
     return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
+  }
+}
+
+async function performActionWithCancellation(
+  bridge: GuaBrowserBridge,
+  request: GuaWebActionRequest,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+  timeoutMessage: string,
+): Promise<GuaWebActionCompletion> {
+  throwIfAborted(signal);
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+  if (signal?.aborted) {
+    signal.removeEventListener("abort", forwardAbort);
+    throw new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.");
+  }
+  try {
+    return await withTimeout(
+      bridge.performAction(request, { signal: controller.signal }),
+      timeoutMs,
+      signal,
+      timeoutMessage,
+    );
+  } catch (error) {
+    controller.abort();
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", forwardAbort);
   }
 }
 
