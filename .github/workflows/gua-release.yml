@@ -1,43 +1,9 @@
 name: Gua Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      major:
-        description: New major version (major upgrades only; leave empty for an automatic minor release)
-        required: false
-        type: string
   push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/gua-release.yml
-      - .github/scripts/next-release-version.ps1
-      - Directory.Build.props
-      - bun.lock
-      - package.json
-      - tsconfig.base.json
-      - CMakeLists.txt
-      - CMakePresets.json
-      - packages/inspector/**
-      - packages/bridge-ws/**
-      - native/gua-core/**
-      - native/gua-runtime/**
-      - native/gua-imgui/**
-      - native/gua-godot/**
-      - native/gua-ws-bridge/**
-      - bindings/dotnet/src/Gua.Core/**
-      - bindings/dotnet/src/Gua.Runtime/**
-      - bindings/unity/**
-      - examples/unity-smoke/**
-      - scripts/build-unity-package.ps1
-      - scripts/copy-unity-managed-closure.ps1
-      - scripts/prepare-unity-package-ci.ps1
-      - scripts/package-unity-upm-ci.ps1
-      - scripts/unity-meta/**
-      - examples/cpp-imgui/**
-      - examples/godot-gdscript/addons/gua/**
-      - protocol/**
+    tags:
+      - "gua-v[0-9]*"
 
 permissions:
   contents: write
@@ -62,9 +28,7 @@ jobs:
       - name: Determine release version
         id: version
         shell: pwsh
-        env:
-          REQUESTED_MAJOR: ${{ inputs.major }}
-        run: .github/scripts/next-release-version.ps1 -TagPrefix gua -LegacyTagPrefixes inspector,godot-plugin,mcp,nuget -RequestedMajor $env:REQUESTED_MAJOR
+        run: .github/scripts/release-version-from-tag.ps1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2

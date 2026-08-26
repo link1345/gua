@@ -427,10 +427,10 @@ var ui := GuaAutoAdapterScript.new()
 
 ## リリース自動化
 
-関連するプロトコル利用コンポーネントが`main`で変更されると、GitHub Actionsが
-成果物を公開します。Inspector・Godotプラグイン・ImGuiプラグインはまとめて
-ビルドされ、同じバージョンの`gua-v*` GitHub Releaseへ添付されます。MCPと
-.NETパッケージは、従来どおり独立したnpm・NuGet公開ワークフローを使用します。
+手動で作成した`gua-vX.Y.Z`タグをpushすると、リリースワークフローが実行されます。
+Inspector・Godotプラグイン・ImGuiプラグインはまとめてビルドされ、対応する
+GitHub Releaseへ添付されます。MCPと.NETパッケージも同じバージョンでnpm・
+NuGetへ公開されます。`main`への変更だけではパッケージは公開されません。
 
 ## リポジトリ構成
 
