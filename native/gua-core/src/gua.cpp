@@ -2103,15 +2103,11 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
     if (!value.node_id.empty()) {
         const auto authorized = project_nodes(ctx->nodes, value.observation_profile);
         const auto node = std::find_if(authorized.begin(), authorized.end(), [&](const Node& candidate) { return candidate.id == value.node_id; });
-        const int error_code = node == authorized.end() ? GUA_ACTION_ERROR_NODE_NOT_FOUND
-            : !node->visible ? GUA_ACTION_ERROR_HIDDEN
-            : !node->enabled ? GUA_ACTION_ERROR_DISABLED
-            : !supports_action(*node, value.action) || !policy_allows_action(*node, value.action) ? GUA_ACTION_ERROR_UNSUPPORTED
-            : GUA_ACTION_ACCEPTED;
-        if (error_code != GUA_ACTION_ACCEPTED) {
+        if (node == authorized.end() || !node->visible || !node->enabled ||
+            !supports_action(*node, value.action) || !policy_allows_action(*node, value.action)) {
             ctx->action_requests.erase(request);
             ctx->events.push_back(Event { value.action, value.node_id, value.request_id, GUA_ACTION_STATUS_FAILED,
-                error_code, "", value.sensitive, ctx->session_epoch, ctx->frame_sequence,
+                GUA_ACTION_ERROR_NODE_NOT_FOUND, "", value.sensitive, ctx->session_epoch, ctx->frame_sequence,
                 value.observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_revision : ctx->revision, value.observation_profile });
             return 0;
         }

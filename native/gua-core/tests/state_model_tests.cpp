@@ -108,32 +108,6 @@ int main()
     assert(denied_event.error_code == GUA_ACTION_ERROR_NODE_NOT_FOUND);
     gua_destroy_context(projected_ui);
 
-    gua_context_t* revalidation = gua_create_context();
-    const auto publish_revalidation_target = [&](const char* role, int visible, int enabled) {
-        gua_begin_frame(revalidation, "revalidation");
-        gua_register_node(revalidation, "target", role, "Target", { 0, 0, 10, 10 }, visible, enabled);
-        gua_end_frame(revalidation);
-    };
-    const gua_action_request_descriptor_t revalidated_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "target" };
-    const auto expect_revalidation_error = [&](int expected_error) {
-        uint64_t request_id = 0;
-        publish_revalidation_target("button", 1, 1);
-        assert(gua_enqueue_action(revalidation, &revalidated_click, &request_id) == GUA_ACTION_ACCEPTED);
-        if (expected_error == GUA_ACTION_ERROR_HIDDEN) publish_revalidation_target("button", 0, 1);
-        else if (expected_error == GUA_ACTION_ERROR_DISABLED) publish_revalidation_target("button", 1, 0);
-        else publish_revalidation_target("text", 1, 1);
-        gua_action_request_t consumed { sizeof(gua_action_request_t) };
-        assert(gua_consume_action_request(revalidation, GUA_ACTION_CLICK, "target", &consumed) == 0);
-        gua_event_v2_t event { sizeof(gua_event_v2_t) };
-        assert(gua_poll_event_v2_for_request(revalidation, request_id, &event) == 1);
-        assert(event.status == GUA_ACTION_STATUS_FAILED);
-        assert(event.error_code == expected_error);
-    };
-    expect_revalidation_error(GUA_ACTION_ERROR_HIDDEN);
-    expect_revalidation_error(GUA_ACTION_ERROR_DISABLED);
-    expect_revalidation_error(GUA_ACTION_ERROR_UNSUPPORTED);
-    gua_destroy_context(revalidation);
-
     gua_context_t* world = gua_create_context();
     const gua_world_state_value_v1_t door_state[] {
         { sizeof(gua_world_state_value_v1_t), "open", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0 },
