@@ -1462,6 +1462,9 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
         return true;
     };
     if (!ctx->world_frame_in_progress || !ctx->staging_world_valid || descriptor->id == nullptr || descriptor->id[0] == '\0' ||
+        (descriptor->parent_id != nullptr && descriptor->parent_id[0] == '\0') ||
+        (descriptor->domain_id != nullptr && descriptor->domain_id[0] == '\0') ||
+        (descriptor->related_ui_node_id != nullptr && descriptor->related_ui_node_id[0] == '\0') ||
         !valid_kind(descriptor->kind) || descriptor->label == nullptr ||
         (descriptor->space != GUA_WORLD_SPACE_2D && descriptor->space != GUA_WORLD_SPACE_3D) ||
         !std::isfinite(descriptor->position_x) || !std::isfinite(descriptor->position_y) || !std::isfinite(descriptor->position_z) ||

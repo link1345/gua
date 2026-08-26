@@ -761,7 +761,7 @@ function compactResult<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
 
-class GuaBridgeClient {
+export class GuaBridgeClient {
   private socket: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
   private nextId = 1;
@@ -781,7 +781,7 @@ class GuaBridgeClient {
     return this.request<GuaWorldObjectTree>({ type: "get_world_object_tree" });
   }
 
-  async findWorldObjects(selector: GuaWorldSelector): Promise<GuaWorldQueryResult> {
+  async findWorldObjects(selector: GuaWorldSelector, timeoutMs = this.requestTimeoutMs): Promise<GuaWorldQueryResult> {
     const state = selector.state;
     return this.request<GuaWorldQueryResult>({ type: "query_world_objects", worldId: selector.id, kind: selector.kind,
       label: selector.label, tag: selector.tag, parentId: selector.parentId, directChild: selector.directChild ? 1 : 0,
@@ -789,17 +789,26 @@ class GuaBridgeClient {
       stateType: state === undefined ? undefined : state.value === null ? 0 : typeof state.value === "string" ? 1 : typeof state.value === "number" ? 2 : 3,
       stateString: typeof state?.value === "string" ? state.value : undefined,
       stateNumber: typeof state?.value === "number" ? state.value : undefined,
-      stateBool: typeof state?.value === "boolean" ? state.value : undefined });
+      stateBool: typeof state?.value === "boolean" ? state.value : undefined }, timeoutMs);
   }
 
   async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number) {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt <= timeoutMs) {
-      const result = await this.findWorldObjects(selector);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const remainingRequestMs = Math.max(1, deadline - Date.now());
+      let result: GuaWorldQueryResult;
+      try {
+        result = await this.findWorldObjects(selector, remainingRequestMs);
+      } catch (error) {
+        if (Date.now() >= deadline) break;
+        throw error;
+      }
       if (!result.valid) throw new Error(result.error ?? "Invalid world selector.");
       const match = result.matches[0];
       if (match !== undefined) return match;
-      await sleep(50);
+      const remainingSleepMs = deadline - Date.now();
+      if (remainingSleepMs <= 0) break;
+      await sleep(Math.min(50, remainingSleepMs));
     }
     throw new Error("Timed out waiting for a Gua world object.");
   }

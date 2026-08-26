@@ -140,15 +140,20 @@ std::string observation_profile_from_environment()
 #endif
 }
 
-std::string copy_world_object_tree_json(gua_runtime_t* runtime)
+std::string copy_world_object_tree_json_unlocked(gua_runtime_t* runtime)
 {
-    const std::lock_guard lock(runtime->context_mutex);
     const int size = gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, nullptr, 0);
     if (size <= 0) return "{}";
     std::string json(static_cast<std::size_t>(size), '\0');
     gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, json.data(), size);
     json.resize(static_cast<std::size_t>(size - 1));
     return json;
+}
+
+std::string copy_world_object_tree_json(gua_runtime_t* runtime)
+{
+    const std::lock_guard lock(runtime->context_mutex);
+    return copy_world_object_tree_json_unlocked(runtime);
 }
 
 std::string unsupported_world_object_tree_json(gua_runtime_t* runtime)
@@ -464,17 +469,18 @@ extern "C" int gua_runtime_abort_world_frame(gua_runtime_t* runtime)
 extern "C" int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
 {
     if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
     if (!runtime->world_object_tree_enabled) {
-        const std::lock_guard lock(runtime->context_mutex);
         return copy_json_string(unsupported_world_object_tree_json(runtime), out_json, out_json_size);
     }
-    return copy_json_string(copy_world_object_tree_json(runtime), out_json, out_json_size);
+    return copy_json_string(copy_world_object_tree_json_unlocked(runtime), out_json, out_json_size);
 }
 
 extern "C" int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size)
 {
-    if (!valid_runtime(runtime) || !runtime->world_object_tree_enabled) return copy_json_string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}", out_json, out_json_size);
+    if (!valid_runtime(runtime)) return 0;
     const std::lock_guard lock(runtime->context_mutex);
+    if (!runtime->world_object_tree_enabled) return copy_json_string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}", out_json, out_json_size);
     return gua_query_world_objects_json(runtime->context, selector, runtime->observation_profile, out_json, out_json_size);
 }
 

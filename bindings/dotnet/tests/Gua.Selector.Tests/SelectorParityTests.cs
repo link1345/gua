@@ -89,7 +89,8 @@ public sealed class SelectorParityTests
                     "{\"id\":101,\"type\":\"query_world_objects\",\"visibleToPlayer\":null}",
                     "{\"id\":102,\"type\":\"query_world_objects\",\"visibleToPlayer\":\"true\"}",
                     "{\"id\":103,\"type\":\"query_world_objects\",\"active\":null}",
-                    "{\"id\":104,\"type\":\"query_world_objects\",\"active\":\"true\"}" })
+                    "{\"id\":104,\"type\":\"query_world_objects\",\"active\":\"true\"}",
+                    "{\"id\":105,\"type\":\"query_world_objects\",\"knd\":\"door\"}" })
                     Assert.That((await SendRawCommandAsync(malformed, command)).GetProperty("ok").GetBoolean(), Is.False);
             }
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));

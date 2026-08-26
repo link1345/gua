@@ -708,6 +708,65 @@ std::optional<bool> json_bool_field_optional(std::string_view json, std::string_
     return std::nullopt;
 }
 
+template <std::size_t Size>
+bool json_has_only_top_level_fields(std::string_view json, const std::array<std::string_view, Size>& allowed)
+{
+    const std::size_t root = json.find_first_not_of(" \t\r\n");
+    if (root == std::string_view::npos || json[root] != '{') return false;
+
+    int object_depth = 0;
+    int array_depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    bool root_closed = false;
+    std::size_t root_end = root;
+    for (std::size_t index = root; index < json.size(); ++index) {
+        const char ch = json[index];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') in_string = false;
+            continue;
+        }
+        if (ch == '"') {
+            std::size_t previous = index;
+            while (previous > root && std::isspace(static_cast<unsigned char>(json[previous - 1U]))) --previous;
+            const bool top_level_key = object_depth == 1 && array_depth == 0 && previous > root &&
+                (json[previous - 1U] == '{' || json[previous - 1U] == ',');
+            if (!top_level_key) {
+                in_string = true;
+                continue;
+            }
+
+            std::size_t end = index + 1U;
+            bool key_escaped = false;
+            for (; end < json.size(); ++end) {
+                if (key_escaped) key_escaped = false;
+                else if (json[end] == '\\') key_escaped = true;
+                else if (json[end] == '"') break;
+            }
+            if (end == json.size()) return false;
+            const auto key = json.substr(index + 1U, end - index - 1U);
+            if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) return false;
+            const std::size_t colon = json.find_first_not_of(" \t\r\n", end + 1U);
+            if (colon == std::string_view::npos || json[colon] != ':') return false;
+            index = end;
+            continue;
+        }
+        if (ch == '{') ++object_depth;
+        else if (ch == '}') {
+            if (--object_depth == 0) {
+                root_closed = true;
+                root_end = index;
+                break;
+            }
+            if (object_depth < 0) return false;
+        } else if (ch == '[') ++array_depth;
+        else if (ch == ']' && --array_depth < 0) return false;
+    }
+    return root_closed && json.find_first_not_of(" \t\r\n", root_end + 1U) == std::string_view::npos;
+}
+
 Command parse_command(std::string_view json)
 {
     Command command;
@@ -745,7 +804,13 @@ Command parse_command(std::string_view json)
     command.world_selector.state_string = json_string_field(json, "stateString").value_or("");
     command.world_selector.state_number = json_number_field(json, "stateNumber").value_or(0);
     command.world_selector.state_bool = json_bool_field(json, "stateBool");
-    command.world_selector_valid = valid_optional_non_empty_string(json, "worldId") &&
+    constexpr std::array world_query_fields { std::string_view("id"), std::string_view("type"), std::string_view("worldId"),
+        std::string_view("worldIdMatch"), std::string_view("kind"), std::string_view("kindMatch"), std::string_view("label"),
+        std::string_view("labelMatch"), std::string_view("tag"), std::string_view("tagMatch"), std::string_view("parentId"),
+        std::string_view("directChild"), std::string_view("visibleToPlayer"), std::string_view("active"), std::string_view("stateKey"),
+        std::string_view("stateType"), std::string_view("stateString"), std::string_view("stateNumber"), std::string_view("stateBool") };
+    command.world_selector_valid = (command.type != "query_world_objects" || json_has_only_top_level_fields(json, world_query_fields)) &&
+        valid_optional_non_empty_string(json, "worldId") &&
         valid_optional_non_empty_string(json, "kind") && valid_optional_non_empty_string(json, "label") &&
         valid_optional_non_empty_string(json, "tag") && valid_optional_non_empty_string(json, "parentId") &&
         valid_optional_int_range(json, "worldIdMatch", 0, 2) && valid_optional_int_range(json, "kindMatch", 0, 2) &&

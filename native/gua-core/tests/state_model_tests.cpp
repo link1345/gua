@@ -157,6 +157,18 @@ int main()
     assert(gua_begin_world_frame(atomic_world, "abort") == 1);
     assert(gua_abort_world_frame(atomic_world) == 1);
     assert(gua_end_world_frame(atomic_world) == 0);
+    auto empty_parent = parent; empty_parent.parent_id = "";
+    assert(gua_begin_world_frame(atomic_world, "empty-parent") == 1);
+    assert(gua_register_world_object_v1(atomic_world, &empty_parent) == 0);
+    assert(gua_end_world_frame(atomic_world) == 0);
+    auto empty_domain = parent; empty_domain.domain_id = "";
+    assert(gua_begin_world_frame(atomic_world, "empty-domain") == 1);
+    assert(gua_register_world_object_v1(atomic_world, &empty_domain) == 0);
+    assert(gua_end_world_frame(atomic_world) == 0);
+    auto empty_related = parent; empty_related.related_ui_node_id = "";
+    assert(gua_begin_world_frame(atomic_world, "empty-related") == 1);
+    assert(gua_register_world_object_v1(atomic_world, &empty_related) == 0);
+    assert(gua_end_world_frame(atomic_world) == 0);
     gua_context_status_t atomic_status { sizeof(gua_context_status_t) };
     assert(gua_get_context_status(atomic_world, &atomic_status) == 1 && atomic_status.world_object_count == 1 && atomic_status.world_revision == 1);
 

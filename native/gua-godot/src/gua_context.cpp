@@ -3,10 +3,28 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace {
+
+bool exactly_representable_as_double(std::int64_t value)
+{
+    const std::uint64_t magnitude = value < 0
+        ? static_cast<std::uint64_t>(-(value + 1)) + 1U
+        : static_cast<std::uint64_t>(value);
+    constexpr std::uint64_t max_consecutive_integer = 1ULL << 53U;
+    if (magnitude <= max_consecutive_integer) return true;
+
+    std::uint64_t reduced = magnitude;
+    unsigned discarded_bits = 0;
+    while (reduced > max_consecutive_integer) {
+        reduced >>= 1U;
+        ++discarded_bits;
+    }
+    return (magnitude & ((1ULL << discarded_bits) - 1U)) == 0;
+}
 
 const char* event_type_name(int type)
 {
@@ -288,7 +306,12 @@ bool GuaContext::register_world_object(const Dictionary& source)
         const Variant value = state[keys[i]]; gua_world_state_value_v1_t item { sizeof(gua_world_state_value_v1_t), state_keys[i].get_data() };
         if (value.get_type() == Variant::NIL) item.type = GUA_WORLD_VALUE_NULL;
         else if (value.get_type() == Variant::BOOL) { item.type = GUA_WORLD_VALUE_BOOLEAN; item.bool_value = static_cast<bool>(value) ? 1 : 0; }
-        else if (value.get_type() == Variant::INT || value.get_type() == Variant::FLOAT) { item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(value); }
+        else if (value.get_type() == Variant::INT) {
+            const auto integer = static_cast<std::int64_t>(value);
+            if (!exactly_representable_as_double(integer)) return reject();
+            item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(integer);
+        }
+        else if (value.get_type() == Variant::FLOAT) { item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(value); }
         else if (value.get_type() == Variant::STRING || value.get_type() == Variant::STRING_NAME) { state_strings[i] = String(value).utf8(); item.type = GUA_WORLD_VALUE_STRING; item.string_value = state_strings[i].get_data(); }
         else return reject();
         state_values.push_back(item);

@@ -181,6 +181,14 @@ func _run() -> void:
 		return
 	door.set_meta(&"gua_world_id", "door-a")
 	ui._publish_world_frame("title")
+	door.set_meta(&"gua_world_state", {"code": 9007199254740993})
+	ui._publish_world_frame("title")
+	var imprecise_integer_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(imprecise_integer_world_tree, "door-a") == null \
+			or imprecise_integer_world_tree.get("frameSequence", 0) != 3:
+		_fail("Gua accepted a world state integer that loses precision in the C ABI: %s" % imprecise_integer_world_tree)
+		return
+	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
