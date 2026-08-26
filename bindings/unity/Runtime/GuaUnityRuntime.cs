@@ -76,7 +76,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (runtime == null) return;
         try
         {
-            runtime.Clock.Advance(TimeSpan.FromSeconds(Time.unscaledDeltaTime));
+            runtime.Clock.AdvanceMilliseconds((double)Time.unscaledDeltaTime * 1000.0);
             targets.Clear();
             ids.Clear();
             clickTargetIds.Clear();

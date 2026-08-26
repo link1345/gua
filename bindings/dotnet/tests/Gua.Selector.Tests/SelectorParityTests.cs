@@ -1181,6 +1181,44 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void ClockTimeSpanProjectionsAreExplicitlyFallibleOutsideTheManagedRange()
+    {
+        var status = new GuaClockStatus(true, false, 1e16, 10, 0, 1);
+        var delta = new GuaClockDelta(1e16);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(status.NowMilliseconds, Is.EqualTo(1e16));
+            Assert.That(status.Now, Is.Null);
+            Assert.That(status.TryGetNow(out _), Is.False);
+            Assert.That(delta.TimeSpan, Is.Null);
+            Assert.That(delta.TryGetTimeSpan(out _), Is.False);
+        });
+
+        var bounded = new GuaClockStatus(true, false, 16.6667, 10, 0, 1);
+        Assert.That(bounded.TryGetNow(out var boundedNow), Is.True);
+        Assert.That(boundedNow.TotalMilliseconds, Is.EqualTo(16.6667).Within(0.0001));
+    }
+
+    [Test]
+    public void RuntimeClockAdvancesFromDoubleMillisecondsWithoutTimeSpanRounding()
+    {
+        const double elapsedMilliseconds = 16.666666;
+        using var runtime = new GuaRuntime();
+        runtime.Clock.Install(step: TimeSpan.FromMilliseconds(100));
+        var ticks = new List<double>();
+        runtime.Clock.Tick += delta => ticks.Add(delta.TotalMilliseconds);
+
+        runtime.Clock.AdvanceMilliseconds(elapsedMilliseconds);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(runtime.Clock.Status.NowMilliseconds, Is.EqualTo(elapsedMilliseconds));
+            Assert.That(ticks, Is.EqualTo(new[] { elapsedMilliseconds }));
+        });
+    }
+
+    [Test]
     public async Task AsyncClockControlsRequireOnlyTheAsyncStatusContract()
     {
         var context = new AsyncOnlyClockContext();

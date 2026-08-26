@@ -27,6 +27,10 @@ public override void _Process(double delta)
 }
 ```
 
+`SyncAttachedTree` also pumps the Gua clock from Godot's monotonic, unscaled
+elapsed time before publishing the semantic frame. The virtual-clock capability
+is enabled only after `Attach` installs this normal frame pump.
+
 The addon is a runtime adapter. `plugin.cfg` and `plugin.gd` exist only so the
 directory follows Godot addon packaging conventions.
 

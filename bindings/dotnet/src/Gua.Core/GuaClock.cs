@@ -5,7 +5,15 @@ public enum GuaClockResult { Ok = 1, InvalidArgument = -1, NotInstalled = -2, In
 public sealed record GuaClockStatus(bool Installed, bool Paused, double NowMilliseconds,
     double DefaultStepMilliseconds, double PendingMilliseconds, ulong Generation)
 {
-    public TimeSpan Now => TimeSpan.FromMilliseconds(NowMilliseconds);
+    /// <summary>
+    /// Gets the current time as a <see cref="TimeSpan"/> when it is within the
+    /// considerably smaller range supported by <see cref="TimeSpan"/>.
+    /// Use <see cref="NowMilliseconds"/> for the full protocol range.
+    /// </summary>
+    public TimeSpan? Now => TryGetNow(out var value) ? value : null;
+
+    public bool TryGetNow(out TimeSpan value) =>
+        GuaClockTimeSpan.TryFromMilliseconds(NowMilliseconds, out value);
 }
 
 public readonly record struct GuaClockStep(GuaClockDelta Delta, bool FinalStep, ulong Generation);
@@ -13,8 +21,43 @@ public readonly record struct GuaClockStep(GuaClockDelta Delta, bool FinalStep, 
 public readonly record struct GuaClockDelta(double TotalMilliseconds)
 {
     public double TotalSeconds => TotalMilliseconds / 1000.0;
-    public TimeSpan TimeSpan => TimeSpan.FromMilliseconds(TotalMilliseconds);
-    public static implicit operator TimeSpan(GuaClockDelta value) => value.TimeSpan;
+    /// <summary>Gets a bounded <see cref="System.TimeSpan"/> projection, or null when the protocol value is outside its range.</summary>
+    public TimeSpan? TimeSpan => TryGetTimeSpan(out var value) ? value : null;
+    public bool TryGetTimeSpan(out TimeSpan value) =>
+        GuaClockTimeSpan.TryFromMilliseconds(TotalMilliseconds, out value);
+}
+
+internal static class GuaClockTimeSpan
+{
+    private static readonly double MaxMilliseconds = (double)long.MaxValue / System.TimeSpan.TicksPerMillisecond;
+    private static readonly double MinMilliseconds = (double)long.MinValue / System.TimeSpan.TicksPerMillisecond;
+
+    public static bool TryFromMilliseconds(double milliseconds, out TimeSpan value)
+    {
+        if (!double.IsFinite(milliseconds) || milliseconds < MinMilliseconds || milliseconds > MaxMilliseconds)
+        {
+            value = default;
+            return false;
+        }
+
+        var ticks = milliseconds * System.TimeSpan.TicksPerMillisecond;
+        if (ticks < long.MinValue || ticks > long.MaxValue)
+        {
+            value = default;
+            return false;
+        }
+
+        try
+        {
+            value = System.TimeSpan.FromTicks(checked((long)ticks));
+            return true;
+        }
+        catch (OverflowException)
+        {
+            value = default;
+            return false;
+        }
+    }
 }
 
 public interface IGuaClockStatusContext

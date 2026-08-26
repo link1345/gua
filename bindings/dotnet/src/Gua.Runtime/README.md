@@ -6,15 +6,19 @@ complete screenshot requests, expose adapter versions, and run the Inspector
 WebSocket bridge without duplicating P/Invoke declarations.
 
 `GuaRuntime.Clock` is the adapter-side clock pump. Adapters call
-`Advance(unscaledDelta)` from their always-running update, while game code uses
-`Schedule` and `Tick` for deterministic pause/run-for behavior. Installing the
+`AdvanceMilliseconds(unscaledDeltaMs)` when their engine exposes elapsed time
+as a floating-point value, or `Advance(unscaledDelta)` when a `TimeSpan` is
+already available. Game code uses `Schedule` and `Tick` for deterministic
+pause/run-for behavior. Installing the
 clock does not intercept `Time.deltaTime`, coroutines, or engine timers; each
 game subsystem that should be controllable must explicitly use this clock as
 its time source.
 
 `Tick` receives `GuaClockDelta`, which retains the native double-precision
 millisecond value even below `TimeSpan`'s 100 ns resolution. It exposes
-`TotalMilliseconds`, `TotalSeconds`, and a rounded `TimeSpan` conversion.
+`TotalMilliseconds`, `TotalSeconds`, and an explicitly fallible `TimeSpan`
+projection. Clock status likewise keeps `NowMilliseconds` as the authoritative
+protocol value; `Now` is null when that value exceeds `TimeSpan`'s range.
 Adapter callback failures are reported by `CallbackFailed` after the scheduler
 isolates the failure and continues the remaining due callbacks and tick
 notification.

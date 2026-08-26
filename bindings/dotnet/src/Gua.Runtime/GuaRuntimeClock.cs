@@ -24,10 +24,13 @@ public sealed class GuaRuntimeClock
     public void RunFor(TimeSpan duration, TimeSpan? step = null)
     { Check(Native.gua_runtime_clock_run_for(runtime.Handle, duration.TotalMilliseconds,
         step?.TotalMilliseconds ?? Status.DefaultStepMilliseconds)); Drain(); }
-    public void Advance(TimeSpan unscaledDelta)
-    { var status = Status; PurgeInactive(status); if (!status.Installed) { reportedAutomaticExecutionLimitGeneration = null; return; } if (status.PendingMilliseconds > 0) { Drain(); return; }
-      if (status.Paused || unscaledDelta <= TimeSpan.Zero) { reportedAutomaticExecutionLimitGeneration = null; return; }
-      var result = Native.gua_runtime_clock_advance(runtime.Handle, unscaledDelta.TotalMilliseconds);
+    public void Advance(TimeSpan unscaledDelta) => AdvanceMilliseconds(unscaledDelta.TotalMilliseconds);
+    public void AdvanceMilliseconds(double unscaledDeltaMilliseconds)
+    { if (!double.IsFinite(unscaledDeltaMilliseconds) || unscaledDeltaMilliseconds < 0)
+          throw new ArgumentOutOfRangeException(nameof(unscaledDeltaMilliseconds));
+      var status = Status; PurgeInactive(status); if (!status.Installed) { reportedAutomaticExecutionLimitGeneration = null; return; } if (status.PendingMilliseconds > 0) { Drain(); return; }
+      if (status.Paused || unscaledDeltaMilliseconds <= 0) { reportedAutomaticExecutionLimitGeneration = null; return; }
+      var result = Native.gua_runtime_clock_advance(runtime.Handle, unscaledDeltaMilliseconds);
       if (result != (int)GuaClockResult.Ok)
       {
           var latest = Status;
