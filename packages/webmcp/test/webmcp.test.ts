@@ -127,6 +127,22 @@ describe("registerGuaWebMcp", () => {
     expect(result.content[0]!.text).not.toContain("secret-marker");
   });
 
+  test("allows set_value to clear a control with an empty string", async () => {
+    const page = modelDocument();
+    const requests: GuaWebActionRequest[] = [];
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([{ ...button("name"), role: "textbox", actions: ["set_value"] }]),
+      performAction: async (request) => {
+        requests.push(request);
+        return { requestId: 10, action: request.action, succeeded: true };
+      },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "name", value: "" }) as { isError?: boolean };
+    expect(result.isError).toBeUndefined();
+    expect(requests).toEqual([{ action: "set_value", nodeId: "name", value: "", sensitive: false }]);
+  });
+
   test("redacts sensitive values from structured bridge failures", async () => {
     const page = modelDocument();
     const bridge: GuaBrowserBridge = {

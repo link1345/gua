@@ -9,11 +9,25 @@ const node: GuaNode = {
   enabled: true,
   bounds: { x: 0, y: 0, w: 100, h: 20 },
   actions: ["set_value"],
+  state: {
+    caretPosition: 1,
+    selectionStart: 0,
+    selectionEnd: 1,
+    scrollX: 2,
+    scrollY: 3,
+    scrollMaxX: 20,
+    scrollMaxY: 30,
+    rangeValue: 5,
+    rangeMin: 0,
+    rangeMax: 10,
+    selectedIndex: -1,
+  },
 };
 
 const validActions: GuaWebActionRequest[] = [
   { action: "click", nodeId: "start" },
   { action: "set_value", nodeId: "name", value: "Codex" },
+  { action: "set_value", nodeId: "name", value: "" },
   { action: "set_checked", nodeId: "music", checked: false },
   { action: "select", nodeId: "server", value: "west" },
   { action: "scroll", nodeId: "list", deltaX: 0, deltaY: 1 },

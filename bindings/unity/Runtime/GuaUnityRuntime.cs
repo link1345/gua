@@ -33,8 +33,12 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
     private readonly Dictionary<ulong, int> webCalls = new();
-    [DllImport("__Internal")] private static extern void GuaUnityWebInstall();
-    [DllImport("__Internal")] private static extern void GuaUnityWebResolve(int callId, string json, int failed);
+    private const int WebCallTimeoutMs = 5000;
+    private string webOwnerId = string.Empty;
+    private bool webInstalled;
+    [DllImport("__Internal")] private static extern void GuaUnityWebInstall(string hostName, string ownerId, int timeoutMs);
+    [DllImport("__Internal")] private static extern void GuaUnityWebUninstall(string ownerId);
+    [DllImport("__Internal")] private static extern void GuaUnityWebResolve(string ownerId, int callId, string json, int failed);
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     public static void EnsureStarted()
@@ -55,7 +59,9 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.EnableVirtualClockAdapter();
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
-                GuaUnityWebInstall();
+                webOwnerId = GetInstanceID().ToString(CultureInfo.InvariantCulture);
+                GuaUnityWebInstall(gameObject.name, webOwnerId, WebCallTimeoutMs);
+                webInstalled = true;
                 Debug.Log("Gua Unity WebGL same-page bridge installed.");
             }
             else
@@ -114,7 +120,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (envelope == null || envelope.command == null) return;
         if (envelope.command.type == "get_ui_tree")
         {
-            GuaUnityWebResolve(envelope.callId, runtime.GetUiTreeJson(), 0);
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetUiTreeJson(), 0);
             return;
         }
         if (envelope.command.type != "perform_action" || envelope.command.request == null)
@@ -139,6 +145,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         webCalls[requestId] = envelope.callId;
     }
 
+    public void HandleWebCancellation(string callIdValue)
+    {
+        if (!int.TryParse(callIdValue, NumberStyles.None, CultureInfo.InvariantCulture, out var callId)) return;
+        foreach (var pair in webCalls.ToArray())
+            if (pair.Value == callId) webCalls.Remove(pair.Key);
+    }
+
     private void FlushWebActionResults()
     {
         foreach (var pair in webCalls.ToArray())
@@ -151,13 +164,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 sensitive = result.Sensitive, sessionEpoch = result.SessionEpoch ?? 0,
                 frameSequence = result.FrameSequence ?? 0, revision = result.Revision ?? 0,
             };
-            GuaUnityWebResolve(pair.Value, JsonUtility.ToJson(payload), 0);
+            GuaUnityWebResolve(webOwnerId, pair.Value, JsonUtility.ToJson(payload), 0);
             webCalls.Remove(pair.Key);
         }
     }
 
-    private static void ResolveWebError(int callId, string code, string message) =>
-        GuaUnityWebResolve(callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
+    private void ResolveWebError(int callId, string code, string message) =>
+        GuaUnityWebResolve(webOwnerId, callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
     private static string WebErrorCode(GuaActionError error) => error switch
     {
         GuaActionError.NodeNotFound => "node_not_found",
@@ -193,6 +206,12 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private void OnDestroy()
     {
         if (activeRuntime == this) activeRuntime = null;
+        if (webInstalled)
+        {
+            GuaUnityWebUninstall(webOwnerId);
+            webInstalled = false;
+        }
+        webCalls.Clear();
         foreach (var pair in uGuiClickHandlers)
             if (pair.Key != null) pair.Key.onClick.RemoveListener(pair.Value);
         foreach (var pair in visualClickHandlers) pair.Key.clicked -= pair.Value;

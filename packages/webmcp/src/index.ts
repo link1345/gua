@@ -8,6 +8,17 @@ export interface GuaNodeState {
   pressed?: boolean;
   checked?: boolean;
   selected?: boolean;
+  caretPosition?: number;
+  selectionStart?: number;
+  selectionEnd?: number;
+  scrollX?: number;
+  scrollY?: number;
+  scrollMaxX?: number;
+  scrollMaxY?: number;
+  rangeValue?: number;
+  rangeMin?: number;
+  rangeMax?: number;
+  selectedIndex?: number;
   value?: number | string | boolean | null;
 }
 export interface GuaNode {
@@ -254,7 +265,7 @@ function actionRequest(name: string, input: Record<string, unknown>): GuaWebActi
       return {
         action,
         nodeId: requiredString(input, "nodeId"),
-        value: requiredString(input, "value"),
+        value: requiredString(input, "value", true),
         sensitive: input.sensitive === true,
       };
     case "set_checked":
@@ -282,8 +293,10 @@ function actionRequest(name: string, input: Record<string, unknown>): GuaWebActi
 }
 
 function toolResult(value: unknown) { return { content: [{ type: "text", text: JSON.stringify(value) }] }; }
-function requiredString(input: Record<string, unknown>, key: string): string {
-  if (typeof input[key] !== "string" || (input[key] as string).length === 0) throw new GuaWebError("invalid_request", `${key} must be a non-empty string.`);
+function requiredString(input: Record<string, unknown>, key: string, allowEmpty = false): string {
+  if (typeof input[key] !== "string" || (!allowEmpty && (input[key] as string).length === 0)) {
+    throw new GuaWebError("invalid_request", `${key} must be ${allowEmpty ? "a string" : "a non-empty string"}.`);
+  }
   return input[key] as string;
 }
 function requiredBoolean(input: Record<string, unknown>, key: string): boolean {
