@@ -291,7 +291,7 @@ async function waitForWorldObject(
   const deadline = performance.now() + timeoutMs;
   do {
     throwIfAborted(signal);
-    const remainingMs = Math.max(0, deadline - performance.now());
+    const remainingMs = Math.ceil(Math.max(0, deadline - performance.now()));
     const result = await withTimeout(
       bridge.findWorldObjects!(selector, { signal, timeoutMs: remainingMs }),
       remainingMs,

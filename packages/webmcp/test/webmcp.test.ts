@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import {
   createGuaInPageBridge,
@@ -186,6 +186,31 @@ describe("registerGuaWebMcp", () => {
       { parentId: "room", directChild: true, state: { key: "locked", value: true } },
       { id: "door" },
     ]);
+  });
+
+  test("passes integer remaining deadlines to engine world queries", async () => {
+    const page = modelDocument();
+    const timeouts: number[] = [];
+    let queryCount = 0;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      findWorldObjects: async (_selector, options) => {
+        timeouts.push(options?.timeoutMs ?? -1);
+        queryCount += 1;
+        return { valid: true, matches: queryCount >= 2 ? [worldObject()] : [] };
+      },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
+    const readings = [1000, 1000.25, 1000.5, 1000.75, 1001.25];
+    const now = spyOn(performance, "now").mockImplementation(() => readings.shift() ?? 1001.25);
+    try {
+      await page.tools.get("wait_for_world_object")!.execute({ id: "door", timeoutMs: 100 });
+    } finally {
+      now.mockRestore();
+    }
+    expect(timeouts).toEqual([100, 99]);
+    expect(timeouts.every(Number.isInteger)).toBe(true);
   });
 
   test("rejects malformed world selectors before invoking the engine", async () => {
