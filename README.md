@@ -62,7 +62,7 @@ recognition.
 
 Godot Web Export and Unity WebGL pages can expose the same live Semantic UI Tree
 through the experimental browser `document.modelContext` API. The
-`@gua/webmcp` package registers `get_ui_tree`, semantic actions, waits, and an
+`gua-webmcp` package registers `get_ui_tree`, semantic actions, waits, and an
 optional screenshot tool against an engine-owned same-page bridge. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no

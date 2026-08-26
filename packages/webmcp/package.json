@@ -1,5 +1,5 @@
 {
-  "name": "@gua/webmcp",
+  "name": "gua-webmcp",
   "version": "0.0.0",
   "description": "Browser-native WebMCP adapter for Gua game UI automation.",
   "type": "module",
@@ -12,6 +12,7 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "bun": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },

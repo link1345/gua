@@ -8,7 +8,7 @@
     "examples/webmcp-page": {
       "name": "gua-webmcp-page-demo",
       "dependencies": {
-        "@gua/webmcp": "workspace:*",
+        "gua-webmcp": "workspace:*",
       },
       "devDependencies": {
         "typescript": "^5.5.0",
@@ -49,7 +49,7 @@
         "gui-mcp": "./dist/cli.js",
       },
       "dependencies": {
-        "@gua/webmcp": "workspace:*",
+        "gua-webmcp": "workspace:*",
         "pngjs": "^7.0.0",
       },
       "devDependencies": {
@@ -59,7 +59,7 @@
       },
     },
     "packages/webmcp": {
-      "name": "@gua/webmcp",
+      "name": "gua-webmcp",
       "version": "0.0.0",
       "devDependencies": {
         "bun-types": "^1.3.0",
@@ -162,7 +162,7 @@
 
     "@gua/inspector": ["@gua/inspector@workspace:packages/inspector"],
 
-    "@gua/webmcp": ["@gua/webmcp@workspace:packages/webmcp"],
+    "gua-webmcp": ["gua-webmcp@workspace:packages/webmcp"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 

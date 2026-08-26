@@ -6,6 +6,6 @@
     "build": "bun build src/main.ts --target browser --outfile dist/gua-webmcp-demo.js",
     "check": "tsc --noEmit"
   },
-  "dependencies": { "@gua/webmcp": "workspace:*" },
+  "dependencies": { "gua-webmcp": "workspace:*" },
   "devDependencies": { "typescript": "^5.5.0" }
 }

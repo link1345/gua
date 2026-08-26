@@ -1,6 +1,6 @@
 # Gua WebMCP same-page demo shell
 
-This shell hosts an exported Godot or Unity game and `@gua/webmcp` in one page.
+This shell hosts an exported Godot or Unity game and `gua-webmcp` in one page.
 Copy the engine's generated loader/canvas markup into `index.html`, build this
 script with `bun run build`, and serve the resulting directory over HTTP.
 

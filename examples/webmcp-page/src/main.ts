@@ -1,4 +1,4 @@
-import { createGodotWebBridge, createUnityWebGlBridge, registerGuaWebMcp } from "@gua/webmcp";
+import { createGodotWebBridge, createUnityWebGlBridge, registerGuaWebMcp } from "gua-webmcp";
 
 const status = document.querySelector<HTMLElement>("#gua-webmcp-status");
 void install();

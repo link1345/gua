@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Same-page Godot Web Export port consumed by @gua/webmcp. It deliberately has
+# Same-page Godot Web Export port consumed by gua-webmcp. It deliberately has
 # no WebSocket endpoint and uses the adapter's request-correlated event queue.
 
 var adapter: RefCounted

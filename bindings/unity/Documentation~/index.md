@@ -15,7 +15,7 @@ experimental.
 
 WebGL builds install a tab-local `__guaUnityWebPort` from
 `Runtime/Plugins/WebGL/GuaWebMcp.jslib`. A surrounding page passes it to
-`@gua/webmcp` with `createUnityWebGlBridge()` and `registerGuaWebMcp()`. Calls
+`gua-webmcp` with `createUnityWebGlBridge()` and `registerGuaWebMcp()`. Calls
 remain in the page. Action promises resolve from request-correlated host
 completion after Unity applies the action, not when it is enqueued.
 

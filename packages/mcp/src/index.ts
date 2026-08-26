@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { guaWebMcpToolDefinitions } from "@gua/webmcp";
+import { guaWebMcpToolDefinitions } from "gua-webmcp";
 
 import {
   GuaAutomationManager,

@@ -1,11 +1,11 @@
-# @gua/webmcp
+# gua-webmcp
 
 Browser-native WebMCP adapter for a Gua-enabled Godot Web Export or Unity WebGL page.
 It registers tools on the experimental `document.modelContext` API and calls an
 engine bridge in the same page. It does not start an MCP server or WebSocket.
 
 ```ts
-import { registerGuaWebMcp } from "@gua/webmcp";
+import { registerGuaWebMcp } from "gua-webmcp";
 
 const registration = await registerGuaWebMcp(window.guaEngineBridge);
 if (!registration.supported) console.info(registration.error);
