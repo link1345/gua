@@ -55,8 +55,8 @@ export interface GuaGameInputActions { schemaVersion: 1; sessionEpoch: number; r
 export interface GuaHeldGameInput { kind: number; target: string; deviceIndex: number; value: unknown; remainingLeaseMs: number; }
 export interface GuaGameInputState { schemaVersion: 1; held: GuaHeldGameInput[]; }
 export type GameInputCommandInput =
-  | { type: "press_game_input_action"; actionId: string; leaseMs?: number; confirmed?: boolean }
-  | { type: "release_game_input_action"; actionId: string; leaseMs?: number }
+  | { type: "press_game_input_action"; actionId: string; confirmed?: boolean }
+  | { type: "release_game_input_action"; actionId: string }
   | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; confirmed?: boolean; sensitive?: boolean; secretKey?: string }
   | { type: "key_down" | "key_up" | "press_physical_key"; code: string; leaseMs?: number }
   | { type: "pointer_move"; mode: "absolute" | "delta"; coordinateSpace?: "viewport_normalized" | "viewport_pixels"; x: number; y: number }

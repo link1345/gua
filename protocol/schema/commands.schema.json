@@ -194,7 +194,24 @@
         "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
         "confirmed": { "type": "boolean", "default": false },
         "sensitive": { "type": "boolean", "default": false }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "set_game_input_action" } }, "required": ["type"] },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "press_game_input_action" } }, "required": ["type"] },
+          "then": { "not": { "anyOf": [{ "required": ["value"] }, { "required": ["leaseMs"] }, { "required": ["sensitive"] }] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "release_game_input_action" } }, "required": ["type"] },
+          "then": { "not": { "anyOf": [
+            { "required": ["value"] }, { "required": ["leaseMs"] },
+            { "required": ["confirmed"] }, { "required": ["sensitive"] }
+          ] } }
+        }
+      ]
     },
     "rawKey": {
       "type": "object", "required": ["type", "code"], "additionalProperties": false,
@@ -328,7 +345,17 @@
           "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "poll_game_input", "get_clock", "clock_pause", "clock_resume", "get_game_input_actions", "get_game_input_state", "release_all_game_inputs"]
         },
         "requestId": { "type": "integer", "minimum": 1 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "poll_game_input" } }, "required": ["type"] },
+          "then": { "required": ["requestId"] }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["poll_events", "poll_game_input"] } }, "required": ["type"] },
+          "else": { "not": { "required": ["requestId"] } }
+        }
+      ]
     }
   }
 }

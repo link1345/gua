@@ -508,6 +508,10 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
         const String bindings_json = JSON::stringify(source.get("bindings", Array()));
         const CharString id_utf8 = id.utf8(), description_utf8 = description.utf8();
         const CharString bindings_utf8 = bindings_json.utf8(), risk_utf8 = risk.utf8();
+        if (type != "button" && type != "axis1d" && type != "vector2" && type != "text") {
+            gua_runtime_abort_game_input_frame(runtime_);
+            return false;
+        }
         const int value_type = type == "axis1d" ? GUA_GAME_INPUT_AXIS1D :
             type == "vector2" ? GUA_GAME_INPUT_VECTOR2 : type == "text" ? GUA_GAME_INPUT_TEXT : GUA_GAME_INPUT_BUTTON;
         const bool has_range = source.has("minimum") || source.has("maximum");

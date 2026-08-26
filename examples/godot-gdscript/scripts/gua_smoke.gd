@@ -125,6 +125,11 @@ func _run() -> void:
 			or bare_context.get_version_json().contains("world_object_tree_v1"):
 		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
 		return
+	if bare_context.publish_game_input_actions("invalid", [{
+		"id": "invalid_type", "description": "Invalid type", "value_type": "axis1D",
+	}]):
+		_fail("GuaContext accepted an unknown game input action value_type.")
+		return
 	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
@@ -199,7 +204,7 @@ func _run() -> void:
 		_fail("Gua Godot status omitted World Object Tree metadata: %s" % world_status)
 		return
 	door.set_meta(&"gua_world_visible_to_player", "false")
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var rejected_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(rejected_world_tree, "door-a") == null \
 			or rejected_world_tree.get("frameSequence", 0) != 1:
@@ -208,7 +213,7 @@ func _run() -> void:
 	door.set_meta(&"gua_world_visible_to_player", true)
 	ui._publish_world_frame("title")
 	door.set_meta(&"gua_world_id", "")
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var missing_id_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(missing_id_world_tree, "door-a") == null \
 			or missing_id_world_tree.get("frameSequence", 0) != 2:
@@ -217,7 +222,7 @@ func _run() -> void:
 	door.set_meta(&"gua_world_id", "door-a")
 	ui._publish_world_frame("title")
 	door.set_meta(&"gua_world_state", {"code": 9007199254740993})
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var imprecise_integer_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(imprecise_integer_world_tree, "door-a") == null \
 			or imprecise_integer_world_tree.get("frameSequence", 0) != 3:

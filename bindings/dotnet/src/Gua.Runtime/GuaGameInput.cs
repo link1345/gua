@@ -191,8 +191,16 @@ public sealed partial class GuaRuntime
     {
         var required = copy(null, 0);
         if (required <= 0) throw new InvalidOperationException("Native game input JSON is unavailable.");
-        var bytes = new byte[required];
-        fixed (byte* pointer = bytes) required = copy(pointer, bytes.Length);
-        return Encoding.UTF8.GetString(bytes, 0, required - 1);
+        while (true)
+        {
+            var bytes = new byte[required];
+            fixed (byte* pointer = bytes)
+            {
+                var actual = copy(pointer, bytes.Length);
+                if (actual <= 0) throw new InvalidOperationException("Native game input JSON is unavailable.");
+                if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
+                required = actual;
+            }
+        }
     }
 }

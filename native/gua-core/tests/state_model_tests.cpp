@@ -831,6 +831,11 @@ int main()
     };
     assert(gua_register_game_input_action_v1(context, &invalid_bindings) == 0);
     assert(gua_end_game_input_frame(context) == 0);
+    assert(gua_begin_game_input_frame(context, "empty-binding") == 1);
+    auto empty_binding = invalid_bindings;
+    empty_binding.bindings_json = "[\"\"]";
+    assert(gua_register_game_input_action_v1(context, &empty_binding) == 0);
+    assert(gua_end_game_input_frame(context) == 0);
     assert(gua_begin_game_input_frame(context, "gameplay") == 1);
     const gua_game_input_action_descriptor_v1_t move {
         sizeof(gua_game_input_action_descriptor_v1_t), "move", "Move player", GUA_GAME_INPUT_VECTOR2,
@@ -855,6 +860,12 @@ int main()
 
     const uint64_t owner_a = gua_create_game_input_owner(context);
     const uint64_t owner_b = gua_create_game_input_owner(context);
+    for (int index = 0; index < 1000; ++index) {
+        const uint64_t empty_owner = gua_create_game_input_owner(context);
+        assert(gua_release_game_input_owner(context, empty_owner) == 1);
+    }
+    gua_game_input_request_v1_t consumed_input { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_consume_game_input_request(context, &consumed_input) == 0);
     uint64_t move_request_id = 0;
     const gua_game_input_request_descriptor_v1_t invalid_hold {
         sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
@@ -874,6 +885,12 @@ int main()
         "NotAKey", "true", 0, 0, 5000, 0, 0
     };
     assert(gua_enqueue_game_input(context, &invalid_key, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_gamepad_index = invalid_key;
+    invalid_gamepad_index.kind = GUA_GAME_INPUT_GAMEPAD;
+    invalid_gamepad_index.operation = GUA_GAME_INPUT_DOWN;
+    invalid_gamepad_index.target = "south";
+    invalid_gamepad_index.device_index = 4;
+    assert(gua_enqueue_game_input(context, &invalid_gamepad_index, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     auto invalid_lease = invalid_key;
     invalid_lease.target = "Space"; invalid_lease.lease_ms = 60001;
     assert(gua_enqueue_game_input(context, &invalid_lease, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT);
@@ -887,7 +904,6 @@ int main()
         "move", "{\"x\":1,\"y\":0}", 0, 0, 5000, 0, 0
     };
     assert(gua_enqueue_game_input(context, &set_move, &move_request_id) == GUA_GAME_INPUT_OK);
-    gua_game_input_request_v1_t consumed_input { sizeof(gua_game_input_request_v1_t) };
     assert(gua_consume_game_input_request(context, &consumed_input) == 1);
     assert(consumed_input.request_id == move_request_id && consumed_input.owner_id == owner_a);
     assert(gua_complete_game_input_request(context, move_request_id, 1, 0) == 1);
@@ -943,6 +959,26 @@ int main()
     assert(consumed_input.operation == GUA_GAME_INPUT_RELEASE && consumed_input.owner_id == owner_a);
     assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
     assert(gua_consume_game_input_request(context, &consumed_input) == 0);
+
+    auto short_move = set_move;
+    short_move.lease_ms = 1;
+    uint64_t consumed_before_map_change_id = 0;
+    assert(gua_enqueue_game_input(context, &short_move, &consumed_before_map_change_id) == GUA_GAME_INPUT_OK);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.request_id == consumed_before_map_change_id);
+    assert(gua_begin_game_input_frame(context, "menu-before-completion") == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    assert(gua_complete_game_input_request(context, consumed_before_map_change_id, 1, 0) == 1);
+    assert(gua_tick_game_input_leases(context, 1.0) == 1);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.owner_id == owner_a && consumed_input.kind == GUA_GAME_INPUT_SEMANTIC &&
+        consumed_input.operation == GUA_GAME_INPUT_RELEASE && std::string(consumed_input.target) == "move");
+    assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
+    assert(gua_begin_game_input_frame(context, "gameplay-restored") == 1);
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_register_game_input_action_v1(context, &chat) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
 
     uint64_t held_before_map_change_id = 0;
     assert(gua_enqueue_game_input(context, &set_move, &held_before_map_change_id) == GUA_GAME_INPUT_OK);

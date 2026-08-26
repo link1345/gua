@@ -143,6 +143,16 @@ describe("InspectorRecorder", () => {
       if (calls === 2) throw new Error("cleanup failed");
     })).rejects.toThrow("cleanup failed");
   });
+
+  test("rejects v1 and non-game-input operations before replay", async () => {
+    const step = { action: "game_input" as const, operation: "press_physical_key", arguments: { code: "Space" },
+      sensitive: false, relativeMilliseconds: 0, preRevision: 0, postRevision: 0 };
+    expect(() => validateRecording({ schemaVersion: 1, steps: [step] })).toThrow("invalid game input");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step, operation: "reset_context",
+      arguments: { expectedSessionEpoch: 1 } }] })).toThrow("invalid game input arguments");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step, operation: "press_game_input_action",
+      arguments: { type: "reset_context", actionId: "jump" } }] })).toThrow("invalid game input arguments");
+  });
 });
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

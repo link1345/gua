@@ -12,6 +12,22 @@
       "items": { "$ref": "#/$defs/step" }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "schemaVersion": { "const": 1 } }, "required": ["schemaVersion"] },
+    "then": {
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] }
+            }
+          }
+        }
+      }
+    }
+  }],
   "$defs": {
     "target": {
       "type": "object",
@@ -53,7 +69,13 @@
         "deltaY": { "type": "number" },
         "scrollUnit": { "type": "integer", "minimum": 0, "maximum": 1 },
         "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 },
-        "operation": { "type": "string", "minLength": 1 },
+        "operation": { "enum": [
+          "press_game_input_action", "set_game_input_action", "release_game_input_action",
+          "key_down", "key_up", "press_physical_key", "pointer_move",
+          "pointer_button_down", "pointer_button_up", "pointer_wheel",
+          "gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad",
+          "text_input", "release_all_game_inputs"
+        ] },
         "arguments": { "type": "object" }
       },
       "allOf": [

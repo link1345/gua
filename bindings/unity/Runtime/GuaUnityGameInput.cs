@@ -194,7 +194,16 @@ public sealed partial class GuaUnityRuntime
     private void PublishSemantic(string actionId, object? value)
     {
         gameInputValues[actionId] = value;
-        GameInputChanged?.Invoke(actionId, value);
+        var subscribers = GameInputChanged;
+        if (subscribers == null) return;
+        foreach (var subscriber in subscribers.GetInvocationList())
+        {
+            try { ((Action<string, object?>)subscriber)(actionId, value); }
+            catch (Exception error)
+            {
+                Debug.LogError($"Gua GameInputChanged subscriber failed for '{actionId}': {error.Message}");
+            }
+        }
     }
 
     private void PulseSemantic(string actionId, object? value)

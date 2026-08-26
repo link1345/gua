@@ -64,6 +64,7 @@ struct Command {
     std::string raw_value = "null";
     unsigned int lease_ms = 5000;
     int device_index = 0;
+    bool device_index_valid = true;
     double input_x = 0;
     double input_y = 0;
     bool world_selector_valid = true;
@@ -908,7 +909,10 @@ Command parse_command(std::string_view json)
     const auto lease_ms = json_int_field(json, "leaseMs");
     command.lease_ms = !lease_ms.has_value() ? 5000U :
         (*lease_ms >= 1 && *lease_ms <= 60000 ? static_cast<unsigned int>(*lease_ms) : 60001U);
-    command.device_index = std::clamp(json_int_field(json, "gamepadIndex").value_or(0), 0, 3);
+    const auto gamepad_index = json_int_field(json, "gamepadIndex");
+    command.device_index = gamepad_index.value_or(0);
+    command.device_index_valid = !json_has_field(json, "gamepadIndex") ||
+        (gamepad_index.has_value() && *gamepad_index >= 0 && *gamepad_index <= 3);
     command.input_x = json_number_field(json, "x").value_or(command.delta_x);
     command.input_y = json_number_field(json, "y").value_or(command.delta_y);
     return command;
@@ -1321,6 +1325,7 @@ private:
                     : error_response(command.id, "unsupported");
             }
             if (command.type == "poll_game_input") {
+                if (command.request_id == 0) return error_response(command.id, "poll_game_input requires requestId");
                 return game_input_owner_id != 0 && handlers_.poll_game_input_result_json
                     ? ok_response(command.id, handlers_.poll_game_input_result_json(game_input_owner_id, command.request_id))
                     : error_response(command.id, "unsupported");
@@ -1337,6 +1342,11 @@ private:
             if (game_input_command) {
                 if (game_input_owner_id == 0 || !handlers_.enqueue_game_input)
                     return error_response(command.id, "unsupported");
+                const bool gamepad_command = command.type == "gamepad_button_down" ||
+                    command.type == "gamepad_button_up" || command.type == "set_gamepad_axis" ||
+                    command.type == "reset_gamepad";
+                if (gamepad_command && !command.device_index_valid)
+                    return error_response(command.id, "invalid gamepadIndex");
                 std::string target = command.action_id;
                 std::string value_json = command.raw_value;
                 double x = command.input_x, y = command.input_y;

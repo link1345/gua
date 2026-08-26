@@ -211,7 +211,7 @@ func get_game_input_action_value(action_id: String, fallback: Variant = null) ->
 	return game_input_values.get(action_id, fallback)
 
 
-func _publish_world_frame(scene: String) -> void:
+func _publish_world_frame(scene: String, report_errors: bool = true) -> void:
 	if root == null or root.get_tree() == null or not context.begin_world_frame(scene):
 		return
 	var objects := root.get_tree().get_nodes_in_group(&"gua_world_object")
@@ -220,12 +220,12 @@ func _publish_world_frame(scene: String) -> void:
 		if not (node is Node2D or node is Node3D):
 			continue
 		if not node.has_meta(&"gua_world_id"):
-			push_error("Gua world object requires gua_world_id metadata: %s" % node.get_path())
+			_report_world_frame_error("Gua world object requires gua_world_id metadata: %s" % node.get_path(), report_errors)
 			context.abort_world_frame()
 			return
 		var object_id := str(node.get_meta(&"gua_world_id", ""))
 		if object_id.is_empty():
-			push_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path())
+			_report_world_frame_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path(), report_errors)
 			context.abort_world_frame()
 			return
 		var parent_id := ""
@@ -248,7 +248,7 @@ func _publish_world_frame(scene: String) -> void:
 		var visible_to_player = node.get_meta(&"gua_world_visible_to_player", false)
 		var active = node.get_meta(&"gua_world_active", true)
 		if typeof(visible_to_player) != TYPE_BOOL or typeof(active) != TYPE_BOOL:
-			push_error("Gua world visibility/active metadata must be boolean: %s" % object_id)
+			_report_world_frame_error("Gua world visibility/active metadata must be boolean: %s" % object_id, report_errors)
 			context.abort_world_frame()
 			return
 		var descriptor := {
@@ -268,11 +268,16 @@ func _publish_world_frame(scene: String) -> void:
 			"related_ui_node_id": str(node.get_meta(&"gua_world_related_ui_node_id", "")),
 		}
 		if not context.register_world_object(descriptor):
-			push_error("Failed to register Gua world object: %s" % object_id)
+			_report_world_frame_error("Failed to register Gua world object: %s" % object_id, report_errors)
 			context.abort_world_frame()
 			return
 	if not context.end_world_frame():
-		push_error("Gua world frame was rejected")
+		_report_world_frame_error("Gua world frame was rejected", report_errors)
+
+
+func _report_world_frame_error(message: String, report_errors: bool) -> void:
+	if report_errors:
+		push_error(message)
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:

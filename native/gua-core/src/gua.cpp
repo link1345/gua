@@ -172,6 +172,7 @@ struct GameInputRequest {
     unsigned int lease_ms = 0;
     int device_index = 0;
     bool sensitive = false;
+    bool creates_hold = false;
 };
 
 struct HeldGameInput {
@@ -802,12 +803,14 @@ bool valid_json_string_array(std::string_view value)
     while (index < value.size()) {
         if (value[index++] != '"') return false;
         bool closed = false;
+        bool non_empty = false;
         while (index < value.size()) {
             const unsigned char character = static_cast<unsigned char>(value[index++]);
             if (character == '"') {
                 closed = true;
                 break;
             }
+            non_empty = true;
             if (character < 0x20) return false;
             if (character != '\\') continue;
             if (index == value.size()) return false;
@@ -820,7 +823,7 @@ bool valid_json_string_array(std::string_view value)
                 return false;
             }
         }
-        if (!closed) return false;
+        if (!closed || !non_empty) return false;
         skip_whitespace();
         if (index == value.size()) return false;
         if (value[index] == ']') {
@@ -953,6 +956,16 @@ bool request_releases_hold(const GameInputRequest& request)
 {
     return request.operation == GUA_GAME_INPUT_RELEASE || request.operation == GUA_GAME_INPUT_UP ||
         request.operation == GUA_GAME_INPUT_RESET;
+}
+
+bool owner_requires_game_input_cleanup(const gua_context_t& ctx, unsigned long long owner_id)
+{
+    return std::any_of(ctx.game_input_cleanup_requests.begin(), ctx.game_input_cleanup_requests.end(),
+               [&](const auto& request) { return request.owner_id == owner_id; }) ||
+        std::any_of(ctx.consumed_game_input_requests.begin(), ctx.consumed_game_input_requests.end(),
+               [&](const auto& request) { return request.owner_id == owner_id; }) ||
+        std::any_of(ctx.held_game_inputs.begin(), ctx.held_game_inputs.end(),
+               [&](const auto& held) { return held.owner_id == owner_id; });
 }
 
 std::string build_semantic_snapshot_json(const std::string& screen, const std::vector<Node>& nodes)
@@ -2312,9 +2325,12 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         ctx->clock_completed_operation_sequence = ctx->next_clock_operation_sequence - 1;
         ++ctx->clock_generation;
     }
+    std::vector<unsigned long long> game_input_cleanup_owners;
+    for (const auto owner_id : ctx->game_input_owners)
+        if (owner_requires_game_input_cleanup(*ctx, owner_id)) game_input_cleanup_owners.push_back(owner_id);
     ctx->game_input_requests.clear();
     ctx->game_input_cleanup_requests.clear();
-    for (const auto owner_id : ctx->game_input_owners) {
+    for (const auto owner_id : game_input_cleanup_owners) {
         ctx->game_input_cleanup_requests.push_back(GameInputRequest {
             ctx->next_game_input_request_id++, owner_id, GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL,
             "all", "null", 0.0, 0.0, 0, 0, false });
@@ -2443,6 +2459,7 @@ extern "C" int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_i
     if (ctx == nullptr || owner_id == 0) return 0;
     const std::lock_guard lock(ctx->mutex);
     if (ctx->game_input_owners.erase(owner_id) == 0) return 0;
+    const bool cleanup_required = owner_requires_game_input_cleanup(*ctx, owner_id);
     ctx->game_input_requests.erase(std::remove_if(ctx->game_input_requests.begin(), ctx->game_input_requests.end(),
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->game_input_requests.end());
     ctx->game_input_cleanup_requests.erase(std::remove_if(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
@@ -2451,8 +2468,9 @@ extern "C" int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_i
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->consumed_game_input_requests.end());
     ctx->game_input_results.erase(std::remove_if(ctx->game_input_results.begin(), ctx->game_input_results.end(),
         [&](const auto& result) { return result.owner_id == owner_id; }), ctx->game_input_results.end());
-    ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, owner_id,
-        GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 0, 0, false });
+    if (cleanup_required)
+        ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, owner_id,
+            GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 0, 0, false });
     ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
         [&](const auto& held) { return held.owner_id == owner_id; }), ctx->held_game_inputs.end());
     return 1;
@@ -2485,6 +2503,8 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
             (descriptor->x < 0.0 || descriptor->x > 1.0 || descriptor->y < 0.0 || descriptor->y > 1.0))
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     } else if (descriptor->kind == GUA_GAME_INPUT_GAMEPAD) {
+        if (descriptor->device_index < 0 || descriptor->device_index > 3)
+            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         if ((descriptor->operation == GUA_GAME_INPUT_DOWN || descriptor->operation == GUA_GAME_INPUT_UP) &&
             !one_of(target, { "south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger",
                 "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right" }))
@@ -2524,6 +2544,7 @@ extern "C" int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input
     auto& queue = ctx->game_input_cleanup_requests.empty() ? ctx->game_input_requests : ctx->game_input_cleanup_requests;
     GameInputRequest request = std::move(queue.front());
     queue.pop_front();
+    request.creates_hold = request_creates_hold(request, ctx->game_input_actions);
     ctx->consumed_game_input_requests.push_back(request);
     *out_request = gua_game_input_request_v1_t { sizeof(*out_request) };
     out_request->request_id = request.request_id; out_request->owner_id = request.owner_id;
@@ -2558,7 +2579,7 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
             ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
                 [&](const auto& held) { return held_key_matches(held, request.owner_id, request.kind, request.target, request.device_index); }),
                 ctx->held_game_inputs.end());
-        } else if (request_creates_hold(request, ctx->game_input_actions)) {
+        } else if (request.creates_hold) {
             auto held = std::find_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
                 [&](const auto& item) { return held_key_matches(item, request.owner_id, request.kind, request.target, request.device_index); });
             if (held == ctx->held_game_inputs.end()) ctx->held_game_inputs.push_back(HeldGameInput {
