@@ -687,8 +687,6 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				return -5
 		"set_value":
 			var value = request.get("value", "")
-			if request.get("sensitive", false):
-				control.set_meta(META_SENSITIVE, true)
 			if control is LineEdit:
 				(control as LineEdit).text = value
 			elif control is TextEdit:
@@ -697,6 +695,8 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				(control as Range).value = float(value)
 			else:
 				return -6
+			if request.get("sensitive", false):
+				control.set_meta(META_SENSITIVE, true)
 		"set_checked":
 			if control is BaseButton:
 				(control as BaseButton).button_pressed = request.get("bool_value", false)

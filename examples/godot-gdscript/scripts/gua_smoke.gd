@@ -317,6 +317,21 @@ func _run() -> void:
 	if not grouped_first.button_pressed or grouped_second.button_pressed or grouped_click_event.get("request_id", 0) != grouped_click.get("request_id", 0):
 		_fail("Gua click action cleared an exclusive ButtonGroup selection: %s / %s" % [grouped_click, grouped_click_event])
 		return
+	var invalid_sensitive_range := ui.enqueue_action({"action": "set_value", "node_id": "volume", "value": "not-a-number", "sensitive": true})
+	ui.update("title")
+	var invalid_sensitive_range_event := ui.poll_event_v2()
+	ui.update("title")
+	var unchanged_range_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "volume")
+	if invalid_sensitive_range_event.get("request_id", 0) != invalid_sensitive_range.get("request_id", 0) \
+			or invalid_sensitive_range_event.get("succeeded", true) \
+			or invalid_sensitive_range_event.get("error_code", 0) != -6 \
+			or slider.value != 42.0 \
+			or unchanged_range_node == null \
+			or not unchanged_range_node.has("value") \
+			or float(unchanged_range_node.get("value", -1.0)) != 42.0 \
+			or float(unchanged_range_node.get("state", {}).get("rangeValue", -1.0)) != 42.0:
+		_fail("Gua marked a range sensitive after rejecting its value: %s / %s" % [invalid_sensitive_range_event, unchanged_range_node])
+		return
 	var sensitive := ui.enqueue_action({"action": "set_value", "node_id": "name", "value": "secret-marker", "sensitive": true})
 	ui.update("title")
 	var sensitive_event := ui.poll_event_v2()
