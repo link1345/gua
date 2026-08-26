@@ -396,6 +396,10 @@ describe("Gua same-page engine port", () => {
       { schemaVersion: 1, frameSequence: 1, revision: 1, screen: "title", nodes: [] },
       { schemaVersion: 2, revision: 1, screen: "title", nodes: [] },
       { schemaVersion: 2, frameSequence: 1, screen: "title", nodes: [] },
+      { schemaVersion: 2, sessionEpoch: 0, frameSequence: 1, revision: 1, screen: "title", nodes: [] },
+      { schemaVersion: 2, sessionEpoch: -1, frameSequence: 1, revision: 1, screen: "title", nodes: [] },
+      { schemaVersion: 2, sessionEpoch: "1", frameSequence: 1, revision: 1, screen: "title", nodes: [] },
+      { sessionEpoch: 1, screen: "title", nodes: [] },
     ]) {
       const bridge = createGuaInPageBridge({ invoke: async () => invalid });
       await expect(bridge.getUiTree()).rejects.toMatchObject({ code: "invalid_request" });

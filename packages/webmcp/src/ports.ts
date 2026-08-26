@@ -60,11 +60,14 @@ function parseTree(value: unknown): GuaUiTree {
   if (!record || typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
   }
-  const hasMetadata = record.schemaVersion !== undefined || record.frameSequence !== undefined || record.revision !== undefined;
+  const hasMetadata = record.schemaVersion !== undefined || record.sessionEpoch !== undefined ||
+    record.frameSequence !== undefined || record.revision !== undefined;
   if (!hasMetadata) {
     return { ...record, schemaVersion: 2, frameSequence: 0, revision: 0 } as unknown as GuaUiTree;
   }
   if (record.schemaVersion !== 2 ||
+      (record.sessionEpoch !== undefined &&
+        (!Number.isInteger(record.sessionEpoch) || (record.sessionEpoch as number) < 1)) ||
       !Number.isInteger(record.frameSequence) || (record.frameSequence as number) < 0 ||
       !Number.isInteger(record.revision) || (record.revision as number) < 0) {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
