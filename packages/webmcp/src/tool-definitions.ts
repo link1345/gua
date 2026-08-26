@@ -19,6 +19,8 @@ export const guaWebMcpToolNames = [
 
 export type GuaWebMcpToolName = (typeof guaWebMcpToolNames)[number];
 
+export const maxBrowserTimerDelayMs = 2_147_483_647;
+
 export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolName>[] = [
   {
     name: "get_ui_tree",
@@ -84,7 +86,7 @@ export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolN
     description: "Poll the live semantic UI tree until a node id appears or the timeout expires.",
     inputSchema: objectSchema({
       nodeId: stringProperty("The target Gua node id."),
-      timeoutMs: { type: "integer", minimum: 0, description: "Maximum wait time in milliseconds. Defaults to 5000." },
+      timeoutMs: { type: "integer", minimum: 0, maximum: maxBrowserTimerDelayMs, description: "Maximum wait time in milliseconds, up to 2147483647. Defaults to 5000." },
     }, ["nodeId"]),
   },
   {

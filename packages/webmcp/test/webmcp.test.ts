@@ -104,6 +104,8 @@ describe("registerGuaWebMcp", () => {
       expect(schema.properties[propertyName]?.minLength).toBe(1);
     }
     expect(page.tools.get("get_screenshot")!.description).toContain("latest screenshot published");
+    const waitSchema = page.tools.get("wait_for_node")!.inputSchema as { properties: { timeoutMs: { maximum?: number } } };
+    expect(waitSchema.properties.timeoutMs.maximum).toBe(2_147_483_647);
 
     const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
     expect(requests).toEqual([{ action: "click", nodeId: "start" }]);
@@ -179,6 +181,40 @@ describe("registerGuaWebMcp", () => {
     const result = await page.tools.get("set_value")!.execute({ nodeId: "name", value: "" }) as { isError?: boolean };
     expect(result.isError).toBeUndefined();
     expect(requests).toEqual([{ action: "set_value", nodeId: "name", value: "", sensitive: false }]);
+  });
+
+  test("rejects malformed sensitive flags before forwarding plaintext", async () => {
+    const page = modelDocument();
+    let called = false;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([{ ...button("password"), role: "textbox", actions: ["set_value"] }]),
+      performAction: async () => {
+        called = true;
+        return { requestId: 11, action: "set_value", succeeded: true };
+      },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: "secret-marker", sensitive: "true" }) as { content: Array<{ text: string }> };
+
+    expect(called).toBe(false);
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("invalid_request");
+    expect(result.content[0]!.text).not.toContain("secret-marker");
+  });
+
+  test("rejects browser timer delays above the signed 32-bit range", async () => {
+    const page = modelDocument();
+    await registerGuaWebMcp(bridgeWithTree(tree()), { document: page.document });
+
+    const result = await page.tools.get("wait_for_node")!.execute({ nodeId: "missing", timeoutMs: 2_147_483_648 }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("invalid_request");
+
+    const invalidRegistration = await registerGuaWebMcp(bridgeWithTree(tree()), {
+      document: modelDocument().document,
+      defaultTimeoutMs: 2_147_483_648,
+    });
+    expect(invalidRegistration.supported).toBe(false);
+    expect(invalidRegistration.error?.code).toBe("invalid_request");
   });
 
   test("redacts sensitive values from structured bridge failures", async () => {

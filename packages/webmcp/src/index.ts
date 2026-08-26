@@ -109,7 +109,7 @@ export interface GuaWebMcpRegistration {
   error?: GuaWebError;
 }
 
-import { guaWebMcpToolDefinitions } from "./tool-definitions.js";
+import { guaWebMcpToolDefinitions, maxBrowserTimerDelayMs } from "./tool-definitions.js";
 
 export async function registerGuaWebMcp(
   bridge: GuaBrowserBridge,
@@ -130,6 +130,8 @@ export async function registerGuaWebMcp(
 
   const definitions = guaWebMcpToolDefinitions.filter((definition) => definition.name !== "get_screenshot" || bridge.getScreenshot);
   try {
+    const pollIntervalMs = timerDelay(options.pollIntervalMs ?? 25, "pollIntervalMs");
+    const defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs");
     for (const definition of definitions) {
       await modelContext.registerTool({
         ...definition,
@@ -138,8 +140,8 @@ export async function registerGuaWebMcp(
           input ?? {},
           bridge,
           executionOptions?.signal,
-          options.pollIntervalMs ?? 25,
-          options.defaultTimeoutMs ?? 5000,
+          pollIntervalMs,
+          defaultTimeoutMs,
         ),
       }, { signal: controller.signal });
       registeredTools.push(definition.name);
@@ -151,7 +153,7 @@ export async function registerGuaWebMcp(
       supported: false,
       registeredTools: [],
       unregister: () => controller.abort(),
-      error: new GuaWebError("webmcp_unsupported", message),
+      error: error instanceof GuaWebError ? error : new GuaWebError("webmcp_unsupported", message),
     };
   }
   return { supported: true, registeredTools, unregister: () => controller.abort() };
@@ -186,7 +188,7 @@ async function executeTool(
     }
     if (name === "wait_for_node") {
       const nodeId = requiredString(input, "nodeId");
-      const timeoutMs = optionalInteger(input, "timeoutMs", defaultTimeoutMs, 0);
+      const timeoutMs = optionalInteger(input, "timeoutMs", defaultTimeoutMs, 0, maxBrowserTimerDelayMs);
       return toolResult(await waitForNode(bridge, nodeId, timeoutMs, pollIntervalMs, signal));
     }
     const request = actionRequest(name, input);
@@ -213,7 +215,7 @@ async function executeTool(
       : completion;
     return toolResult(safeCompletion);
   } catch (error) {
-    const normalized = normalizeError(error, input.sensitive === true ? String(input.value ?? "") : undefined);
+    const normalized = normalizeError(error, input.sensitive === undefined || input.sensitive === false ? undefined : String(input.value ?? ""));
     return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
   }
 }
@@ -300,7 +302,7 @@ function actionRequest(name: string, input: Record<string, unknown>): GuaWebActi
         action,
         nodeId: requiredString(input, "nodeId"),
         value: requiredString(input, "value", true),
-        sensitive: input.sensitive === true,
+        sensitive: input.sensitive === undefined ? false : requiredBoolean(input, "sensitive"),
       };
     case "set_checked":
       return { action, nodeId: requiredString(input, "nodeId"), checked: requiredBoolean(input, "checked") };
@@ -347,6 +349,12 @@ function optionalInteger(input: Record<string, unknown>, key: string, fallback: 
     throw new GuaWebError("invalid_request", `${key} must be an integer from ${minimum} to ${maximum}.`);
   }
   return value as number;
+}
+function timerDelay(value: number, key: string): number {
+  if (!Number.isInteger(value) || value < 0 || value > maxBrowserTimerDelayMs) {
+    throw new GuaWebError("invalid_request", `${key} must be an integer from 0 to ${maxBrowserTimerDelayMs}.`);
+  }
+  return value;
 }
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.");

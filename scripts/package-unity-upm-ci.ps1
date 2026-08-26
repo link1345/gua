@@ -31,7 +31,10 @@ Copy-Item (Join-Path $root "bindings/unity/Documentation~/index.md") (Join-Path 
 Copy-Item (Join-Path $root "bindings/unity/Samples~") $artifact -Recurse
 Copy-Item (Join-Path $root "bindings/unity/Runtime/link.xml") (Join-Path $artifact "Runtime")
 Copy-Item (Join-Path $plugins "Managed/*.dll") (Join-Path $artifact "Runtime/Plugins/Managed")
+Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Core.dll.meta") (Join-Path $artifact "Runtime/Plugins/Managed")
 Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.dll.meta") (Join-Path $artifact "Runtime/Plugins/Managed")
+Copy-Item (Join-Path $plugins "WebGL/Managed/Gua.Core.dll") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed")
+Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Core.WebGL.dll.meta") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed/Gua.Core.dll.meta")
 Copy-Item (Join-Path $plugins "WebGL/Managed/Gua.Runtime.dll") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed")
 Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.WebGL.dll.meta") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed/Gua.Runtime.dll.meta")
 Copy-Item (Join-Path $plugins "x86_64/*.dll") (Join-Path $artifact "Runtime/Plugins/x86_64")
