@@ -24,6 +24,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_action_request",
 	"emit_action_result",
 	"poll_event_v2",
+	"poll_action_result",
 	"get_context_status",
 	"reset_context",
 	"start_inspector_bridge",
@@ -41,11 +42,16 @@ var suppressed_clicks: Dictionary = {}
 var gdextension_resource: Resource
 var unavailable := false
 var screenshot_capture_scheduled := false
+var webmcp_bridge: RefCounted
 
 
 func attach(root_control: Control) -> void:
 	root = root_control
-	_ensure_context()
+	if _ensure_context() and OS.has_feature("web"):
+		var bridge_script := load("res://addons/gua/gua_webmcp_bridge.gd")
+		if bridge_script != null:
+			webmcp_bridge = bridge_script.new()
+			webmcp_bridge.attach(self)
 
 
 func update(screen: String) -> void:
@@ -165,6 +171,12 @@ func poll_event_v2() -> Dictionary:
 	if not _ensure_context():
 		return {}
 	return context.poll_event_v2()
+
+
+func poll_action_result(request_id: int) -> Dictionary:
+	if not _ensure_context():
+		return {}
+	return context.poll_action_result(request_id)
 
 
 func get_context_status() -> Dictionary:

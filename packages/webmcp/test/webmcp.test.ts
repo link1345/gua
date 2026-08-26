@@ -1,0 +1,202 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  createGuaInPageBridge,
+  GuaWebError,
+  registerGuaWebMcp,
+  type GuaBrowserBridge,
+  type GuaUiTree,
+  type GuaWebActionRequest,
+} from "../src/index";
+
+type Registered = {
+  name: string;
+  execute(input: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown>;
+};
+
+function modelDocument() {
+  const tools = new Map<string, Registered>();
+  const signals = new Map<string, AbortSignal | undefined>();
+  return {
+    tools,
+    signals,
+    document: {
+      modelContext: {
+        registerTool(tool: Registered, options?: { signal?: AbortSignal }) {
+          tools.set(tool.name, tool);
+          signals.set(tool.name, options?.signal);
+        },
+      },
+    } as unknown as Document & { modelContext: { registerTool(tool: Registered, options?: { signal?: AbortSignal }): void } },
+  };
+}
+
+function tree(nodes: GuaUiTree["nodes"] = []): GuaUiTree {
+  return { sessionEpoch: 1, frameSequence: 2, revision: 2, screen: "title", nodes };
+}
+
+function button(id = "start"): GuaUiTree["nodes"][number] {
+  return { id, role: "button", label: "Start", visible: true, enabled: true, bounds: { x: 0, y: 0, w: 10, h: 10 }, actions: ["click", "focus"] };
+}
+
+describe("registerGuaWebMcp", () => {
+  test("feature detects WebMCP without breaking the page", async () => {
+    const bridge = bridgeWithTree(tree());
+    const registration = await registerGuaWebMcp(bridge, { document: {} as Document });
+    expect(registration.supported).toBe(false);
+    expect(registration.error?.code).toBe("webmcp_unsupported");
+  });
+
+  test("cleans up partial registrations when the browser rejects access", async () => {
+    let registrations = 0;
+    let firstSignal: AbortSignal | undefined;
+    const document = {
+      modelContext: {
+        registerTool(_tool: Registered, options?: { signal?: AbortSignal }) {
+          registrations += 1;
+          firstSignal ??= options?.signal;
+          if (registrations === 2) throw new DOMException("Permission denied", "NotAllowedError");
+        },
+      },
+    } as unknown as Document & { modelContext: { registerTool(tool: Registered, options?: { signal?: AbortSignal }): void } };
+
+    const registration = await registerGuaWebMcp(bridgeWithTree(tree()), { document });
+    expect(registration.supported).toBe(false);
+    expect(registration.registeredTools).toEqual([]);
+    expect(registration.error?.code).toBe("webmcp_unsupported");
+    expect(firstSignal?.aborted).toBe(true);
+  });
+
+  test("registers the browser tool surface and waits for correlated host completion", async () => {
+    const page = modelDocument();
+    const requests: GuaWebActionRequest[] = [];
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([button()]),
+      performAction: async (request) => {
+        requests.push(request);
+        return { requestId: 41, action: request.action, nodeId: request.nodeId, succeeded: true, revision: 3 };
+      },
+      getScreenshot: async () => ({ dataUri: "data:image/png;base64,AA==", width: 1, height: 1 }),
+    };
+    const registration = await registerGuaWebMcp(bridge, { document: page.document });
+    expect(registration.supported).toBe(true);
+    expect(registration.registeredTools).toContain("get_screenshot");
+
+    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
+    expect(requests).toEqual([{ action: "click", nodeId: "start" }]);
+    expect(JSON.parse(result.content[0]!.text).requestId).toBe(41);
+
+    registration.unregister();
+    expect(page.signals.get("click_node")?.aborted).toBe(true);
+  });
+
+  test("validates live semantic state before dispatch", async () => {
+    const page = modelDocument();
+    let called = false;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([{ ...button(), visible: false }]),
+      performAction: async () => { called = true; throw new Error("should not run"); },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { isError: boolean; content: Array<{ text: string }> };
+    expect(called).toBe(false);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("hidden");
+  });
+
+  test("waits on fresh snapshots and redacts sensitive completion values", async () => {
+    const page = modelDocument();
+    let reads = 0;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(++reads >= 2 ? [button("password")] : []),
+      performAction: async (request) => ({
+        requestId: 9, action: request.action, nodeId: request.nodeId, succeeded: true,
+        value: request.value, sensitive: request.sensitive,
+      }),
+    };
+    const registration = await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
+    expect(registration.registeredTools).not.toContain("get_screenshot");
+    const waited = await page.tools.get("wait_for_node")!.execute({ nodeId: "password", timeoutMs: 100 }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(waited.content[0]!.text).id).toBe("password");
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: "secret-marker", sensitive: true }) as { content: Array<{ text: string }> };
+    expect(result.content[0]!.text).not.toContain("secret-marker");
+  });
+
+  test("redacts sensitive values from structured bridge failures", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([{ ...button("password"), actions: ["set_value"] }]),
+      performAction: async () => { throw new GuaWebError("action_failed", "Rejected secret-marker", { received: "secret-marker" }); },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: "secret-marker", sensitive: true }) as { content: Array<{ text: string }> };
+    expect(result.content[0]!.text).not.toContain("secret-marker");
+    expect(result.content[0]!.text).toContain("[REDACTED]");
+  });
+
+  test("returns a structured timeout when host completion never arrives", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([button()]),
+      performAction: async () => new Promise(() => {}),
+    };
+    await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 0 });
+    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("timeout");
+  });
+
+  test("keeps registrations and state scoped to each document", async () => {
+    const first = modelDocument();
+    const second = modelDocument();
+    await registerGuaWebMcp(bridgeWithTree(tree([button("first")])), { document: first.document });
+    await registerGuaWebMcp(bridgeWithTree(tree([button("second")])), { document: second.document });
+    const firstTree = await first.tools.get("get_ui_tree")!.execute({}) as { content: Array<{ text: string }> };
+    const secondTree = await second.tools.get("get_ui_tree")!.execute({}) as { content: Array<{ text: string }> };
+    expect(firstTree.content[0]!.text).toContain("first");
+    expect(firstTree.content[0]!.text).not.toContain("second");
+    expect(secondTree.content[0]!.text).toContain("second");
+  });
+});
+
+describe("Gua same-page engine port", () => {
+  test("maps protocol commands without a transport or session router", async () => {
+    const commands: unknown[] = [];
+    const bridge = createGuaInPageBridge({
+      async invoke(command) {
+        commands.push(command);
+        if (command.type === "get_ui_tree") return JSON.stringify(tree([button()]));
+        if (command.type === "perform_action") return {
+          requestId: 7, action: command.request.action, nodeId: command.request.nodeId,
+          succeeded: true, sessionEpoch: 1, frameSequence: 3, revision: 3,
+        };
+        throw new Error("unsupported");
+      },
+    });
+    expect((await bridge.getUiTree()).nodes[0]?.id).toBe("start");
+    expect((await bridge.performAction({ action: "click", nodeId: "start" })).requestId).toBe(7);
+    expect(commands).toEqual([
+      { type: "get_ui_tree" },
+      { type: "perform_action", request: { action: "click", nodeId: "start" } },
+    ]);
+  });
+
+  test("does not expose screenshot support until explicitly enabled", () => {
+    const port = { invoke: async () => ({}) };
+    expect(createGuaInPageBridge(port).getScreenshot).toBeUndefined();
+    expect(createGuaInPageBridge(port, { screenshot: true }).getScreenshot).toBeFunction();
+  });
+
+  test("preserves recognized structured engine error codes", async () => {
+    const bridge = createGuaInPageBridge({
+      invoke: async () => { throw { code: "timeout", message: "Host completion timed out." }; },
+    });
+    await expect(bridge.performAction({ action: "click", nodeId: "start" })).rejects.toMatchObject({ code: "timeout" });
+  });
+});
+
+function bridgeWithTree(value: GuaUiTree): GuaBrowserBridge {
+  return {
+    getUiTree: async () => value,
+    performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+  };
+}

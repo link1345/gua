@@ -1,6 +1,8 @@
 #include "gua/runtime.h"
 
+#if GUA_RUNTIME_WITH_WS
 #include "gua/ws_bridge.hpp"
+#endif
 
 #include <cstdio>
 #include <chrono>
@@ -25,7 +27,9 @@ struct gua_runtime_t {
     gua_context_t* context = nullptr;
     mutable std::mutex context_mutex;
     mutable std::mutex bridge_mutex;
+#if GUA_RUNTIME_WITH_WS
     std::unique_ptr<gua::ws::BridgeServer> bridge;
+#endif
     int bridge_port = 0;
     std::string bridge_url;
     std::string ui_tree_json;
@@ -744,6 +748,11 @@ extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset
 
 extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int port)
 {
+#if !GUA_RUNTIME_WITH_WS
+    (void)runtime;
+    (void)port;
+    return 0;
+#else
     if (!valid_runtime(runtime) || port <= 0 || port > 65535) {
         return 0;
     }
@@ -897,10 +906,14 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
     }
 
     return 1;
+#endif
 }
 
 extern "C" void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime)
 {
+#if !GUA_RUNTIME_WITH_WS
+    (void)runtime;
+#else
     if (runtime == nullptr) {
         return;
     }
@@ -916,16 +929,22 @@ extern "C" void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime)
     if (bridge != nullptr) {
         bridge->stop();
     }
+#endif
 }
 
 extern "C" int gua_runtime_inspector_bridge_running(gua_runtime_t* runtime)
 {
+#if !GUA_RUNTIME_WITH_WS
+    (void)runtime;
+    return 0;
+#else
     if (runtime == nullptr) {
         return 0;
     }
 
     const std::lock_guard bridge_lock(runtime->bridge_mutex);
     return runtime->bridge != nullptr && runtime->bridge->running() ? 1 : 0;
+#endif
 }
 
 extern "C" const char* gua_runtime_inspector_bridge_url(gua_runtime_t* runtime)
@@ -940,6 +959,9 @@ extern "C" const char* gua_runtime_inspector_bridge_url(gua_runtime_t* runtime)
 
 extern "C" void gua_runtime_publish_inspector_snapshot(gua_runtime_t* runtime)
 {
+#if !GUA_RUNTIME_WITH_WS
+    (void)runtime;
+#else
     if (runtime == nullptr) {
         return;
     }
@@ -948,4 +970,5 @@ extern "C" void gua_runtime_publish_inspector_snapshot(gua_runtime_t* runtime)
     if (runtime->bridge != nullptr && runtime->bridge->running()) {
         runtime->bridge->publish_snapshot();
     }
+#endif
 }

@@ -10,6 +10,9 @@ internal static unsafe class Native
     [StructLayout(LayoutKind.Sequential)] internal struct NodeV3 { internal uint StructSize; internal NodeV2 Base; internal long CaretPosition, SelectionStart, SelectionEnd; internal double ScrollX, ScrollY, ScrollMaxX, ScrollMaxY, RangeValue, RangeMin, RangeMax; internal long SelectedIndex; }
     [StructLayout(LayoutKind.Sequential)] internal unsafe struct ActionRequest { internal uint StructSize; internal ulong RequestId; internal int Action; internal fixed byte NodeId[128]; internal fixed byte Value[256]; internal float DeltaX, DeltaY; internal int BoolValue; internal fixed byte Key[64]; internal uint Modifiers; internal int Sensitive, ScrollUnit; }
     [StructLayout(LayoutKind.Sequential)] internal struct ActionResult { internal uint StructSize; internal ulong RequestId; internal int Action, Status, ErrorCode; internal nint NodeId, Value; internal int Sensitive; }
+    [StructLayout(LayoutKind.Sequential)] internal struct ActionDescriptor { internal uint StructSize; internal int Action; internal nint NodeId, Value; internal float DeltaX, DeltaY; internal int BoolValue; internal nint Key; internal uint Modifiers; internal int Sensitive, ScrollUnit; }
+    [StructLayout(LayoutKind.Sequential)] internal unsafe struct ActionEventV2 { internal uint StructSize; internal ulong RequestId; internal int Action, Status, ErrorCode; internal fixed byte NodeId[128]; internal fixed byte Value[256]; internal int Sensitive; }
+    [StructLayout(LayoutKind.Sequential)] internal unsafe struct ActionEventV3 { internal uint StructSize; internal ActionEventV2 Base; internal ulong SessionEpoch, FrameSequence, Revision; }
     [StructLayout(LayoutKind.Sequential)] internal struct ScreenshotRequest { internal uint StructSize; internal ulong RequestId, SessionEpoch, AfterFrameSequence; }
     [StructLayout(LayoutKind.Sequential)] internal unsafe struct LegacyEvent { internal int Type; internal fixed byte NodeId[128]; }
 
@@ -36,13 +39,19 @@ internal static unsafe class Native
     }
 #endif
 
+#if GUA_STATIC_LINK
+    private const string Library = "__Internal";
+#else
     private const string Library = "gua_runtime";
+#endif
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern nint gua_runtime_create();
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_destroy(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_begin_frame(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string screen);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_end_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_register_node_v3(nint runtime, in NodeV3 node);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_action_request(nint runtime, int action, [MarshalAs(UnmanagedType.LPUTF8Str)] string? nodeId, ref ActionRequest request);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_action(nint runtime, in ActionDescriptor descriptor, out ulong requestId);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_poll_event_v3_for_request(nint runtime, ulong requestId, ref ActionEventV3 result);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_emit_action_result(nint runtime, in ActionResult result);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_screenshot_request(nint runtime, ref ScreenshotRequest request);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_complete_screenshot_request(nint runtime, ulong requestId, int result, [MarshalAs(UnmanagedType.LPUTF8Str)] string dataUri, int width, int height);

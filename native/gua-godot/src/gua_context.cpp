@@ -346,6 +346,25 @@ Dictionary GuaContext::poll_event_v2()
     return result;
 }
 
+Dictionary GuaContext::poll_action_result(uint64_t request_id)
+{
+    if (request_id == 0) return Dictionary();
+    gua_event_v3_t event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    if (gua_runtime_poll_event_v3_for_request(runtime_, request_id, &event) == 0) return Dictionary();
+    Dictionary result;
+    result["requestId"] = event.base.request_id;
+    result["action"] = action_name(event.base.action);
+    result["succeeded"] = event.base.status == GUA_ACTION_STATUS_SUCCEEDED;
+    result["error"] = event.base.error_code;
+    result["nodeId"] = String::utf8(event.base.node_id);
+    result["value"] = event.base.sensitive != 0 ? String() : String::utf8(event.base.value);
+    result["sensitive"] = event.base.sensitive != 0;
+    result["sessionEpoch"] = event.session_epoch;
+    result["frameSequence"] = event.frame_sequence;
+    result["revision"] = event.revision;
+    return result;
+}
+
 Dictionary GuaContext::get_context_status() const
 {
     gua_context_status_t status { sizeof(gua_context_status_t) };
@@ -446,6 +465,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("consume_action_request", "action", "node_id"), &GuaContext::consume_action_request);
     ClassDB::bind_method(D_METHOD("emit_action_result", "result"), &GuaContext::emit_action_result);
     ClassDB::bind_method(D_METHOD("poll_event_v2"), &GuaContext::poll_event_v2);
+    ClassDB::bind_method(D_METHOD("poll_action_result", "request_id"), &GuaContext::poll_action_result);
     ClassDB::bind_method(D_METHOD("get_context_status"), &GuaContext::get_context_status);
     ClassDB::bind_method(D_METHOD("reset_context", "options"), &GuaContext::reset_context, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));

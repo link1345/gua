@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Runtime.InteropServices;
 using Gua.Core;
 using Gua.Runtime;
 using UnityEngine;
@@ -31,6 +32,9 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private object? frameFocusTarget;
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
+    private readonly Dictionary<ulong, int> webCalls = new();
+    [DllImport("__Internal")] private static extern void GuaUnityWebInstall();
+    [DllImport("__Internal")] private static extern void GuaUnityWebResolve(int callId, string json, int failed);
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     public static void EnsureStarted()
@@ -47,10 +51,18 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         {
             runtime = new GuaRuntime();
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
-            var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
-            var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
-            if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");
-            Debug.Log($"Gua Unity adapter listening on {runtime.InspectorBridgeUrl}.");
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
+            {
+                GuaUnityWebInstall();
+                Debug.Log("Gua Unity WebGL same-page bridge installed.");
+            }
+            else
+            {
+                var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
+                var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
+                if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");
+                Debug.Log($"Gua Unity adapter listening on {runtime.InspectorBridgeUrl}.");
+            }
             activeRuntime = this;
         }
         catch (Exception error)
@@ -77,10 +89,88 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             PruneClickObservers();
             runtime.EndFrame();
             DispatchActions();
+            if (Application.platform == RuntimePlatform.WebGLPlayer) FlushWebActionResults();
             ScheduleScreenshot();
         }
         catch (Exception error) { Debug.LogError("Gua Unity adapter frame failed: " + error); }
     }
+
+    public void HandleWebRequest(string json)
+    {
+        if (runtime == null) return;
+        WebEnvelope envelope;
+        try { envelope = JsonUtility.FromJson<WebEnvelope>(json); }
+        catch (Exception error) { Debug.LogError("Invalid Gua WebGL request: " + error.Message); return; }
+        if (envelope == null || envelope.command == null) return;
+        if (envelope.command.type == "get_ui_tree")
+        {
+            GuaUnityWebResolve(envelope.callId, runtime.GetUiTreeJson(), 0);
+            return;
+        }
+        if (envelope.command.type != "perform_action" || envelope.command.request == null)
+        {
+            ResolveWebError(envelope.callId, "engine_unsupported", "Unity WebGL does not support this Gua command.");
+            return;
+        }
+        var source = envelope.command.request;
+        if (!TryActionType(source.action, out var action))
+        {
+            ResolveWebError(envelope.callId, "invalid_request", "Unknown Gua action.");
+            return;
+        }
+        var request = new GuaActionRequest(action, EmptyToNull(source.nodeId), EmptyToNull(source.value), source.deltaX, source.deltaY,
+            source.@checked, EmptyToNull(source.key), (uint)Math.Clamp(source.modifiers, 0, 15), source.sensitive, source.scrollUnit);
+        var result = runtime.EnqueueAction(request, out var requestId);
+        if (result != GuaActionError.None)
+        {
+            ResolveWebError(envelope.callId, "invalid_request", $"Unity rejected the Gua action ({(int)result}).");
+            return;
+        }
+        webCalls[requestId] = envelope.callId;
+    }
+
+    private void FlushWebActionResults()
+    {
+        foreach (var pair in webCalls.ToArray())
+        {
+            if (!runtime!.TryPollActionEvent(pair.Key, out var result)) continue;
+            var payload = new WebCompletion
+            {
+                requestId = result.RequestId, action = (int)result.Action, succeeded = result.Succeeded,
+                error = (int)result.Error, nodeId = result.NodeId, value = result.Sensitive ? string.Empty : result.Value,
+                sensitive = result.Sensitive, sessionEpoch = result.SessionEpoch ?? 0,
+                frameSequence = result.FrameSequence ?? 0, revision = result.Revision ?? 0,
+            };
+            GuaUnityWebResolve(pair.Value, JsonUtility.ToJson(payload), 0);
+            webCalls.Remove(pair.Key);
+        }
+    }
+
+    private static void ResolveWebError(int callId, string code, string message) =>
+        GuaUnityWebResolve(callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
+    private static string? EmptyToNull(string value) => string.IsNullOrEmpty(value) ? null : value;
+    private static bool TryActionType(string value, out GuaActionType action)
+    {
+        action = value switch
+        {
+            "click" => GuaActionType.Click, "focus" => GuaActionType.Focus, "set_value" => GuaActionType.SetValue,
+            "set_checked" => GuaActionType.SetChecked, "select" => GuaActionType.Select, "scroll" => GuaActionType.Scroll,
+            "press_key" => GuaActionType.PressKey, _ => 0,
+        };
+        return action != 0;
+    }
+
+    [Serializable] private sealed class WebEnvelope { public int callId; public WebCommand command; }
+    [Serializable] private sealed class WebCommand { public string type; public WebAction request; }
+    [Serializable] private sealed class WebAction
+    {
+        public string action, nodeId, value, key; public float deltaX, deltaY; public bool @checked, sensitive; public int modifiers, scrollUnit;
+    }
+    [Serializable] private sealed class WebCompletion
+    {
+        public ulong requestId, sessionEpoch, frameSequence, revision; public int action, error; public bool succeeded, sensitive; public string nodeId, value;
+    }
+    [Serializable] private sealed class WebError { public string code, message; }
 
     private void OnDestroy()
     {

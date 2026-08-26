@@ -30,6 +30,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "@gua/webmcp": "workspace:*",
     "pngjs": "^7.0.0"
   }
 }

@@ -60,6 +60,16 @@ GuaはAIコーディングエージェントを補完します。AIがゲーム�
 実行中ゲームの観測・操作・検証を可能にします。ゲームエンジンやAIを置き換える
 ものではなく、Semanticな対象指定は画像認識に依存しません。
 
+### ブラウザネイティブWebMCP（実験的）
+
+Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Treeを実験的な
+ブラウザ`document.modelContext` APIから公開できます。`@gua/webmcp`は、エンジンが
+所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、任意の
+screenshotツールを登録します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
+ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
+独自のブラウザセッションルーターは持ちません。
+[`examples/webmcp-page`](examples/webmcp-page)にホストページの雛形があります。
+
 ## Godot 4.7対応
 
 推奨Godot統合はGDExtensionを利用するGDScriptアドオンです。標準`Control`を

@@ -3,7 +3,10 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+
+    [Parameter(Mandatory = $true)]
+    [string]$WebNativeDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +19,8 @@ if (Test-Path -LiteralPath $artifact) { Remove-Item -LiteralPath $artifact -Recu
 New-Item -ItemType Directory -Force `
     (Join-Path $artifact "Runtime/Plugins/Managed"), `
     (Join-Path $artifact "Runtime/Plugins/x86_64"), `
+    (Join-Path $artifact "Runtime/Plugins/WebGL"), `
+    (Join-Path $artifact "Runtime/Plugins/WebGL/Managed"), `
     (Join-Path $artifact "Editor"), `
     (Join-Path $artifact "Documentation~") | Out-Null
 
@@ -26,9 +31,20 @@ Copy-Item (Join-Path $root "bindings/unity/Documentation~/index.md") (Join-Path 
 Copy-Item (Join-Path $root "bindings/unity/Samples~") $artifact -Recurse
 Copy-Item (Join-Path $root "bindings/unity/Runtime/link.xml") (Join-Path $artifact "Runtime")
 Copy-Item (Join-Path $plugins "Managed/*.dll") (Join-Path $artifact "Runtime/Plugins/Managed")
+Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.dll.meta") (Join-Path $artifact "Runtime/Plugins/Managed")
+Copy-Item (Join-Path $plugins "WebGL/Managed/Gua.Runtime.dll") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed")
+Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.WebGL.dll.meta") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed/Gua.Runtime.dll.meta")
 Copy-Item (Join-Path $plugins "x86_64/*.dll") (Join-Path $artifact "Runtime/Plugins/x86_64")
 Copy-Item (Join-Path $root "scripts/unity-meta/gua.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
 Copy-Item (Join-Path $root "scripts/unity-meta/gua_runtime.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
+Copy-Item (Join-Path $root "bindings/unity/Runtime/Plugins/WebGL/GuaWebMcp.jslib") (Join-Path $artifact "Runtime/Plugins/WebGL")
+Copy-Item (Join-Path $root "bindings/unity/Runtime/Plugins/WebGL/GuaWebMcp.jslib.meta") (Join-Path $artifact "Runtime/Plugins/WebGL")
+foreach ($webLibrary in "libgua_runtime.a", "libgua-core.a") {
+    $webLibraries = @(Get-ChildItem -LiteralPath $WebNativeDirectory -Recurse -File -Filter $webLibrary)
+    if ($webLibraries.Count -ne 1) { throw "Expected one $webLibrary below '$WebNativeDirectory', found $($webLibraries.Count)." }
+    Copy-Item -LiteralPath $webLibraries[0].FullName -Destination (Join-Path $artifact "Runtime/Plugins/WebGL")
+    Copy-Item (Join-Path $root "scripts/unity-meta/$webLibrary.meta") (Join-Path $artifact "Runtime/Plugins/WebGL")
+}
 
 $scriptAssemblies = Join-Path $project "Library/ScriptAssemblies"
 foreach ($assembly in "Gua.Unity.dll", "Gua.Unity.Bootstrap.dll", "Gua.Unity.TMP.dll") {

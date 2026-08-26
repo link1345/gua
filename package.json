@@ -6,7 +6,8 @@
   "license": "MIT",
   "packageManager": "bun@1.3.14",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "examples/webmcp-page"
   ],
   "scripts": {
     "check": "bun run --workspaces check",

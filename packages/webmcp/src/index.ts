@@ -1,0 +1,293 @@
+export * from "./tool-definitions.js";
+export * from "./ports.js";
+
+export interface GuaBounds { x: number; y: number; w: number; h: number }
+export interface GuaNodeState {
+  focused?: boolean;
+  hovered?: boolean;
+  pressed?: boolean;
+  checked?: boolean;
+  selected?: boolean;
+  value?: number | string | boolean | null;
+}
+export interface GuaNode {
+  id: string;
+  parentId?: string;
+  role: string;
+  label?: string;
+  visible: boolean;
+  enabled: boolean;
+  bounds: GuaBounds;
+  state?: GuaNodeState;
+  actions: string[];
+}
+export interface GuaUiTree {
+  sessionEpoch?: number;
+  frameSequence?: number;
+  revision?: number;
+  screen: string;
+  nodes: GuaNode[];
+}
+export interface GuaScreenshot { dataUri: string; width: number; height: number }
+
+export type GuaWebAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
+export interface GuaWebActionRequest {
+  action: GuaWebAction;
+  nodeId?: string;
+  value?: string;
+  checked?: boolean;
+  sensitive?: boolean;
+  deltaX?: number;
+  deltaY?: number;
+  scrollUnit?: 0 | 1;
+  key?: string;
+  modifiers?: number;
+}
+export interface GuaWebActionCompletion {
+  requestId: number;
+  action: GuaWebAction | number;
+  succeeded: boolean;
+  error?: string | number;
+  nodeId?: string;
+  value?: string;
+  sensitive?: boolean;
+  sessionEpoch?: number;
+  frameSequence?: number;
+  revision?: number;
+}
+
+/** Implemented by the engine adapter in the same page. performAction resolves only after host completion. */
+export interface GuaBrowserBridge {
+  getUiTree(): Promise<GuaUiTree>;
+  performAction(request: GuaWebActionRequest): Promise<GuaWebActionCompletion>;
+  getScreenshot?(): Promise<GuaScreenshot>;
+}
+
+export type GuaWebErrorCode =
+  | "webmcp_unsupported" | "engine_unsupported" | "invalid_request" | "node_not_found"
+  | "hidden" | "disabled" | "unsupported_action" | "action_failed" | "timeout" | "aborted";
+
+export class GuaWebError extends Error {
+  constructor(public readonly code: GuaWebErrorCode, message: string, public readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "GuaWebError";
+  }
+  toJSON() { return { code: this.code, message: this.message, ...(this.details ? { details: this.details } : {}) }; }
+}
+
+interface WebMcpExecutionOptions { signal?: AbortSignal }
+interface WebMcpToolRegistration {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  execute(input: Record<string, unknown>, options?: WebMcpExecutionOptions): Promise<unknown>;
+}
+interface ModelContext {
+  registerTool(tool: WebMcpToolRegistration, options?: { signal?: AbortSignal }): Promise<void> | void;
+}
+
+export interface RegisterGuaWebMcpOptions {
+  document?: Document & { modelContext?: ModelContext };
+  pollIntervalMs?: number;
+  defaultTimeoutMs?: number;
+}
+export interface GuaWebMcpRegistration {
+  supported: boolean;
+  registeredTools: string[];
+  unregister(): void;
+  error?: GuaWebError;
+}
+
+import { guaWebMcpToolDefinitions } from "./tool-definitions.js";
+
+export async function registerGuaWebMcp(
+  bridge: GuaBrowserBridge,
+  options: RegisterGuaWebMcpOptions = {},
+): Promise<GuaWebMcpRegistration> {
+  const documentValue = options.document ?? (globalThis as { document?: Document }).document as RegisterGuaWebMcpOptions["document"];
+  const modelContext = documentValue?.modelContext;
+  const controller = new AbortController();
+  const registeredTools: string[] = [];
+  if (!modelContext || typeof modelContext.registerTool !== "function") {
+    return {
+      supported: false,
+      registeredTools,
+      unregister: () => controller.abort(),
+      error: new GuaWebError("webmcp_unsupported", "This browser does not expose document.modelContext.registerTool()."),
+    };
+  }
+
+  const definitions = guaWebMcpToolDefinitions.filter((definition) => definition.name !== "get_screenshot" || bridge.getScreenshot);
+  try {
+    for (const definition of definitions) {
+      await modelContext.registerTool({
+        ...definition,
+        execute: async (input, executionOptions) => executeTool(
+          definition.name,
+          input ?? {},
+          bridge,
+          executionOptions?.signal,
+          options.pollIntervalMs ?? 25,
+          options.defaultTimeoutMs ?? 5000,
+        ),
+      }, { signal: controller.signal });
+      registeredTools.push(definition.name);
+    }
+  } catch (error) {
+    controller.abort();
+    const message = error instanceof Error ? error.message : "The browser rejected WebMCP tool registration.";
+    return {
+      supported: false,
+      registeredTools: [],
+      unregister: () => controller.abort(),
+      error: new GuaWebError("webmcp_unsupported", message),
+    };
+  }
+  return { supported: true, registeredTools, unregister: () => controller.abort() };
+}
+
+async function executeTool(
+  name: string,
+  input: Record<string, unknown>,
+  bridge: GuaBrowserBridge,
+  signal: AbortSignal | undefined,
+  pollIntervalMs: number,
+  defaultTimeoutMs: number,
+): Promise<unknown> {
+  try {
+    throwIfAborted(signal);
+    if (name === "get_ui_tree") return toolResult(await bridge.getUiTree());
+    if (name === "get_screenshot") {
+      if (!bridge.getScreenshot) throw new GuaWebError("engine_unsupported", "The engine bridge does not support screenshots.");
+      return toolResult(await bridge.getScreenshot());
+    }
+    if (name === "wait_for_node") {
+      const nodeId = requiredString(input, "nodeId");
+      const timeoutMs = optionalInteger(input, "timeoutMs", defaultTimeoutMs, 0);
+      return toolResult(await waitForNode(bridge, nodeId, timeoutMs, pollIntervalMs, signal));
+    }
+    const request = actionRequest(name, input);
+    await validateAction(bridge, request);
+    throwIfAborted(signal);
+    const completion = await withTimeout(
+      bridge.performAction(request),
+      defaultTimeoutMs,
+      signal,
+      `Timed out waiting for ${request.action} host completion.`,
+    );
+    if (!completion || typeof completion.requestId !== "number") {
+      throw new GuaWebError("invalid_request", "The engine bridge returned no request-correlated completion.");
+    }
+    if (!completion.succeeded) {
+      throw new GuaWebError("action_failed", `The host rejected ${request.action} for ${request.nodeId ?? "current focus"}.`, {
+        requestId: completion.requestId,
+        hostError: completion.error ?? "unknown",
+      });
+    }
+    const safeCompletion = request.sensitive || completion.sensitive ? { ...completion, value: "", sensitive: true } : completion;
+    return toolResult(safeCompletion);
+  } catch (error) {
+    const normalized = normalizeError(error, input.sensitive === true ? String(input.value ?? "") : undefined);
+    return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
+  }
+}
+
+async function validateAction(bridge: GuaBrowserBridge, request: GuaWebActionRequest): Promise<void> {
+  if (request.action === "press_key" && !request.nodeId) return;
+  const node = (await bridge.getUiTree()).nodes.find((candidate) => candidate.id === request.nodeId);
+  if (!node) throw new GuaWebError("node_not_found", `Gua node not found: ${request.nodeId}`);
+  if (!node.visible) throw new GuaWebError("hidden", `Gua node is hidden: ${request.nodeId}`);
+  if (!node.enabled) throw new GuaWebError("disabled", `Gua node is disabled: ${request.nodeId}`);
+  if (!node.actions.includes(request.action)) {
+    throw new GuaWebError("unsupported_action", `Gua node does not support ${request.action}: ${request.nodeId}`);
+  }
+}
+
+async function waitForNode(bridge: GuaBrowserBridge, nodeId: string, timeoutMs: number, pollIntervalMs: number, signal?: AbortSignal): Promise<GuaNode> {
+  const deadline = performance.now() + timeoutMs;
+  do {
+    throwIfAborted(signal);
+    const node = (await bridge.getUiTree()).nodes.find((candidate) => candidate.id === nodeId);
+    if (node) return node;
+    if (performance.now() >= deadline) break;
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - performance.now())), signal);
+  } while (true);
+  throw new GuaWebError("timeout", `Timed out waiting for Gua node: ${nodeId}`, { timeoutMs });
+}
+
+function actionRequest(name: string, input: Record<string, unknown>): GuaWebActionRequest {
+  const action = name.replace(/_node$/, "") as GuaWebAction;
+  if (!["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"].includes(action)) {
+    throw new GuaWebError("invalid_request", `Unknown Gua WebMCP tool: ${name}`);
+  }
+  const request: GuaWebActionRequest = { action };
+  if (action !== "press_key" || input.nodeId !== undefined) request.nodeId = requiredString(input, "nodeId");
+  if (action === "set_value" || action === "select") request.value = requiredString(input, "value");
+  if (action === "set_value") request.sensitive = input.sensitive === true;
+  if (action === "set_checked") request.checked = requiredBoolean(input, "checked");
+  if (action === "scroll") {
+    request.deltaX = requiredNumber(input, "deltaX");
+    request.deltaY = requiredNumber(input, "deltaY");
+    request.scrollUnit = optionalInteger(input, "scrollUnit", 0, 0, 1) as 0 | 1;
+  }
+  if (action === "press_key") {
+    request.key = requiredString(input, "key");
+    request.modifiers = optionalInteger(input, "modifiers", 0, 0, 15);
+  }
+  return request;
+}
+
+function toolResult(value: unknown) { return { content: [{ type: "text", text: JSON.stringify(value) }] }; }
+function requiredString(input: Record<string, unknown>, key: string): string {
+  if (typeof input[key] !== "string" || (input[key] as string).length === 0) throw new GuaWebError("invalid_request", `${key} must be a non-empty string.`);
+  return input[key] as string;
+}
+function requiredBoolean(input: Record<string, unknown>, key: string): boolean {
+  if (typeof input[key] !== "boolean") throw new GuaWebError("invalid_request", `${key} must be a boolean.`);
+  return input[key] as boolean;
+}
+function requiredNumber(input: Record<string, unknown>, key: string): number {
+  if (typeof input[key] !== "number" || !Number.isFinite(input[key])) throw new GuaWebError("invalid_request", `${key} must be a finite number.`);
+  return input[key] as number;
+}
+function optionalInteger(input: Record<string, unknown>, key: string, fallback: number, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
+  const value = input[key] ?? fallback;
+  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new GuaWebError("invalid_request", `${key} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return value as number;
+}
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.");
+}
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.")); }, { once: true });
+  });
+}
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number, signal: AbortSignal | undefined, message: string): Promise<T> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(() => reject(new GuaWebError("timeout", message, { timeoutMs }))), Math.max(0, timeoutMs));
+    const aborted = () => finish(() => reject(new GuaWebError("aborted", "The Gua WebMCP tool call was aborted.")));
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      settle();
+    };
+    signal?.addEventListener("abort", aborted, { once: true });
+    operation.then((value) => finish(() => resolve(value)), (error) => finish(() => reject(error)));
+  });
+}
+function normalizeError(error: unknown, secret?: string): GuaWebError {
+  let message = error instanceof Error ? error.message : "The engine bridge failed.";
+  if (secret) message = message.split(secret).join("[REDACTED]");
+  if (error instanceof GuaWebError) {
+    const details = secret && error.details
+      ? JSON.parse(JSON.stringify(error.details).split(secret).join("[REDACTED]")) as Record<string, unknown>
+      : error.details;
+    return new GuaWebError(error.code, message, details);
+  }
+  return new GuaWebError("action_failed", message);
+}
