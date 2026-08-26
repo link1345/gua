@@ -191,12 +191,14 @@ key code、pointer移動/button/wheel、Standard Gamepad、text inputを扱い�
 保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒です。満了、切断、
 reset、replay失敗、session disposeではneutral状態へ戻します。InspectorにはAction
 Map、保持lease、Raw操作、緊急`Release all`を表示します。
+ローカルC++/.NET sessionは返されたrequest IDをpollしてhost完了を確認します。
+enqueue受付だけではadapterが入力を注入したことを意味しません。
 
 Unity 6000.5では`com.unity.inputsystem@1.20.0`のvirtual deviceへ注入し、
 Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡します。
 adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開します。
 既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
-`press_physical_key`を使う。
+`press_physical_key`を使います。
 
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を

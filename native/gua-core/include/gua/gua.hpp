@@ -414,6 +414,8 @@ public:
     bool release_game_input_owner(std::uint64_t owner_id) { return gua_release_game_input_owner(context_, owner_id) != 0; }
     [[nodiscard]] std::string game_input_state_json(std::uint64_t owner_id) const
     { return copy_json([owner_id](auto* context, char* output, int size) { return gua_copy_game_input_state_json(context, owner_id, output, size); }); }
+    [[nodiscard]] std::string game_input_result_json(std::uint64_t owner_id, std::uint64_t request_id) const
+    { return copy_json([owner_id, request_id](auto* context, char* output, int size) { return gua_copy_game_input_result_json(context, owner_id, request_id, output, size); }); }
     [[nodiscard]] std::uint64_t enqueue_game_input(std::uint64_t owner_id, int kind, int operation,
         std::string_view target, std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
         double x = 0, double y = 0, int device_index = 0, bool sensitive = false)
@@ -500,6 +502,8 @@ public:
     { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive); }
     [[nodiscard]] std::string state_json() const
     { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->game_input_state_json(owner_id_); }
+    [[nodiscard]] std::string result_json(std::uint64_t request_id) const
+    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->game_input_result_json(owner_id_, request_id); }
     void reset() noexcept { if (context_ != nullptr) context_->release_game_input_owner(owner_id_); context_ = nullptr; owner_id_ = 0; }
 private:
     Context* context_ = nullptr;

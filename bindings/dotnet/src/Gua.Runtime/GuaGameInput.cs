@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Gua.Runtime;
 
@@ -24,6 +25,12 @@ public sealed record GuaGameInputRequest(
     ulong RequestId, ulong OwnerId, GuaGameInputKind Kind, GuaGameInputOperation Operation,
     string Target, string ValueJson, double X, double Y, uint LeaseMs, int DeviceIndex, bool Sensitive);
 
+public sealed record GuaGameInputResult(
+    [property: JsonPropertyName("completed")] bool Completed,
+    [property: JsonPropertyName("requestId")] ulong? RequestId = null,
+    [property: JsonPropertyName("succeeded")] bool? Succeeded = null,
+    [property: JsonPropertyName("errorCode")] int? ErrorCode = null);
+
 public sealed class GuaGameInputSession : IDisposable
 {
     private GuaRuntime? runtime;
@@ -36,11 +43,14 @@ public sealed class GuaGameInputSession : IDisposable
         return owner.EnqueueGameInput(OwnerId, kind, operation, target, value, lease, x, y, deviceIndex, sensitive);
     }
     public string GetStateJson() => (runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession))).GetGameInputStateJson(OwnerId);
+    public GuaGameInputResult PollResult(ulong requestId) =>
+        (runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession))).GetGameInputResult(OwnerId, requestId);
     public void Dispose() { var owner = runtime; runtime = null; if (owner is not null) owner.ReleaseGameInputOwner(OwnerId); }
 }
 
 public sealed partial class GuaRuntime
 {
+    private unsafe delegate int CopyGameInputJsonDelegate(byte* output, int size);
     private Action? gameInputShutdown;
 
     public void EnableGameInput(GuaGameInputCapabilities capabilities, Action shutdown)
@@ -161,16 +171,28 @@ public sealed partial class GuaRuntime
 
     public unsafe string GetGameInputActionsJson() => CopyGameInputJson(0, false);
     internal unsafe string GetGameInputStateJson(ulong ownerId) => CopyGameInputJson(ownerId, true);
+    internal unsafe GuaGameInputResult GetGameInputResult(ulong ownerId, ulong requestId)
+    {
+        ThrowIfDisposed();
+        int Copy(byte* output, int size) => Native.gua_runtime_copy_game_input_result_json(_handle, ownerId, requestId, output, size);
+        var json = CopyGameInputJson(Copy);
+        return JsonSerializer.Deserialize<GuaGameInputResult>(json)
+            ?? throw new InvalidOperationException("Native game input result JSON is invalid.");
+    }
     private unsafe string CopyGameInputJson(ulong ownerId, bool state)
     {
         ThrowIfDisposed();
         int Copy(byte* output, int size) => state
             ? Native.gua_runtime_copy_game_input_state_json(_handle, ownerId, output, size)
             : Native.gua_runtime_copy_game_input_actions_json(_handle, output, size);
-        var required = Copy(null, 0);
+        return CopyGameInputJson(Copy);
+    }
+    private static unsafe string CopyGameInputJson(CopyGameInputJsonDelegate copy)
+    {
+        var required = copy(null, 0);
         if (required <= 0) throw new InvalidOperationException("Native game input JSON is unavailable.");
         var bytes = new byte[required];
-        fixed (byte* pointer = bytes) required = Copy(pointer, bytes.Length);
+        fixed (byte* pointer = bytes) required = copy(pointer, bytes.Length);
         return Encoding.UTF8.GetString(bytes, 0, required - 1);
     }
 }

@@ -151,6 +151,8 @@ controls, and text input. Stateful input is isolated per connection, defaults
 to a five-second lease (maximum 60 seconds), and is neutralized on expiry,
 disconnect, reset, replay failure, or session disposal. Inspector shows action
 metadata, held leases, raw controls, and an emergency **Release all** button.
+Local C++ and .NET sessions poll the returned request ID for host completion;
+enqueue acceptance alone does not prove that the adapter injected the input.
 
 Unity 6000.5 integration uses `com.unity.inputsystem@1.20.0` virtual devices;
 Godot injects main-thread `InputEvent` values through `Input.parse_input_event`.

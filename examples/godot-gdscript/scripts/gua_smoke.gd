@@ -157,6 +157,10 @@ func _run() -> void:
 	if not game_input_actions.contains("\"button\"") or not game_input_actions.contains("\"axis1d\"") or not game_input_actions.contains("\"vector2\"") or not game_input_actions.contains("\"text\""):
 		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
 		return
+	for code in ["Backspace", "ContextMenu", "F1", "F24", "Numpad0", "Numpad9", "Quote", "ScrollLock"]:
+		if ui._keycode_from_w3c(code) == KEY_NONE:
+			_fail("Gua raw-keyboard capability did not implement protocol-valid code %s." % code)
+			return
 	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 101, "target": "move", "value_json": "{\"x\":1,\"y\":0}"}) != 0:
 		_fail("Gua smoke could not inject the first owner-scoped semantic value.")
 		return

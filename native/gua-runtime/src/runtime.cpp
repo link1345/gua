@@ -894,6 +894,14 @@ extern "C" int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, ui
     return gua_copy_game_input_state_json(runtime->context, owner_id, out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, uint64_t owner_id, uint64_t request_id,
+    char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_copy_game_input_result_json(runtime->context, owner_id, request_id, out_json, out_json_size);
+}
+
 extern "C" void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled)
 {
     if (!valid_runtime(runtime)) return;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { InspectorRecorder, validateRecording } from "../src/automation";
+import { InspectorRecorder, replayRecording, validateRecording } from "../src/automation";
 import { MockInspectorClient, createCoalescedAsyncRunner, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
@@ -100,6 +100,48 @@ describe("InspectorRecorder", () => {
     const recording = recorder.stop();
     validateRecording(recording);
     expect(recording.steps.map((step) => step.operation)).toEqual(["set_game_input_action", "release_game_input_action"]);
+    expect(recording.steps.every((step) => step.target === undefined && step.coordinateFallback === undefined)).toBe(true);
+    expect(() => validateRecording({ ...recording, steps: [{ ...recording.steps[0], target: { currentFocus: true } }] }))
+      .toThrow("game input cannot have a UI target");
+  });
+
+  test("redacts and restores sensitive game input", async () => {
+    const recorder = new InspectorRecorder();
+    recorder.start();
+    recorder.recordGameInput({ type: "set_game_input_action", actionId: "chat", value: "not-written",
+      sensitive: true, secretKey: "chat-secret" }, 22);
+    const recording = recorder.stop();
+    expect(recording.steps[0]?.secretKey).toBe("chat-secret");
+    expect(JSON.stringify(recording)).not.toContain("not-written");
+
+    const commands: unknown[] = [];
+    await replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never,
+      { "chat-secret": "restored" }, async (command) => { commands.push(command); });
+    expect(commands).toEqual([
+      { type: "set_game_input_action", actionId: "chat", sensitive: true, value: "restored" },
+      { type: "release_all_game_inputs" },
+    ]);
+    expect(() => validateRecording({ ...recording, steps: [{ ...recording.steps[0],
+      arguments: { ...recording.steps[0]?.arguments, value: "plaintext" } }] }))
+      .toThrow("sensitive game input plaintext");
+    expect(() => validateRecording({ ...recording, steps: [{ ...recording.steps[0], secretKey: undefined }] }))
+      .toThrow("requires a secretKey");
+  });
+
+  test("preserves replay failures but surfaces cleanup-only failures", async () => {
+    const recording = { schemaVersion: 2 as const, steps: [{ action: "game_input" as const,
+      operation: "press_physical_key" as const, arguments: { code: "Space" }, sensitive: false,
+      relativeMilliseconds: 0, preRevision: 0, postRevision: 0 }] };
+    let calls = 0;
+    await expect(replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never, {}, async () => {
+      calls += 1;
+      throw new Error(calls === 1 ? "replay failed" : "cleanup failed");
+    })).rejects.toThrow("replay failed");
+    calls = 0;
+    await expect(replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never, {}, async () => {
+      calls += 1;
+      if (calls === 2) throw new Error("cleanup failed");
+    })).rejects.toThrow("cleanup failed");
   });
 });
 

@@ -100,6 +100,7 @@ int gua_runtime_complete_game_input_request(gua_runtime_t* runtime, uint64_t req
 int gua_runtime_tick_game_input_leases(gua_runtime_t* runtime, double elapsed_ms);
 int gua_runtime_copy_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, uint64_t owner_id, char* out_json, int out_json_size);
+int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, uint64_t owner_id, uint64_t request_id, char* out_json, int out_json_size);
 /* Adapter opt-in: enable only after the host publishes world frames. */
 void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled);
 /* Host-owned ceiling; transports cannot override this profile per request. */

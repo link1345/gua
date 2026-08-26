@@ -39,4 +39,5 @@ the native runtime is destroyed. Local consumers create a
 call `TryConsumeGameInput`, inject the request on the host thread, and then call
 `CompleteGameInput`. Call `TickGameInputLeases` once per host frame with
 unscaled elapsed time. Enqueue acceptance and host completion are deliberately
-separate, and lease timing never uses `GuaRuntime.Clock`.
+separate; local callers use `GuaGameInputSession.PollResult(requestId)` for the
+correlated completion. Lease timing never uses `GuaRuntime.Clock`.

@@ -81,12 +81,15 @@ export class InspectorRecorder {
   recordGameInput(input: GameInputCommandInput, requestId?: number): void {
     if (this.startedAt === null) return;
     const sensitive = "sensitive" in input && input.sensitive === true;
+    const secretKey = "secretKey" in input ? input.secretKey : undefined;
+    if (sensitive && secretKey === undefined) throw new Error("Sensitive game input requires secretKey.");
     const argumentsValue = { ...input } as Record<string, unknown>;
     delete argumentsValue.type;
+    delete argumentsValue.secretKey;
     if (sensitive) { delete argumentsValue.value; delete argumentsValue.text; }
     this.steps.push({ action: "game_input", operation: input.type, arguments: argumentsValue,
       requestId, relativeMilliseconds: Date.now() - this.startedAt, preRevision: 0, postRevision: 0,
-      sensitive, target: { currentFocus: true } });
+      sensitive, secretKey: sensitive ? secretKey : undefined });
   }
 
   stop(): GuaRecording {
@@ -107,13 +110,21 @@ export async function replayRecording(
 ): Promise<void> {
   validateRecording(recording);
   let previous = 0;
+  let replaySucceeded = false;
   try { for (const step of recording.steps) {
     if (step.waitCondition !== undefined) await waitForCondition(getTree, step.waitCondition, 10000);
     else if (step.relativeMilliseconds > previous) await delay(step.relativeMilliseconds - previous);
     previous = step.relativeMilliseconds;
     if (step.action === "game_input") {
       if (performGameInput === undefined || step.operation === undefined || step.arguments === undefined) throw new Error("Game input replay is unavailable.");
-      await performGameInput({ type: step.operation, ...step.arguments } as GameInputCommandInput);
+      const argumentsValue = { type: step.operation, ...step.arguments } as Record<string, unknown>;
+      if (step.sensitive) {
+        const secret = secrets[step.secretKey as string];
+        if (secret === undefined) throw new Error(`Missing secret '${step.secretKey}'.`);
+        if (step.operation === "text_input") argumentsValue.text = secret;
+        else argumentsValue.value = secret;
+      }
+      await performGameInput(argumentsValue as GameInputCommandInput);
       continue;
     }
     const nodeId = await resolveTarget(step, await getTree());
@@ -126,8 +137,13 @@ export async function replayRecording(
       modifiers: step.modifiers, deltaX: step.deltaX, deltaY: step.deltaY,
       scrollUnit: step.scrollUnit, sensitive: step.sensitive, secretKey: step.secretKey,
     });
-  } } finally {
-    if (performGameInput !== undefined) await performGameInput({ type: "release_all_game_inputs" });
+  }
+  replaySucceeded = true;
+  } finally {
+    if (performGameInput !== undefined) {
+      try { await performGameInput({ type: "release_all_game_inputs" }); }
+      catch (cleanupError) { if (replaySucceeded) throw cleanupError; }
+    }
   }
 }
 
@@ -199,13 +215,24 @@ export function validateRecording(value: unknown): asserts value is GuaRecording
     }
     if (raw.action === "game_input" && (value.schemaVersion !== 2 || typeof raw.operation !== "string" || !isRecord(raw.arguments)))
       throw new Error(`Recording step ${index} has invalid game input.`);
+    if (raw.action === "game_input" && raw.sensitive === true && isRecord(raw.arguments) &&
+        ("value" in raw.arguments || "text" in raw.arguments))
+      throw new Error(`Recording step ${index} contains sensitive game input plaintext.`);
+    if (raw.sensitive === true && (typeof raw.secretKey !== "string" || raw.secretKey.length === 0))
+      throw new Error(`Recording step ${index} requires a secretKey for sensitive input.`);
+    if (raw.sensitive === false && raw.secretKey !== undefined)
+      throw new Error(`Recording step ${index} cannot have a secretKey when input is not sensitive.`);
     if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < previous) {
       throw new Error(`Recording step ${index} has invalid timing.`);
     }
     previous = raw.relativeMilliseconds as number;
     const hasTarget = isRecord(raw.target);
     const hasCoordinate = isRecord(raw.coordinateFallback);
-    if (hasTarget === hasCoordinate) throw new Error(`Recording step ${index} requires exactly one target or coordinate fallback.`);
+    if (raw.action === "game_input") {
+      if (hasTarget || hasCoordinate) throw new Error(`Recording step ${index} game input cannot have a UI target.`);
+    } else if (hasTarget === hasCoordinate) {
+      throw new Error(`Recording step ${index} requires exactly one target or coordinate fallback.`);
+    }
     if (!Number.isInteger(raw.preRevision) || !Number.isInteger(raw.postRevision)) throw new Error(`Recording step ${index} has invalid revisions.`);
   });
 }

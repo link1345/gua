@@ -191,6 +191,8 @@ struct GameInputResult {
     int error_code = 0;
 };
 
+constexpr std::size_t max_game_input_results = 1024;
+
 const char* log_level_name(int level)
 {
     switch (level) {
@@ -683,16 +685,104 @@ bool valid_game_input_id(std::string_view value)
     });
 }
 
+void skip_json_whitespace(std::string_view value, std::size_t& index)
+{
+    while (index < value.size() && std::isspace(static_cast<unsigned char>(value[index])) != 0) ++index;
+}
+
+bool parse_json_value(std::string_view value, std::size_t& index, int depth);
+
+bool parse_json_string(std::string_view value, std::size_t& index)
+{
+    if (index == value.size() || value[index++] != '"') return false;
+    while (index < value.size()) {
+        const unsigned char character = static_cast<unsigned char>(value[index++]);
+        if (character == '"') return true;
+        if (character < 0x20) return false;
+        if (character != '\\') continue;
+        if (index == value.size()) return false;
+        const char escape = value[index++];
+        if (escape == 'u') {
+            for (int digit = 0; digit < 4; ++digit) {
+                if (index == value.size() || std::isxdigit(static_cast<unsigned char>(value[index++])) == 0) return false;
+            }
+        } else if (std::string_view("\"\\/bfnrt").find(escape) == std::string_view::npos) {
+            return false;
+        }
+    }
+    return false;
+}
+
+bool parse_json_number(std::string_view value, std::size_t& index)
+{
+    const std::size_t start = index;
+    if (index < value.size() && value[index] == '-') ++index;
+    if (index == value.size()) return false;
+    if (value[index] == '0') {
+        ++index;
+        if (index < value.size() && std::isdigit(static_cast<unsigned char>(value[index])) != 0) return false;
+    } else {
+        if (value[index] < '1' || value[index] > '9') return false;
+        while (index < value.size() && std::isdigit(static_cast<unsigned char>(value[index])) != 0) ++index;
+    }
+    if (index < value.size() && value[index] == '.') {
+        ++index;
+        if (index == value.size() || std::isdigit(static_cast<unsigned char>(value[index])) == 0) return false;
+        while (index < value.size() && std::isdigit(static_cast<unsigned char>(value[index])) != 0) ++index;
+    }
+    if (index < value.size() && (value[index] == 'e' || value[index] == 'E')) {
+        ++index;
+        if (index < value.size() && (value[index] == '+' || value[index] == '-')) ++index;
+        if (index == value.size() || std::isdigit(static_cast<unsigned char>(value[index])) == 0) return false;
+        while (index < value.size() && std::isdigit(static_cast<unsigned char>(value[index])) != 0) ++index;
+    }
+    return index > start;
+}
+
+bool parse_json_value(std::string_view value, std::size_t& index, int depth)
+{
+    if (depth > 32) return false;
+    skip_json_whitespace(value, index);
+    if (index == value.size()) return false;
+    if (value[index] == '"') return parse_json_string(value, index);
+    if (value.substr(index, 4) == "true" || value.substr(index, 4) == "null") { index += 4; return true; }
+    if (value.substr(index, 5) == "false") { index += 5; return true; }
+    if (value[index] == '[') {
+        ++index;
+        skip_json_whitespace(value, index);
+        if (index < value.size() && value[index] == ']') { ++index; return true; }
+        while (parse_json_value(value, index, depth + 1)) {
+            skip_json_whitespace(value, index);
+            if (index < value.size() && value[index] == ']') { ++index; return true; }
+            if (index == value.size() || value[index++] != ',') return false;
+        }
+        return false;
+    }
+    if (value[index] == '{') {
+        ++index;
+        skip_json_whitespace(value, index);
+        if (index < value.size() && value[index] == '}') { ++index; return true; }
+        while (true) {
+            if (!parse_json_string(value, index)) return false;
+            skip_json_whitespace(value, index);
+            if (index == value.size() || value[index++] != ':') return false;
+            if (!parse_json_value(value, index, depth + 1)) return false;
+            skip_json_whitespace(value, index);
+            if (index < value.size() && value[index] == '}') { ++index; return true; }
+            if (index == value.size() || value[index++] != ',') return false;
+            skip_json_whitespace(value, index);
+        }
+    }
+    return parse_json_number(value, index);
+}
+
 bool valid_json_value(std::string_view value)
 {
     if (value.empty() || value.size() >= 512) return false;
-    if (value == "true" || value == "false" || value == "null") return true;
-    if (value.front() == '"' && value.back() == '"') return true;
-    if (value.front() == '{' && value.back() == '}') return true;
-    char* end = nullptr;
-    const std::string copy(value);
-    const double number = std::strtod(copy.c_str(), &end);
-    return end == copy.c_str() + copy.size() && std::isfinite(number);
+    std::size_t index = 0;
+    if (!parse_json_value(value, index, 0)) return false;
+    skip_json_whitespace(value, index);
+    return index == value.size();
 }
 
 bool valid_json_string_array(std::string_view value)
@@ -776,6 +866,40 @@ bool one_of(std::string_view value, std::initializer_list<std::string_view> allo
 bool one_of(int value, std::initializer_list<int> allowed)
 {
     return std::find(allowed.begin(), allowed.end(), value) != allowed.end();
+}
+
+int validate_semantic_game_input(const std::vector<GameInputAction>& actions, int operation,
+    std::string_view target, std::string_view value)
+{
+    if (operation == GUA_GAME_INPUT_RELEASE)
+        return valid_game_input_id(target) ? GUA_GAME_INPUT_OK : GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    const auto action = std::find_if(actions.begin(), actions.end(),
+        [&](const auto& item) { return item.id == target; });
+    if (action == actions.end()) return GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND;
+    if (!action->active) return GUA_GAME_INPUT_ERROR_INACTIVE;
+    if (operation == GUA_GAME_INPUT_PRESS && action->value_type != GUA_GAME_INPUT_BUTTON)
+        return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
+    if (operation == GUA_GAME_INPUT_SET && action->value_type == GUA_GAME_INPUT_BUTTON && !action->holdable)
+        return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
+    if (action->value_type == GUA_GAME_INPUT_BUTTON && operation == GUA_GAME_INPUT_SET &&
+        value != "true" && value != "false") return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    if (action->value_type == GUA_GAME_INPUT_AXIS1D && operation == GUA_GAME_INPUT_SET) {
+        char* end = nullptr;
+        const std::string copy(value);
+        const double number = std::strtod(copy.c_str(), &end);
+        if (end != copy.c_str() + copy.size() || !std::isfinite(number) ||
+            (action->has_range && (number < action->minimum || number > action->maximum)))
+            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    }
+    if (action->value_type == GUA_GAME_INPUT_VECTOR2 && operation == GUA_GAME_INPUT_SET) {
+        double x = 0.0, y = 0.0;
+        if (value.empty() || value.front() != '{' || !json_object_number(value, "x", x) || !json_object_number(value, "y", y) ||
+            (action->has_range && (x < action->minimum || x > action->maximum || y < action->minimum || y > action->maximum)))
+            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    }
+    if (action->value_type == GUA_GAME_INPUT_TEXT && operation == GUA_GAME_INPUT_SET &&
+        (value.empty() || value.front() != '"')) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    return GUA_GAME_INPUT_OK;
 }
 
 std::string build_game_input_semantic_snapshot(const std::string& context, const std::vector<GameInputAction>& actions)
@@ -2325,6 +2449,8 @@ extern "C" int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_i
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->game_input_cleanup_requests.end());
     ctx->consumed_game_input_requests.erase(std::remove_if(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->consumed_game_input_requests.end());
+    ctx->game_input_results.erase(std::remove_if(ctx->game_input_results.begin(), ctx->game_input_results.end(),
+        [&](const auto& result) { return result.owner_id == owner_id; }), ctx->game_input_results.end());
     ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, owner_id,
         GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 0, 0, false });
     ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
@@ -2346,33 +2472,8 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
     const std::string value = descriptor->value_json != nullptr ? descriptor->value_json : "null";
     if (target.size() >= 128 || !valid_json_value(value)) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     if (descriptor->kind == GUA_GAME_INPUT_SEMANTIC) {
-        const auto action = std::find_if(ctx->game_input_actions.begin(), ctx->game_input_actions.end(),
-            [&](const auto& item) { return item.id == target; });
-        if (action == ctx->game_input_actions.end()) return GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND;
-        if (!action->active) return GUA_GAME_INPUT_ERROR_INACTIVE;
-        if (descriptor->operation == GUA_GAME_INPUT_PRESS && action->value_type != GUA_GAME_INPUT_BUTTON)
-            return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
-        if (descriptor->operation == GUA_GAME_INPUT_SET && action->value_type == GUA_GAME_INPUT_BUTTON && !action->holdable)
-            return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
-        if (descriptor->operation == GUA_GAME_INPUT_RELEASE && action->value_type == GUA_GAME_INPUT_TEXT)
-            return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
-        if (action->value_type == GUA_GAME_INPUT_BUTTON && descriptor->operation == GUA_GAME_INPUT_SET &&
-            value != "true" && value != "false") return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
-        if (action->value_type == GUA_GAME_INPUT_AXIS1D && descriptor->operation == GUA_GAME_INPUT_SET) {
-            char* end = nullptr;
-            const double number = std::strtod(value.c_str(), &end);
-            if (end != value.c_str() + value.size() || !std::isfinite(number) ||
-                (action->has_range && (number < action->minimum || number > action->maximum)))
-                return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
-        }
-        if (action->value_type == GUA_GAME_INPUT_VECTOR2 && descriptor->operation == GUA_GAME_INPUT_SET) {
-            double x = 0.0, y = 0.0;
-            if (value.front() != '{' || !json_object_number(value, "x", x) || !json_object_number(value, "y", y) ||
-                (action->has_range && (x < action->minimum || x > action->maximum || y < action->minimum || y > action->maximum)))
-                return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
-        }
-        if (action->value_type == GUA_GAME_INPUT_TEXT && descriptor->operation == GUA_GAME_INPUT_SET && value.front() != '"')
-            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        const int validation = validate_semantic_game_input(ctx->game_input_actions, descriptor->operation, target, value);
+        if (validation != GUA_GAME_INPUT_OK) return validation;
     } else if (descriptor->kind == GUA_GAME_INPUT_KEYBOARD) {
         if (!one_of(descriptor->operation, { GUA_GAME_INPUT_PRESS, GUA_GAME_INPUT_DOWN, GUA_GAME_INPUT_UP }) ||
             !valid_keyboard_code(target)) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
@@ -2380,7 +2481,7 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
         if ((descriptor->operation == GUA_GAME_INPUT_DOWN || descriptor->operation == GUA_GAME_INPUT_UP) &&
             !one_of(target, { "primary", "secondary", "auxiliary", "back", "forward" }))
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
-        if (descriptor->operation == GUA_GAME_INPUT_MOVE_ABSOLUTE && target == "absolute_normalized:viewport_normalized" &&
+        if (descriptor->operation == GUA_GAME_INPUT_MOVE_ABSOLUTE && target == "absolute:viewport_normalized" &&
             (descriptor->x < 0.0 || descriptor->x > 1.0 || descriptor->y < 0.0 || descriptor->y > 1.0))
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     } else if (descriptor->kind == GUA_GAME_INPUT_GAMEPAD) {
@@ -2409,6 +2510,16 @@ extern "C" int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input
 {
     if (ctx == nullptr || out_request == nullptr || out_request->struct_size < sizeof(*out_request)) return 0;
     const std::lock_guard lock(ctx->mutex);
+    while (!ctx->game_input_requests.empty()) {
+        const auto& request = ctx->game_input_requests.front();
+        if (request.kind != GUA_GAME_INPUT_SEMANTIC) break;
+        const int validation = validate_semantic_game_input(ctx->game_input_actions, request.operation,
+            request.target, request.value_json);
+        if (validation == GUA_GAME_INPUT_OK) break;
+        if (ctx->game_input_results.size() >= max_game_input_results) ctx->game_input_results.pop_front();
+        ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, false, validation });
+        ctx->game_input_requests.pop_front();
+    }
     if (ctx->game_input_cleanup_requests.empty() && ctx->game_input_requests.empty()) return 0;
     auto& queue = ctx->game_input_cleanup_requests.empty() ? ctx->game_input_requests : ctx->game_input_cleanup_requests;
     GameInputRequest request = std::move(queue.front());
@@ -2456,7 +2567,10 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
             else { held->value_json = request.value_json; held->remaining_ms = request.lease_ms; held->sensitive = request.sensitive; }
         }
     }
-    ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, succeeded != 0, error_code });
+    if (ctx->game_input_owners.contains(request.owner_id)) {
+        if (ctx->game_input_results.size() >= max_game_input_results) ctx->game_input_results.pop_front();
+        ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, succeeded != 0, error_code });
+    }
     return 1;
 }
 
@@ -2509,5 +2623,8 @@ extern "C" int gua_copy_game_input_result_json(gua_context_t* ctx, uint64_t owne
         : "{\"completed\":true,\"requestId\":" + std::to_string(result->request_id) +
             ",\"succeeded\":" + (result->succeeded ? "true" : "false") +
             ",\"errorCode\":" + std::to_string(result->error_code) + "}";
-    return copy_json_string(json, out_json, out_json_size);
+    const int required_size = copy_json_string(json, out_json, out_json_size);
+    if (result != ctx->game_input_results.end() && out_json != nullptr && out_json_size >= required_size)
+        ctx->game_input_results.erase(result);
+    return required_size;
 }

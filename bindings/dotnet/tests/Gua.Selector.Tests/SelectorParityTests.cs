@@ -1570,6 +1570,30 @@ public sealed class SelectorParityTests
         Assert.That(shutdownInvoked, Is.True);
     }
 
+    [Test]
+    public void LocalGameInputSessionPollsCorrelatedCompletionOnce()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.PublishGameInputActions("gameplay", [
+            new GuaGameInputActionDescriptor("jump", "Jump", GuaGameInputValueType.Button, Holdable: true),
+        ]);
+        using var session = runtime.CreateGameInputSession();
+        var requestId = session.Send(GuaGameInputKind.Semantic, GuaGameInputOperation.Set, "jump", true);
+
+        Assert.That(session.PollResult(requestId).Completed, Is.False);
+        Assert.That(runtime.TryConsumeGameInput(out var request), Is.True);
+        runtime.CompleteGameInput(request, true);
+
+        var completed = session.PollResult(requestId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(completed.Completed, Is.True);
+            Assert.That(completed.RequestId, Is.EqualTo(requestId));
+            Assert.That(completed.Succeeded, Is.True);
+            Assert.That(session.PollResult(requestId).Completed, Is.False);
+        });
+    }
+
     private static int ScheduledCount(object clock)
     {
         var field = clock.GetType().GetField("scheduled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)

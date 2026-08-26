@@ -74,6 +74,17 @@
           }
         },
         {
+          "if": {
+            "properties": { "action": { "const": "game_input" }, "sensitive": { "const": true } },
+            "required": ["action", "sensitive"]
+          },
+          "then": {
+            "properties": {
+              "arguments": { "not": { "anyOf": [{ "required": ["value"] }, { "required": ["text"] }] } }
+            }
+          }
+        },
+        {
           "if": { "properties": { "target": { "required": ["currentFocus"] } }, "required": ["target"] },
           "then": { "properties": { "action": { "const": "press_key" } } }
         },

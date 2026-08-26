@@ -1049,11 +1049,25 @@ func _keycode_from_w3c(code: String) -> Key:
 		return OS.find_keycode_from_string(code.substr(3, 1))
 	if code.begins_with("Digit") and code.length() == 6:
 		return OS.find_keycode_from_string(code.substr(5, 1))
+	if code.begins_with("F") and code.substr(1).is_valid_int():
+		var function_index := int(code.substr(1))
+		if function_index >= 1 and function_index <= 24:
+			return KEY_F1 + function_index - 1
+	if code.begins_with("Numpad") and code.length() == 7 and code.substr(6, 1).is_valid_int():
+		return KEY_KP_0 + int(code.substr(6, 1))
 	var names := {
 		"ArrowUp": KEY_UP, "ArrowDown": KEY_DOWN, "ArrowLeft": KEY_LEFT, "ArrowRight": KEY_RIGHT,
 		"Space": KEY_SPACE, "Enter": KEY_ENTER, "Escape": KEY_ESCAPE, "Tab": KEY_TAB,
 		"ShiftLeft": KEY_SHIFT, "ShiftRight": KEY_SHIFT, "ControlLeft": KEY_CTRL,
 		"ControlRight": KEY_CTRL, "AltLeft": KEY_ALT, "AltRight": KEY_ALT,
+		"MetaLeft": KEY_META, "MetaRight": KEY_META, "Backquote": KEY_QUOTELEFT,
+		"Backslash": KEY_BACKSLASH, "Backspace": KEY_BACKSPACE, "BracketLeft": KEY_BRACKETLEFT,
+		"BracketRight": KEY_BRACKETRIGHT, "CapsLock": KEY_CAPSLOCK, "Comma": KEY_COMMA,
+		"ContextMenu": KEY_MENU, "Delete": KEY_DELETE, "End": KEY_END, "Equal": KEY_EQUAL,
+		"Home": KEY_HOME, "Insert": KEY_INSERT, "Minus": KEY_MINUS, "NumLock": KEY_NUMLOCK,
+		"PageDown": KEY_PAGEDOWN, "PageUp": KEY_PAGEUP, "Pause": KEY_PAUSE, "Period": KEY_PERIOD,
+		"Quote": KEY_APOSTROPHE, "ScrollLock": KEY_SCROLLLOCK, "Semicolon": KEY_SEMICOLON,
+		"Slash": KEY_SLASH,
 	}
 	return names.get(code, KEY_NONE)
 

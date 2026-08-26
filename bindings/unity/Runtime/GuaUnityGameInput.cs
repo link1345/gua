@@ -28,7 +28,7 @@ public sealed partial class GuaUnityRuntime
 #if ENABLE_INPUT_SYSTEM
     private Keyboard? virtualKeyboard;
     private Mouse? virtualMouse;
-    private Gamepad? virtualGamepad;
+    private readonly Gamepad?[] virtualGamepads = new Gamepad?[4];
     private readonly Dictionary<ButtonControl, HashSet<ulong>> buttonOwners = new();
     private readonly Dictionary<AxisControl, Dictionary<ulong, (float Value, long Sequence)>> axisValuesByOwner = new();
 #endif
@@ -48,7 +48,8 @@ public sealed partial class GuaUnityRuntime
         {
             virtualKeyboard ??= InputSystem.AddDevice<Keyboard>();
             virtualMouse ??= InputSystem.AddDevice<Mouse>();
-            virtualGamepad ??= InputSystem.AddDevice<Gamepad>();
+            for (var index = 0; index < virtualGamepads.Length; index++)
+                virtualGamepads[index] ??= InputSystem.AddDevice<Gamepad>();
             capabilities |= GuaGameInputCapabilities.Keyboard | GuaGameInputCapabilities.Pointer |
                 GuaGameInputCapabilities.Gamepad | GuaGameInputCapabilities.Text;
         }
@@ -153,12 +154,13 @@ public sealed partial class GuaUnityRuntime
             SetButtonOwner(button, request.OwnerId, pressed);
             return true;
         }
-        if (request.Kind == GuaGameInputKind.Gamepad && virtualGamepad != null)
+        if (request.Kind == GuaGameInputKind.Gamepad && request.DeviceIndex >= 0 && request.DeviceIndex < virtualGamepads.Length &&
+            virtualGamepads[request.DeviceIndex] is { } gamepad)
         {
-            if (request.Operation == GuaGameInputOperation.Reset) { ReleaseOwnerGamepad(request.OwnerId); return true; }
+            if (request.Operation == GuaGameInputOperation.Reset) { ReleaseOwnerGamepad(request.OwnerId, gamepad); return true; }
             if (request.Operation == GuaGameInputOperation.Set)
             {
-                var axis = GamepadAxis(request.Target);
+                var axis = GamepadAxis(gamepad, request.Target);
                 if (axis == null) return false;
                 using var value = JsonDocument.Parse(request.ValueJson);
                 SetAxisOwner(axis, request.OwnerId, value.RootElement.GetSingle());
@@ -166,12 +168,12 @@ public sealed partial class GuaUnityRuntime
             }
             if (request.Operation == GuaGameInputOperation.Release)
             {
-                var axis = GamepadAxis(request.Target);
+                var axis = GamepadAxis(gamepad, request.Target);
                 if (axis == null) return false;
                 ReleaseAxisOwner(axis, request.OwnerId);
                 return true;
             }
-            var button = GamepadButton(request.Target);
+            var button = GamepadButton(gamepad, request.Target);
             if (button == null) return false;
             var pressed = request.Operation == GuaGameInputOperation.Down;
             SetButtonOwner(button, request.OwnerId, pressed);
@@ -230,8 +232,10 @@ public sealed partial class GuaUnityRuntime
 #if ENABLE_INPUT_SYSTEM
         if (virtualKeyboard != null) InputSystem.RemoveDevice(virtualKeyboard);
         if (virtualMouse != null) InputSystem.RemoveDevice(virtualMouse);
-        if (virtualGamepad != null) InputSystem.RemoveDevice(virtualGamepad);
-        virtualKeyboard = null; virtualMouse = null; virtualGamepad = null;
+        foreach (var gamepad in virtualGamepads)
+            if (gamepad != null) InputSystem.RemoveDevice(gamepad);
+        virtualKeyboard = null; virtualMouse = null;
+        Array.Clear(virtualGamepads, 0, virtualGamepads.Length);
 #endif
     }
 
@@ -271,22 +275,22 @@ public sealed partial class GuaUnityRuntime
         "auxiliary" => virtualMouse?.middleButton, "back" => virtualMouse?.backButton,
         "forward" => virtualMouse?.forwardButton, _ => null,
     };
-    private AxisControl? GamepadAxis(string name) => name switch
+    private static AxisControl? GamepadAxis(Gamepad gamepad, string name) => name switch
     {
-        "left_stick_x" => virtualGamepad?.leftStick.x, "left_stick_y" => virtualGamepad?.leftStick.y,
-        "right_stick_x" => virtualGamepad?.rightStick.x, "right_stick_y" => virtualGamepad?.rightStick.y,
-        "left_trigger" => virtualGamepad?.leftTrigger, "right_trigger" => virtualGamepad?.rightTrigger, _ => null,
+        "left_stick_x" => gamepad.leftStick.x, "left_stick_y" => gamepad.leftStick.y,
+        "right_stick_x" => gamepad.rightStick.x, "right_stick_y" => gamepad.rightStick.y,
+        "left_trigger" => gamepad.leftTrigger, "right_trigger" => gamepad.rightTrigger, _ => null,
     };
-    private ButtonControl? GamepadButton(string name) => name switch
+    private static ButtonControl? GamepadButton(Gamepad gamepad, string name) => name switch
     {
-        "south" => virtualGamepad?.buttonSouth, "east" => virtualGamepad?.buttonEast,
-        "west" => virtualGamepad?.buttonWest, "north" => virtualGamepad?.buttonNorth,
-        "left_shoulder" => virtualGamepad?.leftShoulder, "right_shoulder" => virtualGamepad?.rightShoulder,
-        "left_trigger" => virtualGamepad?.leftTrigger, "right_trigger" => virtualGamepad?.rightTrigger,
-        "back" => virtualGamepad?.selectButton, "start" => virtualGamepad?.startButton,
-        "left_stick" => virtualGamepad?.leftStickButton, "right_stick" => virtualGamepad?.rightStickButton,
-        "dpad_up" => virtualGamepad?.dpad.up, "dpad_down" => virtualGamepad?.dpad.down,
-        "dpad_left" => virtualGamepad?.dpad.left, "dpad_right" => virtualGamepad?.dpad.right, _ => null,
+        "south" => gamepad.buttonSouth, "east" => gamepad.buttonEast,
+        "west" => gamepad.buttonWest, "north" => gamepad.buttonNorth,
+        "left_shoulder" => gamepad.leftShoulder, "right_shoulder" => gamepad.rightShoulder,
+        "left_trigger" => gamepad.leftTrigger, "right_trigger" => gamepad.rightTrigger,
+        "back" => gamepad.selectButton, "start" => gamepad.startButton,
+        "left_stick" => gamepad.leftStickButton, "right_stick" => gamepad.rightStickButton,
+        "dpad_up" => gamepad.dpad.up, "dpad_down" => gamepad.dpad.down,
+        "dpad_left" => gamepad.dpad.left, "dpad_right" => gamepad.dpad.right, _ => null,
     };
 
     private bool ButtonIsHeld(ButtonControl button) => buttonOwners.TryGetValue(button, out var owners) && owners.Count != 0;
@@ -318,13 +322,12 @@ public sealed partial class GuaUnityRuntime
         InputSystem.QueueDeltaStateEvent(axis, value);
     }
 
-    private void ReleaseOwnerGamepad(ulong ownerId)
+    private void ReleaseOwnerGamepad(ulong ownerId, Gamepad gamepad)
     {
-        if (virtualGamepad == null) return;
         foreach (var button in new List<ButtonControl>(buttonOwners.Keys))
-            if (button.device == virtualGamepad) SetButtonOwner(button, ownerId, false);
+            if (button.device == gamepad) SetButtonOwner(button, ownerId, false);
         foreach (var axis in new List<AxisControl>(axisValuesByOwner.Keys))
-            if (axis.device == virtualGamepad) ReleaseAxisOwner(axis, ownerId);
+            if (axis.device == gamepad) ReleaseAxisOwner(axis, ownerId);
     }
 #endif
 }

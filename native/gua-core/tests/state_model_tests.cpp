@@ -866,6 +866,9 @@ int main()
         "move", "{\"x\":2,\"y\":0}", 0, 0, 5000, 0, 0
     };
     assert(gua_enqueue_game_input(context, &invalid_vector, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto malformed_vector = invalid_vector;
+    malformed_vector.value_json = "{\"x\":0,\"y\":0,broken}";
+    assert(gua_enqueue_game_input(context, &malformed_vector, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     const gua_game_input_request_descriptor_v1_t invalid_key {
         sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_KEYBOARD, GUA_GAME_INPUT_DOWN,
         "NotAKey", "true", 0, 0, 5000, 0, 0
@@ -874,6 +877,11 @@ int main()
     auto invalid_lease = invalid_key;
     invalid_lease.target = "Space"; invalid_lease.lease_ms = 60001;
     assert(gua_enqueue_game_input(context, &invalid_lease, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT);
+    const gua_game_input_request_descriptor_v1_t invalid_normalized_pointer {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_POINTER, GUA_GAME_INPUT_MOVE_ABSOLUTE,
+        "absolute:viewport_normalized", "null", 2.0, -1.0, 5000, 0, 0
+    };
+    assert(gua_enqueue_game_input(context, &invalid_normalized_pointer, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     const gua_game_input_request_descriptor_v1_t set_move {
         sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
         "move", "{\"x\":1,\"y\":0}", 0, 0, 5000, 0, 0
@@ -883,6 +891,14 @@ int main()
     assert(gua_consume_game_input_request(context, &consumed_input) == 1);
     assert(consumed_input.request_id == move_request_id && consumed_input.owner_id == owner_a);
     assert(gua_complete_game_input_request(context, move_request_id, 1, 0) == 1);
+    int result_size = gua_copy_game_input_result_json(context, owner_a, move_request_id, nullptr, 0);
+    std::string game_input_result(static_cast<std::size_t>(result_size), '\0');
+    gua_copy_game_input_result_json(context, owner_a, move_request_id, game_input_result.data(), result_size);
+    assert(game_input_result.find("\"completed\":true") != std::string::npos);
+    result_size = gua_copy_game_input_result_json(context, owner_a, move_request_id, nullptr, 0);
+    game_input_result.assign(static_cast<std::size_t>(result_size), '\0');
+    gua_copy_game_input_result_json(context, owner_a, move_request_id, game_input_result.data(), result_size);
+    assert(game_input_result.find("\"completed\":false") != std::string::npos);
     int state_size = gua_copy_game_input_state_json(context, owner_a, nullptr, 0);
     std::string game_input_state(static_cast<std::size_t>(state_size), '\0');
     gua_copy_game_input_state_json(context, owner_a, game_input_state.data(), state_size);
@@ -927,6 +943,34 @@ int main()
     assert(consumed_input.operation == GUA_GAME_INPUT_RELEASE && consumed_input.owner_id == owner_a);
     assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
     assert(gua_consume_game_input_request(context, &consumed_input) == 0);
+
+    uint64_t held_before_map_change_id = 0;
+    assert(gua_enqueue_game_input(context, &set_move, &held_before_map_change_id) == GUA_GAME_INPUT_OK);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(gua_complete_game_input_request(context, held_before_map_change_id, 1, 0) == 1);
+    uint64_t stale_request_id = 0;
+    assert(gua_enqueue_game_input(context, &set_move, &stale_request_id) == GUA_GAME_INPUT_OK);
+    assert(gua_begin_game_input_frame(context, "menu") == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    const gua_game_input_request_descriptor_v1_t release_removed_move {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_b, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_RELEASE,
+        "move", "null", 0, 0, 5000, 0, 0
+    };
+    uint64_t release_removed_move_id = 0;
+    assert(gua_enqueue_game_input(context, &release_removed_move, &release_removed_move_id) == GUA_GAME_INPUT_OK);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.request_id == release_removed_move_id);
+    assert(gua_complete_game_input_request(context, release_removed_move_id, 1, 0) == 1);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 0);
+    state_size = gua_copy_game_input_state_json(context, owner_b, nullptr, 0);
+    game_input_state.assign(static_cast<std::size_t>(state_size), '\0');
+    gua_copy_game_input_state_json(context, owner_b, game_input_state.data(), state_size);
+    assert(game_input_state.find("\"target\":\"move\"") == std::string::npos);
+    result_size = gua_copy_game_input_result_json(context, owner_a, stale_request_id, nullptr, 0);
+    game_input_result.assign(static_cast<std::size_t>(result_size), '\0');
+    gua_copy_game_input_result_json(context, owner_a, stale_request_id, game_input_result.data(), result_size);
+    assert(game_input_result.find("\"succeeded\":false") != std::string::npos);
+    assert(game_input_result.find("\"errorCode\":" + std::to_string(GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND)) != std::string::npos);
     assert(gua_release_game_input_owner(context, owner_a) == 1);
     assert(gua_release_game_input_owner(context, owner_b) == 1);
 

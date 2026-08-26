@@ -325,6 +325,11 @@ and `release_all_game_inputs`. Raw commands are `key_down`, `key_up`,
 gamepad button/axis/reset operations, and `text_input`. The existing UI-tree
 `press_key` command is unchanged; physical keyboard input uses W3C
 `KeyboardEvent.code` through `press_physical_key`.
+Before dispatching `press_game_input_action` or `set_game_input_action`, MCP
+must resolve the current descriptor and require `confirmed=true` when
+`requiresConfirmation` is set; Inspector presents its local confirmation UI.
+Release operations remain available without confirmation so stale input can
+always be neutralized.
 
 Stateful operations use a 5000 ms lease when `leaseMs` is omitted and reject
 values above 60000 ms. Leases advance from unscaled elapsed host-frame time,
@@ -336,6 +341,11 @@ before runtime destruction; .NET adapters register that shutdown path when they
 enable game input. Enqueue acceptance is not completion: clients
 must wait for the matching request ID to be completed after injection into the
 host input path.
+Local C++ sessions use `result_json(requestId)` and .NET sessions use
+`PollResult(requestId)` to distinguish pending, successful, and failed host
+injection. A completed result is acknowledged and removed after a successful
+full-buffer copy; implementations retain at most 1024 unacknowledged results
+and discard results owned by a released session.
 
 Adapters advertise only initialized paths from `semantic_game_input_v1`,
 `raw_keyboard_input_v1`, `raw_pointer_input_v1`, `raw_gamepad_input_v1`,

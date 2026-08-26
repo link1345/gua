@@ -204,7 +204,7 @@ export class DemoRuntime {
     if (command.type === "release_all_game_inputs") this.heldGameInputs = [];
     else if (command.type === "set_game_input_action" || command.type === "key_down" || command.type === "pointer_button_down" || command.type === "gamepad_button_down" || command.type === "set_gamepad_axis") {
       const target = "actionId" in command ? command.actionId : "code" in command ? command.code : "button" in command ? command.button : "axis" in command ? command.axis : "raw";
-      this.heldGameInputs = [...this.heldGameInputs.filter((held) => held.target !== target), { kind: 1, target, deviceIndex: "deviceIndex" in command ? command.deviceIndex ?? 0 : 0, value: "value" in command ? command.value : true, remainingLeaseMs: "leaseMs" in command ? command.leaseMs ?? 5000 : 5000 }];
+      this.heldGameInputs = [...this.heldGameInputs.filter((held) => held.target !== target), { kind: 1, target, deviceIndex: "gamepadIndex" in command ? command.gamepadIndex ?? 0 : 0, value: "value" in command ? command.value : true, remainingLeaseMs: "leaseMs" in command ? command.leaseMs ?? 5000 : 5000 }];
     }
     this.log("info", `game_input(${command.type})`);
     return { requestId };

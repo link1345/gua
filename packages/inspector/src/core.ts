@@ -55,16 +55,17 @@ export interface GuaGameInputActions { schemaVersion: 1; sessionEpoch: number; r
 export interface GuaHeldGameInput { kind: number; target: string; deviceIndex: number; value: unknown; remainingLeaseMs: number; }
 export interface GuaGameInputState { schemaVersion: 1; held: GuaHeldGameInput[]; }
 export type GameInputCommandInput =
-  | { type: "press_game_input_action" | "release_game_input_action"; actionId: string; leaseMs?: number }
-  | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; sensitive?: boolean }
+  | { type: "press_game_input_action"; actionId: string; leaseMs?: number; confirmed?: boolean }
+  | { type: "release_game_input_action"; actionId: string; leaseMs?: number }
+  | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; confirmed?: boolean; sensitive?: boolean; secretKey?: string }
   | { type: "key_down" | "key_up" | "press_physical_key"; code: string; leaseMs?: number }
-  | { type: "pointer_move"; mode: "absolute_normalized" | "absolute_pixels" | "delta"; x: number; y: number; leaseMs?: number }
+  | { type: "pointer_move"; mode: "absolute" | "delta"; coordinateSpace?: "viewport_normalized" | "viewport_pixels"; x: number; y: number }
   | { type: "pointer_button_down" | "pointer_button_up"; button: string; leaseMs?: number }
-  | { type: "pointer_wheel"; x: number; y: number }
-  | { type: "gamepad_button_down" | "gamepad_button_up"; button: string; deviceIndex?: number; leaseMs?: number }
-  | { type: "set_gamepad_axis"; axis: string; value: number; deviceIndex?: number; leaseMs?: number }
-  | { type: "reset_gamepad"; deviceIndex?: number }
-  | { type: "text_input"; text: string; sensitive?: boolean }
+  | { type: "pointer_wheel"; deltaX: number; deltaY: number; wheelUnit?: "pixels" | "lines" }
+  | { type: "gamepad_button_down" | "gamepad_button_up"; button: string; gamepadIndex?: number; leaseMs?: number }
+  | { type: "set_gamepad_axis"; axis: string; value: number; gamepadIndex?: number; leaseMs?: number }
+  | { type: "reset_gamepad"; gamepadIndex?: number }
+  | { type: "text_input"; text: string; sensitive?: boolean; secretKey?: string }
   | { type: "release_all_game_inputs" };
 
 export interface InspectorPanel {

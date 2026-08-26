@@ -1180,24 +1180,37 @@ private:
             std::make_shared<std::mutex>(),
             handlers_.create_game_input_owner ? handlers_.create_game_input_owner() : 0,
         };
-        {
-            const std::lock_guard lock(clients_mutex_);
-            clients_.push_back(connection);
-        }
-        std::cout << "Inspector connected." << std::endl;
-        publish_snapshot();
-
-        while (running_.load()) {
-            const std::optional<std::string> message = read_text_frame(client);
-            if (!message.has_value()) {
-                break;
+        const auto release_owner = [&]() noexcept {
+            if (connection.game_input_owner_id == 0 || !handlers_.release_game_input_owner) return;
+            try {
+                handlers_.release_game_input_owner(connection.game_input_owner_id);
+            } catch (...) {
+                // Connection teardown must continue even if host cleanup reporting fails.
             }
+            connection.game_input_owner_id = 0;
+        };
+        try {
+            {
+                const std::lock_guard lock(clients_mutex_);
+                clients_.push_back(connection);
+            }
+            std::cout << "Inspector connected." << std::endl;
+            publish_snapshot();
 
-            const std::string response = handle_command(*message, connection.game_input_owner_id);
-            send_text_frame(connection, response);
+            while (running_.load()) {
+                const std::optional<std::string> message = read_text_frame(client);
+                if (!message.has_value()) {
+                    break;
+                }
+
+                const std::string response = handle_command(*message, connection.game_input_owner_id);
+                send_text_frame(connection, response);
+            }
+        } catch (...) {
+            release_owner();
+            throw;
         }
-        if (connection.game_input_owner_id != 0 && handlers_.release_game_input_owner)
-            handlers_.release_game_input_owner(connection.game_input_owner_id);
+        release_owner();
 
         {
             const std::lock_guard lock(clients_mutex_);

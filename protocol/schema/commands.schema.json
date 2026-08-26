@@ -215,18 +215,88 @@
         "deltaX": { "type": "number" }, "deltaY": { "type": "number" },
         "wheelUnit": { "enum": ["pixels", "lines"] },
         "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "pointer_move" } }, "required": ["type"] },
+          "then": {
+            "required": ["mode", "x", "y"],
+            "not": { "anyOf": [
+              { "required": ["button"] }, { "required": ["deltaX"] }, { "required": ["deltaY"] },
+              { "required": ["wheelUnit"] }, { "required": ["leaseMs"] }
+            ] },
+            "allOf": [
+              {
+                "if": { "properties": { "mode": { "const": "absolute" } }, "required": ["mode"] },
+                "then": {
+                  "required": ["coordinateSpace"],
+                  "allOf": [{
+                    "if": { "properties": { "coordinateSpace": { "const": "viewport_normalized" } }, "required": ["coordinateSpace"] },
+                    "then": { "properties": { "x": { "minimum": 0, "maximum": 1 }, "y": { "minimum": 0, "maximum": 1 } } }
+                  }]
+                },
+                "else": { "not": { "required": ["coordinateSpace"] } }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["pointer_button_down", "pointer_button_up"] } }, "required": ["type"] },
+          "then": {
+            "required": ["button"],
+            "not": { "anyOf": [
+              { "required": ["mode"] }, { "required": ["coordinateSpace"] }, { "required": ["x"] },
+              { "required": ["y"] }, { "required": ["deltaX"] }, { "required": ["deltaY"] },
+              { "required": ["wheelUnit"] }
+            ] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "pointer_wheel" } }, "required": ["type"] },
+          "then": {
+            "anyOf": [{ "required": ["deltaX"] }, { "required": ["deltaY"] }],
+            "not": { "anyOf": [
+              { "required": ["mode"] }, { "required": ["coordinateSpace"] }, { "required": ["x"] },
+              { "required": ["y"] }, { "required": ["button"] }, { "required": ["leaseMs"] }
+            ] }
+          }
+        }
+      ]
     },
     "gamepadInput": {
       "type": "object", "required": ["type"], "additionalProperties": false,
       "properties": {
         "type": { "enum": ["gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad"] },
         "gamepadIndex": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0 },
-        "button": { "type": "string", "minLength": 1 },
+        "button": { "enum": ["south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger", "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right"] },
         "axis": { "enum": ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] },
         "value": { "type": "number", "minimum": -1, "maximum": 1 },
         "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "enum": ["gamepad_button_down", "gamepad_button_up"] } }, "required": ["type"] },
+          "then": {
+            "required": ["button"],
+            "not": { "anyOf": [{ "required": ["axis"] }, { "required": ["value"] }] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "set_gamepad_axis" } }, "required": ["type"] },
+          "then": {
+            "required": ["axis", "value"],
+            "not": { "required": ["button"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reset_gamepad" } }, "required": ["type"] },
+          "then": {
+            "not": { "anyOf": [
+              { "required": ["button"] }, { "required": ["axis"] }, { "required": ["value"] }, { "required": ["leaseMs"] }
+            ] }
+          }
+        }
+      ]
     },
     "textInput": {
       "type": "object",

@@ -597,10 +597,14 @@ async function executeTool(
     case "press_physical_key":
       return performGameInput(bridge, automation, { type: name, code: readStringArg(args, "code"),
         leaseMs: readIntegerArg(args, "leaseMs", 5000) });
-    case "pointer_move":
-      return performGameInput(bridge, automation, { type: name, mode: readEnumArg(args, "mode", ["absolute", "delta"]),
-        coordinateSpace: readEnumArg(args, "coordinateSpace", ["viewport_normalized", "viewport_pixels"], "viewport_pixels"),
-        x: readNumberArg(args, "x", 0), y: readNumberArg(args, "y", 0) });
+    case "pointer_move": {
+      const mode = readEnumArg(args, "mode", ["absolute", "delta"]);
+      return performGameInput(bridge, automation, compactResult({ type: name, mode,
+        coordinateSpace: mode === "absolute"
+          ? readEnumArg(args, "coordinateSpace", ["viewport_normalized", "viewport_pixels"], "viewport_pixels")
+          : undefined,
+        x: readNumberArg(args, "x", 0), y: readNumberArg(args, "y", 0) }) as GameInputCommandInput);
+    }
     case "pointer_button_down":
     case "pointer_button_up":
       return performGameInput(bridge, automation, { type: name,
@@ -732,6 +736,14 @@ async function performGameInput(
   input: GameInputCommandInput,
   timeoutMs = 10000,
 ): Promise<{ ok: true; requestId: number; completion: GameInputCompletion }> {
+  if (input.type === "press_game_input_action" || input.type === "set_game_input_action") {
+    const snapshot = await bridge.getGameInputActions();
+    if (!isRecord(snapshot) || !Array.isArray(snapshot.actions)) throw new Error("Gua returned an invalid game input action map.");
+    const action = snapshot.actions.find((candidate) => isRecord(candidate) && candidate.id === input.actionId);
+    if (isRecord(action) && action.requiresConfirmation === true && input.confirmed !== true) {
+      throw new Error(`Game input action '${input.actionId}' requires confirmed=true.`);
+    }
+  }
   const receipt = await bridge.performGameInput(input);
   const completion = await bridge.waitForGameInput(receipt.requestId, timeoutMs);
   if (!completion.succeeded) throw new Error(`Gua game input ${input.type} failed with error ${completion.errorCode}.`);
@@ -805,6 +817,7 @@ async function replayRecording(
   const results: Array<{ index: number; action: RecordedAction; requestId?: number }> = [];
   let previous = 0;
   const hasGameInput = recording.steps.some((step) => step.action === "game_input");
+  let replaySucceeded = false;
   try {
   for (const [index, step] of recording.steps.entries()) {
     if (timingMode === "prefer_conditions" && step.waitCondition !== undefined) {
@@ -842,10 +855,14 @@ async function replayRecording(
     }, timeoutMs);
     results.push(compactResult({ index, action: step.action, requestId: result.requestId }));
   }
+  replaySucceeded = true;
   } finally {
     if (hasGameInput) {
       try { await performGameInput(bridge, undefined, { type: "release_all_game_inputs" }, timeoutMs); }
-      catch { /* preserve the original replay failure after best-effort cleanup */ }
+      catch (cleanupError) {
+        if (replaySucceeded) throw cleanupError;
+        // Preserve the original replay failure after best-effort cleanup.
+      }
     }
   }
   return { ok: true, steps: results };

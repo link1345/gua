@@ -84,6 +84,7 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_tick_game_input_leases(nint runtime, double elapsedMs);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_actions_json(nint runtime, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_state_json(nint runtime, ulong ownerId, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_result_json(nint runtime, ulong ownerId, ulong requestId, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_world_object_tree_enabled(nint runtime, int enabled);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_set_observation_profile(nint runtime, int profile);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_click(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string id);

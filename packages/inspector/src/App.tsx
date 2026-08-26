@@ -337,7 +337,8 @@ function GameInputPanel({ actions, state, onInput, onError }: {
   const [rawCode, setRawCode] = useState("Space");
   const run = (command: GameInputCommandInput, confirm = false) => {
     if (confirm && !window.confirm("This action requires confirmation. Continue?")) return;
-    void onInput(command).catch((caught) => onError((caught as Error).message));
+    const confirmedCommand = confirm ? { ...command, confirmed: true } as GameInputCommandInput : command;
+    void onInput(confirmedCommand).catch((caught) => onError((caught as Error).message));
   };
   return <section className="gua-panel gua-game-input-panel">
     <PanelHeader title="Game Input" detail={actions === null ? "unsupported" : `${actions.context} · r${actions.revision}`} />
