@@ -39,7 +39,6 @@ on:
       - scripts/unity-meta/**
       - examples/cpp-imgui/**
       - examples/godot-gdscript/addons/gua/**
-      - examples/webmcp-page/**
       - protocol/**
 
 permissions:

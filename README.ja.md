@@ -68,7 +68,7 @@ Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Tr
 screenshotツールを登録します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
 ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
 独自のブラウザセッションルーターは持ちません。
-[`examples/webmcp-page`](examples/webmcp-page)にホストページの雛形があります。
+組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
 
 ## Godot 4.7対応
 

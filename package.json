@@ -5,10 +5,7 @@
   "description": "Playwright-style runtime UI automation for games, with Godot support and MCP access for AI coding agents.",
   "license": "MIT",
   "packageManager": "bun@1.3.14",
-  "workspaces": [
-    "packages/*",
-    "examples/webmcp-page"
-  ],
+  "workspaces": ["packages/*"],
   "scripts": {
     "check": "bun run --workspaces check",
     "inspector": "bun run --filter @gua/inspector dev",
