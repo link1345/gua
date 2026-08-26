@@ -41,3 +41,28 @@ bot, or full UI framework.
 - For independent defect investigation, use the project-local `$gua-bug-hunt`
   skill. Keep bug-hunting subagents read-only and require reproducible evidence;
   fixes are a separate task unless the user explicitly requests them.
+
+## Automatic Audit Gate
+
+- After changing repository content, including adding an untracked file,
+  complete the initial focused validation, then spawn exactly one `gua_auditor`
+  subagent before the final handoff.
+- Give the auditor only the current task scope and change set. Include
+  `git status --short`, tracked and staged diffs, and the contents of relevant
+  untracked files so additions cannot escape review. Require the auditor to use
+  `$gua-bug-hunt`, select only the relevant audit-matrix lanes, and return
+  reproducible findings with file references and verification evidence.
+- Treat the auditor as behaviorally read-only: its custom-agent sandbox defaults
+  to read-only, but a live parent permission override may take precedence.
+  Explicitly prohibit edits in every audit prompt, reject any audit-authored
+  file changes, and leave all fixes to the parent agent.
+- Wait for the auditor and independently validate each finding. Ignore
+  speculative, style-only, duplicate, out-of-scope, or unsupported findings.
+- If the user authorized implementation, fix validated findings that are within
+  the task scope and rerun the narrowest relevant verification. After audit-led
+  fixes, run at most one final `gua_auditor` pass on those fixes.
+- Do not let an auditor spawn another auditor, and do not repeat auditing when
+  the final pass reports no actionable finding. This bounds the automatic gate
+  to at most two audit passes per task.
+- Skip the automatic audit only when no repository file changed, when the task
+  is itself a read-only audit, or when the user explicitly asks to skip it.

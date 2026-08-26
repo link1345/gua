@@ -110,6 +110,8 @@ func _run() -> void:
 	screen.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.name = "scroll"
+	scroll.scroll_horizontal_custom_step = 7.0
+	scroll.scroll_vertical_custom_step = 9.0
 	var scroll_content := Control.new()
 	scroll_content.custom_minimum_size = Vector2(1000, 1000)
 	scroll.add_child(scroll_content)
@@ -273,6 +275,7 @@ func _run() -> void:
 		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
 		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
 		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
+		[{"action": "scroll", "node_id": "scroll", "delta_x": 1.0, "delta_y": 1.0, "scroll_unit": 1}, func(): return scroll.scroll_horizontal == 32 and scroll.scroll_vertical == 39],
 		[{"action": "scroll", "node_id": "servers", "delta_x": 30.0}, func(): return item_list.get_h_scroll_bar().value > 0],
 		[{"action": "press_key", "node_id": "name", "key": "A", "modifiers": 5}, func(): return key_events.size() == 2 and key_events[0].pressed and not key_events[1].pressed and key_events[0].shift_pressed and key_events[0].ctrl_pressed],
 	]
@@ -289,6 +292,15 @@ func _run() -> void:
 		if observed.get("request_id", 0) != accepted.get("request_id", 0) or not observed.get("succeeded", false):
 			_fail("Gua smoke did not correlate observed action event: %s / %s" % [accepted, observed])
 			return
+	var invalid_scroll := ui.enqueue_action({"action": "scroll", "node_id": "scroll", "delta_y": 1.0, "scroll_unit": 2})
+	ui.update("title")
+	var invalid_scroll_event := ui.poll_event_v2()
+	if invalid_scroll_event.get("request_id", 0) != invalid_scroll.get("request_id", 0) \
+			or invalid_scroll_event.get("succeeded", true) \
+			or invalid_scroll_event.get("error_code", 0) != -6 \
+			or scroll.scroll_vertical != 39:
+		_fail("Gua accepted an unsupported semantic scroll unit: %s" % invalid_scroll_event)
+		return
 	var spin_focus := ui.enqueue_action({"action": "focus", "node_id": "limit"})
 	ui.update("title")
 	var spin_focus_event := ui.poll_event_v2()

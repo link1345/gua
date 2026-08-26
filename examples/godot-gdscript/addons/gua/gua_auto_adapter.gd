@@ -706,14 +706,22 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 			if not _select_value(control, str(request.get("value", ""))):
 				return -6
 		"scroll":
+			var scroll_unit := int(request.get("scroll_unit", 0))
+			if scroll_unit != 0 and scroll_unit != 1:
+				return -6
+			var delta_x := float(request.get("delta_x", 0.0))
+			var delta_y := float(request.get("delta_y", 0.0))
+			if scroll_unit == 1:
+				delta_x *= _semantic_scroll_extent(control, true)
+				delta_y *= _semantic_scroll_extent(control, false)
 			if control is ScrollContainer:
 				var scroll := control as ScrollContainer
-				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
-				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
+				scroll.scroll_horizontal += int(round(delta_x))
+				scroll.scroll_vertical += int(round(delta_y))
 			elif control is ItemList:
 				var item_list := control as ItemList
-				item_list.get_h_scroll_bar().value += float(request.get("delta_x", 0.0))
-				item_list.get_v_scroll_bar().value += float(request.get("delta_y", 0.0))
+				item_list.get_h_scroll_bar().value += delta_x
+				item_list.get_v_scroll_bar().value += delta_y
 			else:
 				return -5
 		"press_key":
@@ -740,6 +748,28 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 		_:
 			return -5
 	return 0
+
+
+func _semantic_scroll_extent(control: Control, horizontal: bool) -> float:
+	if control is ItemList:
+		var item_list := control as ItemList
+		if item_list.item_count > 0:
+			var item_size := item_list.get_item_rect(0).size
+			var item_extent := item_size.x if horizontal else item_size.y
+			if item_extent > 0.0:
+				return item_extent
+		var list_bar: ScrollBar = item_list.get_h_scroll_bar() if horizontal else item_list.get_v_scroll_bar()
+		if list_bar.custom_step > 0.0:
+			return list_bar.custom_step
+	elif control is ScrollContainer:
+		var scroll := control as ScrollContainer
+		var custom_step := scroll.scroll_horizontal_custom_step if horizontal else scroll.scroll_vertical_custom_step
+		if custom_step > 0.0:
+			return custom_step
+		var scroll_bar: ScrollBar = scroll.get_h_scroll_bar() if horizontal else scroll.get_v_scroll_bar()
+		if scroll_bar.custom_step > 0.0:
+			return scroll_bar.custom_step
+	return maxf(1.0, float(control.get_theme_default_font_size()))
 
 
 func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:

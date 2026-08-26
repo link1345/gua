@@ -461,6 +461,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     {
         value = null;
         failure = GuaActionError.Unsupported;
+        if (request.Action == GuaActionType.Scroll && request.ScrollUnit is not 0 and not 1)
+        { failure = GuaActionError.InvalidValue; return false; }
         if (request.Action == GuaActionType.Focus)
         {
             if (target is VisualElement visual) { EventSystem.current?.SetSelectedGameObject(null); visual.Focus(); return true; }
@@ -527,13 +529,16 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         {
             var listScrollView = scrollingList.Q<ScrollView>();
             if (listScrollView == null) return false;
-            var multiplier = request.ScrollUnit == 1 ? Math.Max(1f, scrollingList.fixedItemHeight) : 1f;
+            var multiplier = request.ScrollUnit == 1 ? PositiveOrOne(scrollingList.fixedItemHeight) : 1f;
             listScrollView.scrollOffset += new Vector2(request.DeltaX, request.DeltaY) * multiplier; return true;
         }
         if (target is ScrollView scrollView && request.Action == GuaActionType.Scroll)
-        { scrollView.scrollOffset += new Vector2(request.DeltaX, request.DeltaY); return true; }
+        {
+            var multiplier = request.ScrollUnit == 1 ? PositiveOrOne(scrollView.mouseWheelScrollSize) : 1f;
+            scrollView.scrollOffset += new Vector2(request.DeltaX, request.DeltaY) * multiplier; return true;
+        }
         if (target is ScrollRect scrollRect && request.Action == GuaActionType.Scroll)
-        { scrollRect.normalizedPosition += new Vector2(request.DeltaX, -request.DeltaY) * 0.01f; return true; }
+        { return ApplyScrollRect(scrollRect, request); }
         if (target is VisualElement keyTarget && request.Action == GuaActionType.PressKey)
         {
             if (!GuaUnityKeyEvent.TryCreateGesture(request, out var keyDown, out var keyUp)) { failure = GuaActionError.InvalidValue; return false; }
@@ -550,6 +555,24 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (request.Action is GuaActionType.SetValue or GuaActionType.Select or GuaActionType.PressKey) failure = GuaActionError.InvalidValue;
         return false;
     }
+
+    private static bool ApplyScrollRect(ScrollRect scrollRect, GuaActionRequest request)
+    {
+        var content = scrollRect.content;
+        var viewport = scrollRect.viewport ?? scrollRect.transform as RectTransform;
+        if (content == null || viewport == null) return false;
+        var canvasScale = PositiveOrOne(scrollRect.GetComponentInParent<Canvas>()?.scaleFactor ?? 1f);
+        var lineExtent = request.ScrollUnit == 1 ? PositiveOrOne(scrollRect.scrollSensitivity) : 1f / canvasScale;
+        var overflowX = Math.Max(0f, content.rect.width - viewport.rect.width);
+        var overflowY = Math.Max(0f, content.rect.height - viewport.rect.height);
+        var normalizedX = overflowX > 0f ? request.DeltaX * lineExtent / overflowX : 0f;
+        var normalizedY = overflowY > 0f ? request.DeltaY * lineExtent / overflowY : 0f;
+        scrollRect.normalizedPosition += new Vector2(normalizedX, -normalizedY);
+        return true;
+    }
+
+    private static float PositiveOrOne(float value) =>
+        float.IsNaN(value) || float.IsInfinity(value) || value <= 0f ? 1f : value;
 
     private void ScheduleScreenshot()
     {
