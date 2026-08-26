@@ -557,6 +557,69 @@ int main()
     assert(!invalid_count.load());
     gua_destroy_context(concurrent);
 
+    // Game input maps commit atomically and held state is isolated by owner.
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    const gua_game_input_action_descriptor_v1_t move {
+        sizeof(gua_game_input_action_descriptor_v1_t), "move", "Move player", GUA_GAME_INPUT_VECTOR2,
+        -1.0, 1.0, 1, 1, 1, "[\"KeyW/KeyA/KeyS/KeyD\"]", "safe", 0
+    };
+    const gua_game_input_action_descriptor_v1_t interact {
+        sizeof(gua_game_input_action_descriptor_v1_t), "interact", "Interact", GUA_GAME_INPUT_BUTTON,
+        0.0, 0.0, 0, 0, 1, "[\"KeyE\"]", "safe", 0
+    };
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    const int map_size = gua_copy_game_input_actions_json(context, nullptr, 0);
+    std::string map(static_cast<std::size_t>(map_size), '\0');
+    gua_copy_game_input_actions_json(context, map.data(), map_size);
+    assert(map.find("\"context\":\"gameplay\"") != std::string::npos);
+
+    const uint64_t owner_a = gua_create_game_input_owner(context);
+    const uint64_t owner_b = gua_create_game_input_owner(context);
+    uint64_t move_request_id = 0;
+    const gua_game_input_request_descriptor_v1_t invalid_hold {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
+        "interact", "true", 0, 0, 5000, 0, 0
+    };
+    assert(gua_enqueue_game_input(context, &invalid_hold, nullptr) == GUA_GAME_INPUT_ERROR_UNSUPPORTED);
+    const gua_game_input_request_descriptor_v1_t invalid_vector {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
+        "move", "{\"x\":2,\"y\":0}", 0, 0, 5000, 0, 0
+    };
+    assert(gua_enqueue_game_input(context, &invalid_vector, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    const gua_game_input_request_descriptor_v1_t invalid_key {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_KEYBOARD, GUA_GAME_INPUT_DOWN,
+        "NotAKey", "true", 0, 0, 5000, 0, 0
+    };
+    assert(gua_enqueue_game_input(context, &invalid_key, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_lease = invalid_key;
+    invalid_lease.target = "Space"; invalid_lease.lease_ms = 60001;
+    assert(gua_enqueue_game_input(context, &invalid_lease, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT);
+    const gua_game_input_request_descriptor_v1_t set_move {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
+        "move", "{\"x\":1,\"y\":0}", 0, 0, 5000, 0, 0
+    };
+    assert(gua_enqueue_game_input(context, &set_move, &move_request_id) == GUA_GAME_INPUT_OK);
+    gua_game_input_request_v1_t consumed_input { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.request_id == move_request_id && consumed_input.owner_id == owner_a);
+    assert(gua_complete_game_input_request(context, move_request_id, 1, 0) == 1);
+    int state_size = gua_copy_game_input_state_json(context, owner_a, nullptr, 0);
+    std::string game_input_state(static_cast<std::size_t>(state_size), '\0');
+    gua_copy_game_input_state_json(context, owner_a, game_input_state.data(), state_size);
+    assert(game_input_state.find("\"target\":\"move\"") != std::string::npos);
+    state_size = gua_copy_game_input_state_json(context, owner_b, nullptr, 0);
+    game_input_state.assign(static_cast<std::size_t>(state_size), '\0');
+    gua_copy_game_input_state_json(context, owner_b, game_input_state.data(), state_size);
+    assert(game_input_state.find("\"target\":\"move\"") == std::string::npos);
+    assert(gua_tick_game_input_leases(context, 5000.0) == 1);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.operation == GUA_GAME_INPUT_RELEASE && consumed_input.owner_id == owner_a);
+    assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
+    assert(gua_release_game_input_owner(context, owner_a) == 1);
+    assert(gua_release_game_input_owner(context, owner_b) == 1);
+
     gua_destroy_context(context);
     return 0;
 }

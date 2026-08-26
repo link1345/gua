@@ -54,6 +54,12 @@ public:
     Dictionary consume_clock_step();
     Array consume_clock_steps();
     void enable_virtual_clock_adapter();
+    bool publish_game_input_actions(const String& input_context, const Array& actions);
+    String get_game_input_actions_json() const;
+    void enable_game_input_adapter(int capabilities);
+    Dictionary consume_game_input_request();
+    bool complete_game_input_request(const Dictionary& result);
+    int tick_game_input_leases(double elapsed_ms);
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

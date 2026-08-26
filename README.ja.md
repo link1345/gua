@@ -75,7 +75,7 @@ regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテ
 Unityパッケージはランタイムアダプターを自動起動し、UI Toolkit、uGUI、TextMeshProの
 Controlを手動登録なしで収集します。`Gua.Testing.Unity`を使うと、通常の.NETテストから
 Editor Play Modeまたはビルド済みMono Playerを起動できます。現在の対応範囲は
-Unity 6000.0以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
+Unity 6000.5以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
 EditorWindowの自動化には未対応です。導入・検証手順は
 [Unity 6 Windows x64](#unity-6-windows-x64)を参照してください。
 
@@ -173,6 +173,22 @@ SchedulerまたはTickへ接続したゲームロジックだけだ。engine標�
 物理、Animation、Audio、OS時刻、ネットワークは停止しない。
 bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
 `clock_run_for`、`clock_resume`を利用できる。
+
+### Semantic Game ActionとRaw Input
+
+ホストはUI Treeと独立したGame Action Mapを明示登録し、button、axis、vector、
+textを`press_game_input_action`、`set_game_input_action`、
+`release_game_input_action`で操作できる。明示opt-inのRaw toolはW3C physical
+key code、pointer移動/button/wheel、Standard Gamepad、text inputを扱う。
+保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒だ。満了、切断、
+reset、replay失敗、session disposeではneutral状態へ戻す。InspectorにはAction
+Map、保持lease、Raw操作、緊急`Release all`を表示する。
+
+Unity 6000.5では`com.unity.inputsystem@1.20.0`のvirtual deviceへ注入し、
+Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡す。
+adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開する。
+既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
+`press_physical_key`を使う。
 
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を

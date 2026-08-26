@@ -35,7 +35,7 @@ describe("InspectorRecorder", () => {
     expect(status.defaultStepMs).toBe(10);
     expect(status.state).toBe("paused");
   });
-  test("exports schema v1 and redacts sensitive values", () => {
+  test("exports schema v2 and redacts sensitive values", () => {
     const recorder = new InspectorRecorder();
     recorder.start();
     recorder.record(
@@ -47,10 +47,19 @@ describe("InspectorRecorder", () => {
     const recording = recorder.stop();
 
     validateRecording(recording);
-    expect(recording.schemaVersion).toBe(1);
+    expect(recording.schemaVersion).toBe(2);
     expect(recording.steps[0]?.value).toBeUndefined();
     expect(recording.steps[0]?.secretKey).toBe("login-password");
     expect(JSON.stringify(recording)).not.toContain("not-written");
+  });
+  test("records semantic game input and explicit release", () => {
+    const recorder = new InspectorRecorder();
+    recorder.start();
+    recorder.recordGameInput({ type: "set_game_input_action", actionId: "move", value: { x: 1, y: 0 }, leaseMs: 5000 }, 20);
+    recorder.recordGameInput({ type: "release_game_input_action", actionId: "move" }, 21);
+    const recording = recorder.stop();
+    validateRecording(recording);
+    expect(recording.steps.map((step) => step.operation)).toEqual(["set_game_input_action", "release_game_input_action"]);
   });
 });
 

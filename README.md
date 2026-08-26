@@ -75,7 +75,7 @@ for setup details.
 The Unity package automatically starts the runtime adapter and reflects UI
 Toolkit, uGUI, and TextMeshPro controls without manual semantic-node
 registration. `Gua.Testing.Unity` can launch Editor Play Mode or a built Mono
-Player from ordinary .NET tests. The first supported scope is Unity 6000.0+ on
+Player from ordinary .NET tests. The first supported scope is Unity 6000.5+ on
 Windows x64 with Mono; IL2CPP, non-Windows targets, Unity IMGUI, and EditorWindow
 automation are not currently supported. See [Unity 6 Windows x64](#unity-6-windows-x64)
 for installation and verification details.
@@ -132,6 +132,23 @@ wired to GuaClock schedules or ticks. Engine-native timers, physics, animations,
 audio, OS time, and networking continue normally.
 The bridge, MCP, and Inspector expose `get_clock`, `clock_install`,
 `clock_pause`, `clock_run_for`, and `clock_resume`.
+
+### Semantic game actions and raw input
+
+Hosts can publish an explicit game-action map independent of the UI tree, then
+drive buttons, axes, vectors, or text through `press_game_input_action`,
+`set_game_input_action`, and `release_game_input_action`. Opt-in raw tools cover
+W3C physical keyboard codes, pointer motion/buttons/wheel, Standard Gamepad
+controls, and text input. Stateful input is isolated per connection, defaults
+to a five-second lease (maximum 60 seconds), and is neutralized on expiry,
+disconnect, reset, replay failure, or session disposal. Inspector shows action
+metadata, held leases, raw controls, and an emergency **Release all** button.
+
+Unity 6000.5 integration uses `com.unity.inputsystem@1.20.0` virtual devices;
+Godot injects main-thread `InputEvent` values through `Input.parse_input_event`.
+Adapters advertise each input capability only after its pump and cleanup path
+are initialized. The existing semantic UI `press_key` API remains unchanged;
+raw keyboard gestures use `press_physical_key`.
 
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   A thin MCP server that exposes Gua runtime actions to AI agents through the
@@ -441,7 +458,7 @@ TextMeshPro runtime UI. `GuaId` and `GuaScreen` are optional overrides; game
 code does not register semantic nodes manually. `Gua.Testing.Unity` provides
 Editor Play Mode and Mono Windows Player hosts. See
 [`examples/unity-smoke`](examples/unity-smoke/README.md) for the verified Unity
-6000.5.3f1 fixture. Windows x64, Unity 6000.0+, and Mono are supported in this
+6000.5.3f1 fixture. Windows x64, Unity 6000.5+, and Mono are supported in this
 initial release; IL2CPP, other operating systems, IMGUI, and EditorWindow UI
 automation are not.
 

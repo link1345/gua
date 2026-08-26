@@ -1,0 +1,165 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+
+namespace Gua.Runtime;
+
+[Flags]
+public enum GuaGameInputCapabilities : uint
+{
+    None = 0, Semantic = 1, Keyboard = 2, Pointer = 4, Gamepad = 8, Text = 16,
+    All = Semantic | Keyboard | Pointer | Gamepad | Text,
+}
+
+public enum GuaGameInputValueType { Button = 1, Axis1D = 2, Vector2 = 3, Text = 4 }
+public enum GuaGameInputKind { Semantic = 1, Keyboard = 2, Pointer = 3, Gamepad = 4, TextInput = 5, Cleanup = 6 }
+public enum GuaGameInputOperation { Press = 1, Set = 2, Release = 3, Down = 4, Up = 5, MoveAbsolute = 6, MoveDelta = 7, Wheel = 8, Reset = 9, ReleaseAll = 10 }
+
+public sealed record GuaGameInputActionDescriptor(
+    string Id, string Description, GuaGameInputValueType ValueType,
+    double? Minimum = null, double? Maximum = null, bool Holdable = false, bool Active = true,
+    IReadOnlyList<string>? Bindings = null, string Risk = "safe", bool RequiresConfirmation = false);
+
+public sealed record GuaGameInputRequest(
+    ulong RequestId, ulong OwnerId, GuaGameInputKind Kind, GuaGameInputOperation Operation,
+    string Target, string ValueJson, double X, double Y, uint LeaseMs, int DeviceIndex, bool Sensitive);
+
+public sealed class GuaGameInputSession : IDisposable
+{
+    private GuaRuntime? runtime;
+    internal GuaGameInputSession(GuaRuntime runtime, ulong ownerId) { this.runtime = runtime; OwnerId = ownerId; }
+    public ulong OwnerId { get; }
+    public ulong Send(GuaGameInputKind kind, GuaGameInputOperation operation, string target,
+        object? value = null, TimeSpan? lease = null, double x = 0, double y = 0, int deviceIndex = 0, bool sensitive = false)
+    {
+        var owner = runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession));
+        return owner.EnqueueGameInput(OwnerId, kind, operation, target, value, lease, x, y, deviceIndex, sensitive);
+    }
+    public string GetStateJson() => (runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession))).GetGameInputStateJson(OwnerId);
+    public void Dispose() { var owner = runtime; runtime = null; if (owner is not null) owner.ReleaseGameInputOwner(OwnerId); }
+}
+
+public sealed partial class GuaRuntime
+{
+    public void EnableGameInput(GuaGameInputCapabilities capabilities)
+    {
+        ThrowIfDisposed();
+        Native.gua_runtime_set_game_input_capabilities(_handle, (uint)capabilities);
+    }
+
+    public void PublishGameInputActions(string context, IReadOnlyList<GuaGameInputActionDescriptor> actions)
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(context)) throw new ArgumentException("Input context is required.", nameof(context));
+        if (Native.gua_runtime_begin_game_input_frame(_handle, context) == 0)
+            throw new InvalidOperationException("Failed to begin the game input action frame.");
+        try
+        {
+            foreach (var action in actions)
+            {
+                if (action.Minimum.HasValue != action.Maximum.HasValue)
+                    throw new ArgumentException($"Action '{action.Id}' must specify both range bounds.");
+                var strings = new[] { action.Id, action.Description, JsonSerializer.Serialize(action.Bindings ?? []), action.Risk };
+                var pointers = strings.Select(Marshal.StringToCoTaskMemUTF8).Select(pointer => (nint)pointer).ToArray();
+                try
+                {
+                    var native = new Native.GameInputAction
+                    {
+                        StructSize = (uint)Marshal.SizeOf<Native.GameInputAction>(), Id = pointers[0], Description = pointers[1],
+                        ValueType = (int)action.ValueType, Minimum = action.Minimum ?? 0, Maximum = action.Maximum ?? 0,
+                        HasRange = action.Minimum.HasValue ? 1 : 0, Holdable = action.Holdable ? 1 : 0, Active = action.Active ? 1 : 0,
+                        BindingsJson = pointers[2], Risk = pointers[3], RequiresConfirmation = action.RequiresConfirmation ? 1 : 0,
+                    };
+                    if (Native.gua_runtime_register_game_input_action_v1(_handle, in native) == 0)
+                        throw new ArgumentException($"Invalid game input action '{action.Id}'.", nameof(actions));
+                }
+                finally { foreach (var pointer in pointers) Marshal.FreeCoTaskMem(pointer); }
+            }
+            if (Native.gua_runtime_end_game_input_frame(_handle) == 0)
+                throw new InvalidOperationException("Failed to commit the game input action frame.");
+        }
+        catch
+        {
+            Native.gua_runtime_abort_game_input_frame(_handle);
+            throw;
+        }
+    }
+
+    public GuaGameInputSession CreateGameInputSession()
+    {
+        ThrowIfDisposed();
+        var ownerId = Native.gua_runtime_create_game_input_owner(_handle);
+        if (ownerId == 0) throw new InvalidOperationException("Failed to create a game input session.");
+        return new(this, ownerId);
+    }
+
+    internal void ReleaseGameInputOwner(ulong ownerId)
+    {
+        if (_handle != 0) Native.gua_runtime_release_game_input_owner(_handle, ownerId);
+    }
+
+    internal ulong EnqueueGameInput(ulong ownerId, GuaGameInputKind kind, GuaGameInputOperation operation,
+        string target, object? value, TimeSpan? lease, double x, double y, int deviceIndex, bool sensitive)
+    {
+        ThrowIfDisposed();
+        var leaseMs = lease is null ? 5000 : checked((uint)lease.Value.TotalMilliseconds);
+        if (leaseMs is < 1 or > 60000) throw new ArgumentOutOfRangeException(nameof(lease));
+        // Sensitive values still have to reach the host input path. The native
+        // request marks them sensitive so diagnostics and recordings redact them.
+        var json = JsonSerializer.Serialize(value);
+        var targetPointer = Marshal.StringToCoTaskMemUTF8(target);
+        var valuePointer = Marshal.StringToCoTaskMemUTF8(json);
+        try
+        {
+            var request = new Native.GameInputRequestDescriptor
+            {
+                StructSize = (uint)Marshal.SizeOf<Native.GameInputRequestDescriptor>(), OwnerId = ownerId,
+                Kind = (int)kind, Operation = (int)operation, Target = targetPointer, ValueJson = valuePointer,
+                X = x, Y = y, LeaseMs = leaseMs, DeviceIndex = deviceIndex, Sensitive = sensitive ? 1 : 0,
+            };
+            var result = Native.gua_runtime_enqueue_game_input(_handle, in request, out var requestId);
+            if (result != 1) throw new InvalidOperationException($"Game input request was rejected ({result}).");
+            return requestId;
+        }
+        finally { Marshal.FreeCoTaskMem(targetPointer); Marshal.FreeCoTaskMem(valuePointer); }
+    }
+
+    public unsafe bool TryConsumeGameInput(out GuaGameInputRequest request)
+    {
+        ThrowIfDisposed();
+        var native = new Native.GameInputRequest { StructSize = (uint)sizeof(Native.GameInputRequest) };
+        if (Native.gua_runtime_consume_game_input_request(_handle, ref native) == 0) { request = default!; return false; }
+        byte* target = native.Target; byte* value = native.ValueJson;
+        request = new(native.RequestId, native.OwnerId, (GuaGameInputKind)native.Kind, (GuaGameInputOperation)native.Operation,
+            Utf8(target, 128), Utf8(value, 512), native.X, native.Y, native.LeaseMs, native.DeviceIndex, native.Sensitive != 0);
+        return true;
+    }
+
+    public void CompleteGameInput(GuaGameInputRequest request, bool succeeded, int errorCode = 0)
+    {
+        ThrowIfDisposed();
+        if (Native.gua_runtime_complete_game_input_request(_handle, request.RequestId, succeeded ? 1 : 0, errorCode) == 0)
+            throw new InvalidOperationException($"Unknown game input request {request.RequestId}.");
+    }
+
+    public int TickGameInputLeases(TimeSpan unscaledElapsed)
+    {
+        ThrowIfDisposed();
+        return Native.gua_runtime_tick_game_input_leases(_handle, unscaledElapsed.TotalMilliseconds);
+    }
+
+    public unsafe string GetGameInputActionsJson() => CopyGameInputJson(0, false);
+    internal unsafe string GetGameInputStateJson(ulong ownerId) => CopyGameInputJson(ownerId, true);
+    private unsafe string CopyGameInputJson(ulong ownerId, bool state)
+    {
+        ThrowIfDisposed();
+        int Copy(byte* output, int size) => state
+            ? Native.gua_runtime_copy_game_input_state_json(_handle, ownerId, output, size)
+            : Native.gua_runtime_copy_game_input_actions_json(_handle, output, size);
+        var required = Copy(null, 0);
+        if (required <= 0) throw new InvalidOperationException("Native game input JSON is unavailable.");
+        var bytes = new byte[required];
+        fixed (byte* pointer = bytes) required = Copy(pointer, bytes.Length);
+        return Encoding.UTF8.GetString(bytes, 0, required - 1);
+    }
+}

@@ -39,3 +39,9 @@ The fixture verifies adapter version reporting, automatic UI reflection,
 request-correlated action completion after Unity listeners run, and rendered
 PNG capture. Generated Unity directories, plug-ins, TMP Essential Resources,
 players, packages, and logs stay out of git.
+# Game input fixture
+
+The project uses Unity Input System 1.20.0 with both input backends enabled.
+Its runtime fixture creates a `GuaGameInputMap` with semantic button, axis1d,
+vector2, and text actions, and enables virtual keyboard, mouse, and standard
+gamepad paths for integration tests.

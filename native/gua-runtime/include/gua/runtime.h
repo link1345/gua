@@ -73,6 +73,27 @@ void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* ve
 void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const char* adapter, const char* version);
 /* Adapter opt-in: enable only when the host pumps and consumes clock steps. */
 void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, int enabled);
+enum {
+    GUA_RUNTIME_GAME_INPUT_SEMANTIC = 1U << 0,
+    GUA_RUNTIME_GAME_INPUT_KEYBOARD = 1U << 1,
+    GUA_RUNTIME_GAME_INPUT_POINTER = 1U << 2,
+    GUA_RUNTIME_GAME_INPUT_GAMEPAD = 1U << 3,
+    GUA_RUNTIME_GAME_INPUT_TEXT = 1U << 4
+};
+/* Adapters opt in only after their host-frame input pump and cleanup route exist. */
+void gua_runtime_set_game_input_capabilities(gua_runtime_t* runtime, uint32_t capabilities);
+int gua_runtime_begin_game_input_frame(gua_runtime_t* runtime, const char* input_context);
+int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v1_t* descriptor);
+int gua_runtime_end_game_input_frame(gua_runtime_t* runtime);
+int gua_runtime_abort_game_input_frame(gua_runtime_t* runtime);
+uint64_t gua_runtime_create_game_input_owner(gua_runtime_t* runtime);
+int gua_runtime_release_game_input_owner(gua_runtime_t* runtime, uint64_t owner_id);
+int gua_runtime_enqueue_game_input(gua_runtime_t* runtime, const gua_game_input_request_descriptor_v1_t* descriptor, uint64_t* out_request_id);
+int gua_runtime_consume_game_input_request(gua_runtime_t* runtime, gua_game_input_request_v1_t* out_request);
+int gua_runtime_complete_game_input_request(gua_runtime_t* runtime, uint64_t request_id, int succeeded, int error_code);
+int gua_runtime_tick_game_input_leases(gua_runtime_t* runtime, double elapsed_ms);
+int gua_runtime_copy_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, uint64_t owner_id, char* out_json, int out_json_size);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);
 int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, gua_node_state_v2_t* out_state);
 int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size);

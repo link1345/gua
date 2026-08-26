@@ -1,6 +1,7 @@
 #include "gua/godot/gua_context.hpp"
 
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <string>
@@ -415,6 +416,85 @@ void GuaContext::enable_virtual_clock_adapter()
     gua_runtime_set_virtual_clock_enabled(runtime_, 1);
 }
 
+bool GuaContext::publish_game_input_actions(const String& input_context, const Array& actions)
+{
+    const CharString context_utf8 = input_context.utf8();
+    if (gua_runtime_begin_game_input_frame(runtime_, context_utf8.get_data()) == 0) return false;
+    for (int index = 0; index < actions.size(); ++index) {
+        if (actions[index].get_type() != Variant::DICTIONARY) {
+            gua_runtime_abort_game_input_frame(runtime_);
+            return false;
+        }
+        const Dictionary source = actions[index];
+        const String id = source.get("id", String());
+        const String description = source.get("description", String());
+        const String type = source.get("value_type", String("button"));
+        const String risk = source.get("risk", String("safe"));
+        const String bindings_json = JSON::stringify(source.get("bindings", Array()));
+        const CharString id_utf8 = id.utf8(), description_utf8 = description.utf8();
+        const CharString bindings_utf8 = bindings_json.utf8(), risk_utf8 = risk.utf8();
+        const int value_type = type == "axis1d" ? GUA_GAME_INPUT_AXIS1D :
+            type == "vector2" ? GUA_GAME_INPUT_VECTOR2 : type == "text" ? GUA_GAME_INPUT_TEXT : GUA_GAME_INPUT_BUTTON;
+        const bool has_range = source.has("minimum") || source.has("maximum");
+        if (has_range && (!source.has("minimum") || !source.has("maximum"))) {
+            gua_runtime_abort_game_input_frame(runtime_);
+            return false;
+        }
+        const gua_game_input_action_descriptor_v1_t descriptor {
+            sizeof(gua_game_input_action_descriptor_v1_t), id_utf8.get_data(), description_utf8.get_data(), value_type,
+            source.get("minimum", 0.0), source.get("maximum", 0.0), has_range ? 1 : 0,
+            static_cast<bool>(source.get("holdable", false)) ? 1 : 0,
+            static_cast<bool>(source.get("active", true)) ? 1 : 0,
+            bindings_utf8.get_data(), risk_utf8.get_data(),
+            static_cast<bool>(source.get("requires_confirmation", false)) ? 1 : 0
+        };
+        if (gua_runtime_register_game_input_action_v1(runtime_, &descriptor) == 0) {
+            gua_runtime_abort_game_input_frame(runtime_);
+            return false;
+        }
+    }
+    return gua_runtime_end_game_input_frame(runtime_) != 0;
+}
+
+String GuaContext::get_game_input_actions_json() const
+{
+    return copy_runtime_json(runtime_, gua_runtime_copy_game_input_actions_json);
+}
+
+void GuaContext::enable_game_input_adapter(int capabilities)
+{
+    gua_runtime_set_game_input_capabilities(runtime_, static_cast<uint32_t>(capabilities));
+}
+
+Dictionary GuaContext::consume_game_input_request()
+{
+    gua_game_input_request_v1_t request { sizeof(gua_game_input_request_v1_t) };
+    if (gua_runtime_consume_game_input_request(runtime_, &request) == 0) return Dictionary();
+    Dictionary result;
+    result["request_id"] = request.request_id;
+    result["owner_id"] = request.owner_id;
+    result["kind"] = request.kind;
+    result["operation"] = request.operation;
+    result["target"] = String::utf8(request.target);
+    result["value_json"] = String::utf8(request.value_json);
+    result["x"] = request.x; result["y"] = request.y;
+    result["lease_ms"] = request.lease_ms;
+    result["device_index"] = request.device_index;
+    result["sensitive"] = request.sensitive != 0;
+    return result;
+}
+
+bool GuaContext::complete_game_input_request(const Dictionary& result)
+{
+    return gua_runtime_complete_game_input_request(runtime_, result.get("request_id", 0),
+        static_cast<bool>(result.get("succeeded", false)) ? 1 : 0, result.get("error_code", 0)) != 0;
+}
+
+int GuaContext::tick_game_input_leases(double elapsed_ms)
+{
+    return gua_runtime_tick_game_input_leases(runtime_, elapsed_ms);
+}
+
 Dictionary GuaContext::get_context_status() const
 {
     gua_context_status_t status { sizeof(gua_context_status_t) };
@@ -527,6 +607,12 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("consume_clock_step"), &GuaContext::consume_clock_step);
     ClassDB::bind_method(D_METHOD("consume_clock_steps"), &GuaContext::consume_clock_steps);
     ClassDB::bind_method(D_METHOD("enable_virtual_clock_adapter"), &GuaContext::enable_virtual_clock_adapter);
+    ClassDB::bind_method(D_METHOD("publish_game_input_actions", "input_context", "actions"), &GuaContext::publish_game_input_actions);
+    ClassDB::bind_method(D_METHOD("get_game_input_actions_json"), &GuaContext::get_game_input_actions_json);
+    ClassDB::bind_method(D_METHOD("enable_game_input_adapter", "capabilities"), &GuaContext::enable_game_input_adapter);
+    ClassDB::bind_method(D_METHOD("consume_game_input_request"), &GuaContext::consume_game_input_request);
+    ClassDB::bind_method(D_METHOD("complete_game_input_request", "result"), &GuaContext::complete_game_input_request);
+    ClassDB::bind_method(D_METHOD("tick_game_input_leases", "elapsed_ms"), &GuaContext::tick_game_input_leases);
     ClassDB::bind_method(D_METHOD("start_inspector_bridge", "port"), &GuaContext::start_inspector_bridge, DEFVAL(8765));
     ClassDB::bind_method(D_METHOD("stop_inspector_bridge"), &GuaContext::stop_inspector_bridge);
     ClassDB::bind_method(D_METHOD("inspector_bridge_running"), &GuaContext::inspector_bridge_running);

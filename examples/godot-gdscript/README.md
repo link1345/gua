@@ -12,6 +12,13 @@ frame; concurrent pending requests share that readback. The headless smoke cover
 button, text input, checkbox, and select semantics plus PNG capture; managed
 `Gua.Testing.Visual` tests own baseline comparison policy, while
 `Gua.Testing.Recording` owns semantic recording and correlated replay.
+
+Game input is opt-in. Call `configure_game_input_actions(...)` with the actions
+the game intends to expose, and call `enable_raw_input()` only after the
+adapter's main-thread pump is active. The adapter emits
+`game_input_action_changed`, exposes `get_game_input_action_value(id)`, injects
+raw events through `Input.parse_input_event`, and releases held values when the
+lease or session ends.
 Because Godot's dummy headless renderer has no viewport texture, the smoke injects
 a deterministic `Image`; normal runtime calls omit that test-only argument and
 capture `Viewport.get_texture().get_image()`.

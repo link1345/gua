@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gua.dev/schema/recording.schema.json",
-  "title": "Gua UI operation recording v1",
+  "title": "Gua operation recording",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "steps"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "enum": [1, 2] },
     "steps": {
       "type": "array",
       "items": { "$ref": "#/$defs/step" }
@@ -37,7 +37,7 @@
       "additionalProperties": false,
       "required": ["action", "relativeMilliseconds", "preRevision", "postRevision", "sensitive"],
       "properties": {
-        "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] },
+        "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"] },
         "requestId": { "type": "integer", "minimum": 0 },
         "eventId": { "type": "integer", "minimum": 0 },
         "target": { "$ref": "#/$defs/target" },
@@ -52,14 +52,23 @@
         "deltaX": { "type": "number" },
         "deltaY": { "type": "number" },
         "scrollUnit": { "type": "integer", "minimum": 0, "maximum": 1 },
-        "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 }
+        "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "operation": { "type": "string", "minLength": 1 },
+        "arguments": { "type": "object" }
       },
       "allOf": [
-        { "oneOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] },
+        {
+          "if": { "properties": { "action": { "const": "game_input" } }, "required": ["action"] },
+          "then": {
+            "required": ["operation", "arguments"],
+            "not": { "anyOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] }
+          },
+          "else": { "oneOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] }
+        },
         {
           "if": { "properties": { "sensitive": { "const": true } }, "required": ["sensitive"] },
           "then": {
-            "properties": { "action": { "const": "set_value" } },
+            "properties": { "action": { "enum": ["set_value", "game_input"] } },
             "required": ["secretKey"],
             "not": { "required": ["value"] }
           }

@@ -8,7 +8,7 @@
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "key", "text", "gamepad"]
+      "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "key", "text", "gamepad", "game_input"]
     },
     "timestampMs": {
       "type": "integer",
@@ -35,6 +35,10 @@
     "axis": {
       "type": "string"
     },
+    "operation": { "type": "string" },
+    "actionId": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+    "deviceIndex": { "type": "integer", "minimum": 0 },
+    "leaseMs": { "type": "integer", "minimum": 0, "maximum": 60000 },
     "value": {
       "oneOf": [
         { "type": "string" },

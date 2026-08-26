@@ -19,7 +19,7 @@ namespace Gua.Unity
 {
 
 [DefaultExecutionOrder(-32000)]
-public sealed class GuaUnityRuntime : MonoBehaviour
+public sealed partial class GuaUnityRuntime : MonoBehaviour
 {
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
@@ -49,6 +49,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
+            InitializeGameInput();
             var configured = Environment.GetEnvironmentVariable("GUA_BRIDGE_PORT");
             var port = int.TryParse(configured, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 8765;
             if (!runtime.StartInspectorBridge(port)) throw new InvalidOperationException($"Failed to start Gua Inspector bridge on port {port}.");
@@ -60,6 +61,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             Debug.LogError("Failed to initialize the Gua Unity adapter: " + error);
             enabled = false;
         }
+    }
+
+    private IEnumerator Start()
+    {
+        // Scene fixtures and user maps may be created by AfterSceneLoad hooks.
+        yield return null;
+        InitializeGameInput();
     }
 
     public static void RunFrame() { if (activeRuntime != null && activeRuntime.enabled) activeRuntime.Tick(); }
@@ -87,6 +95,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             PruneClickObservers();
             runtime.EndFrame();
             DispatchActions();
+            PumpGameInput();
             ScheduleScreenshot();
         }
         catch (Exception error) { Debug.LogError("Gua Unity adapter frame failed: " + error); }
@@ -102,6 +111,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         visualClickHandlers.Clear();
         clickTargetIds.Clear();
         suppressedClicks.Clear();
+        DisposeGameInput();
         runtime?.Dispose();
         runtime = null;
     }

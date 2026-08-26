@@ -2,6 +2,7 @@ class_name GuaAutoAdapter
 extends RefCounted
 
 signal clock_tick(delta: float)
+signal game_input_action_changed(action_id: String, value: Variant)
 
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
@@ -40,6 +41,12 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_clock_step",
 	"consume_clock_steps",
 	"enable_virtual_clock_adapter",
+	"publish_game_input_actions",
+	"get_game_input_actions_json",
+	"enable_game_input_adapter",
+	"consume_game_input_request",
+	"complete_game_input_request",
+	"tick_game_input_leases",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -65,11 +72,19 @@ var clock_run_active := false
 var clock_run_callbacks_remaining := CLOCK_CALLBACK_LIMIT
 var clock_run_generation := -1
 var clock_execution_limit_reached := false
+var game_input_values: Dictionary = {}
+var held_physical_keys: Dictionary = {}
+var held_pointer_buttons: Dictionary = {}
+var held_gamepad_buttons: Dictionary = {}
+var held_gamepad_axes: Dictionary = {}
+var raw_input_enabled := false
+var last_game_input_ticks_ms := Time.get_ticks_msec()
 
 
 func attach(root_control: Control) -> void:
 	root = root_control
 	last_clock_ticks_ms = Time.get_ticks_msec()
+	last_game_input_ticks_ms = last_clock_ticks_ms
 	_ensure_context()
 
 
@@ -77,6 +92,9 @@ func update(screen: String) -> void:
 	if not _ensure_context():
 		return
 	var ticks_ms := Time.get_ticks_msec()
+	var game_input_elapsed_ms := maxi(0, ticks_ms - last_game_input_ticks_ms)
+	last_game_input_ticks_ms = ticks_ms
+	context.tick_game_input_leases(game_input_elapsed_ms)
 	var clock_status: Dictionary = context.get_clock()
 	_bind_pending_clock_schedules(clock_status)
 	var clock_installed := bool(clock_status.get("installed", false))
@@ -125,7 +143,29 @@ func update(screen: String) -> void:
 	context.end_frame()
 	_dispatch_click_requests()
 	_dispatch_action_requests()
+	_dispatch_game_input_requests()
 	_schedule_screenshot_capture()
+
+
+func configure_game_input_actions(input_context: String, actions: Array[Dictionary]) -> bool:
+	if not _ensure_context():
+		return false
+	var published := bool(context.publish_game_input_actions(input_context, actions))
+	if published:
+		context.enable_game_input_adapter(1 | (30 if raw_input_enabled else 0))
+	return published
+
+
+func enable_raw_input() -> bool:
+	if not _ensure_context():
+		return false
+	raw_input_enabled = true
+	context.enable_game_input_adapter(31)
+	return true
+
+
+func get_game_input_action_value(action_id: String, fallback: Variant = null) -> Variant:
+	return game_input_values.get(action_id, fallback)
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
@@ -708,6 +748,226 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 		_:
 			return -5
 	return 0
+
+
+func _dispatch_game_input_requests() -> void:
+	while true:
+		var request: Dictionary = context.consume_game_input_request()
+		if request.is_empty():
+			break
+		var error_code := _apply_game_input(request)
+		context.complete_game_input_request({
+			"request_id": request.get("request_id", 0),
+			"succeeded": error_code == 0,
+			"error_code": error_code,
+		})
+
+
+func _apply_game_input(request: Dictionary) -> int:
+	var kind := int(request.get("kind", 0))
+	var operation := int(request.get("operation", 0))
+	var target := str(request.get("target", ""))
+	if kind == 6 or operation == 10:
+		_release_all_injected_inputs()
+		return 0
+	if kind == 1:
+		var value = JSON.parse_string(str(request.get("value_json", "null")))
+		if operation == 1:
+			_set_semantic_input(target, true)
+			_set_semantic_input(target, false)
+		elif operation == 2:
+			if value is Dictionary and value.has("x") and value.has("y"):
+				value = Vector2(float(value.x), float(value.y))
+			_set_semantic_input(target, value)
+		elif operation == 3:
+			var current = game_input_values.get(target, false)
+			_set_semantic_input(target, Vector2.ZERO if current is Vector2 else (0.0 if current is float else false))
+		else:
+			return -4
+		return 0
+	if kind == 2:
+		var keycode := _keycode_from_w3c(target)
+		if keycode == KEY_NONE:
+			return -6
+		if operation == 1:
+			_inject_key(keycode, true)
+			_inject_key(keycode, false)
+		elif operation == 4:
+			held_physical_keys[target] = keycode
+			_inject_key(keycode, true)
+		elif operation in [3, 5]:
+			held_physical_keys.erase(target)
+			_inject_key(keycode, false)
+		else:
+			return -4
+		return 0
+	if kind == 3:
+		if operation in [6, 7]:
+			var motion := InputEventMouseMotion.new()
+			var coordinates := target.split(":")
+			var point := Vector2(float(request.get("x", 0.0)), float(request.get("y", 0.0)))
+			if operation == 6:
+				if coordinates.size() > 1 and coordinates[1] == "viewport_normalized" and root != null:
+					point *= root.get_viewport().get_visible_rect().size
+				motion.position = point
+			else:
+				motion.relative = point
+			Input.parse_input_event(motion)
+			return 0
+		if operation == 8:
+			var wheel := InputEventMouseButton.new()
+			wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN if float(request.get("y", 0.0)) > 0 else MOUSE_BUTTON_WHEEL_UP
+			wheel.pressed = true
+			wheel.factor = absf(float(request.get("y", 0.0)))
+			Input.parse_input_event(wheel)
+			return 0
+		var button := _mouse_button(target)
+		if button == MOUSE_BUTTON_NONE:
+			return -6
+		var pressed := operation == 4
+		if operation not in [3, 4, 5]:
+			return -4
+		if pressed:
+			held_pointer_buttons[target] = button
+		else:
+			held_pointer_buttons.erase(target)
+		var mouse := InputEventMouseButton.new()
+		mouse.button_index = button
+		mouse.pressed = pressed
+		Input.parse_input_event(mouse)
+		return 0
+	if kind == 4:
+		var device := int(request.get("device_index", 0))
+		if operation == 9:
+			_release_gamepad(device)
+			return 0
+		if operation == 2:
+			var axis := _gamepad_axis(target)
+			if axis < 0:
+				return -6
+			var value := clampf(float(JSON.parse_string(str(request.get("value_json", "0")))), -1.0, 1.0)
+			var axis_key := "%d:%s" % [device, target]
+			held_gamepad_axes[axis_key] = {"device": device, "axis": axis}
+			var motion := InputEventJoypadMotion.new()
+			motion.device = device
+			motion.axis = axis
+			motion.axis_value = value
+			Input.parse_input_event(motion)
+			return 0
+		var button_index := _gamepad_button(target)
+		if button_index < 0:
+			return -6
+		var pressed := operation == 4
+		if operation not in [3, 4, 5]:
+			return -4
+		var button_key := "%d:%s" % [device, target]
+		if pressed:
+			held_gamepad_buttons[button_key] = {"device": device, "button": button_index}
+		else:
+			held_gamepad_buttons.erase(button_key)
+		var joy := InputEventJoypadButton.new()
+		joy.device = device
+		joy.button_index = button_index
+		joy.pressed = pressed
+		Input.parse_input_event(joy)
+		return 0
+	if kind == 5:
+		var text = JSON.parse_string(str(request.get("value_json", "\"\"")))
+		if not text is String:
+			return -6
+		for index in text.length():
+			var character := InputEventKey.new()
+			character.unicode = text.unicode_at(index)
+			character.pressed = true
+			Input.parse_input_event(character)
+		return 0
+	return -4
+
+
+func _set_semantic_input(action_id: String, value: Variant) -> void:
+	game_input_values[action_id] = value
+	game_input_action_changed.emit(action_id, value)
+
+
+func _inject_key(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = keycode
+	event.keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+
+func _keycode_from_w3c(code: String) -> Key:
+	if code.begins_with("Key") and code.length() == 4:
+		return OS.find_keycode_from_string(code.substr(3, 1))
+	if code.begins_with("Digit") and code.length() == 6:
+		return OS.find_keycode_from_string(code.substr(5, 1))
+	var names := {
+		"ArrowUp": KEY_UP, "ArrowDown": KEY_DOWN, "ArrowLeft": KEY_LEFT, "ArrowRight": KEY_RIGHT,
+		"Space": KEY_SPACE, "Enter": KEY_ENTER, "Escape": KEY_ESCAPE, "Tab": KEY_TAB,
+		"ShiftLeft": KEY_SHIFT, "ShiftRight": KEY_SHIFT, "ControlLeft": KEY_CTRL,
+		"ControlRight": KEY_CTRL, "AltLeft": KEY_ALT, "AltRight": KEY_ALT,
+	}
+	return names.get(code, KEY_NONE)
+
+
+func _mouse_button(name: String) -> MouseButton:
+	return {
+		"primary": MOUSE_BUTTON_LEFT, "secondary": MOUSE_BUTTON_RIGHT, "auxiliary": MOUSE_BUTTON_MIDDLE,
+		"back": MOUSE_BUTTON_XBUTTON1, "forward": MOUSE_BUTTON_XBUTTON2,
+	}.get(name, MOUSE_BUTTON_NONE)
+
+
+func _gamepad_button(name: String) -> int:
+	var names := [
+		"south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger", "right_trigger",
+		"back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right", "guide",
+	]
+	return names.find(name)
+
+
+func _gamepad_axis(name: String) -> int:
+	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"].find(name)
+
+
+func _release_gamepad(device: int) -> void:
+	for key in held_gamepad_buttons.keys():
+		var held: Dictionary = held_gamepad_buttons[key]
+		if int(held.device) != device:
+			continue
+		var event := InputEventJoypadButton.new()
+		event.device = device
+		event.button_index = int(held.button)
+		event.pressed = false
+		Input.parse_input_event(event)
+		held_gamepad_buttons.erase(key)
+	for key in held_gamepad_axes.keys():
+		var held: Dictionary = held_gamepad_axes[key]
+		if int(held.device) != device:
+			continue
+		var event := InputEventJoypadMotion.new()
+		event.device = device
+		event.axis = int(held.axis)
+		event.axis_value = 0.0
+		Input.parse_input_event(event)
+		held_gamepad_axes.erase(key)
+
+
+func _release_all_injected_inputs() -> void:
+	for key in held_physical_keys.values():
+		_inject_key(key, false)
+	held_physical_keys.clear()
+	for button in held_pointer_buttons.values():
+		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = false
+		Input.parse_input_event(event)
+	held_pointer_buttons.clear()
+	for device in range(4):
+		_release_gamepad(device)
+	for action_id in game_input_values.keys():
+		var current = game_input_values[action_id]
+		_set_semantic_input(action_id, Vector2.ZERO if current is Vector2 else (0.0 if current is float else false))
 
 
 func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:

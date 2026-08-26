@@ -1,6 +1,6 @@
-import type { GuaNode, GuaUiTree } from "./core";
+import type { GameInputCommandInput, GuaNode, GuaUiTree } from "./core";
 
-export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
+export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key" | "game_input";
 
 export interface SemanticActionInput {
   action: RecordedAction;
@@ -33,9 +33,11 @@ export interface RecordingStep {
   deltaY?: number;
   scrollUnit?: number;
   modifiers?: number;
+  operation?: GameInputCommandInput["type"];
+  arguments?: Record<string, unknown>;
 }
 
-export interface GuaRecording { schemaVersion: 1; steps: RecordingStep[] }
+export interface GuaRecording { schemaVersion: 1 | 2; steps: RecordingStep[] }
 
 export interface ActionOutcome {
   requestId?: number;
@@ -76,10 +78,21 @@ export class InspectorRecorder {
     }) as unknown as RecordingStep);
   }
 
+  recordGameInput(input: GameInputCommandInput, requestId?: number): void {
+    if (this.startedAt === null) return;
+    const sensitive = "sensitive" in input && input.sensitive === true;
+    const argumentsValue = { ...input } as Record<string, unknown>;
+    delete argumentsValue.type;
+    if (sensitive) { delete argumentsValue.value; delete argumentsValue.text; }
+    this.steps.push({ action: "game_input", operation: input.type, arguments: argumentsValue,
+      requestId, relativeMilliseconds: Date.now() - this.startedAt, preRevision: 0, postRevision: 0,
+      sensitive, target: { currentFocus: true } });
+  }
+
   stop(): GuaRecording {
     if (this.startedAt === null) throw new Error("No recording is active.");
     this.startedAt = null;
-    const recording: GuaRecording = { schemaVersion: 1, steps: [...this.steps] };
+    const recording: GuaRecording = { schemaVersion: 2, steps: [...this.steps] };
     validateRecording(recording);
     return recording;
   }
@@ -90,13 +103,19 @@ export async function replayRecording(
   getTree: () => Promise<GuaUiTree>,
   perform: (action: SemanticActionInput) => Promise<ActionOutcome>,
   secrets: Record<string, string> = {},
+  performGameInput?: (command: GameInputCommandInput) => Promise<unknown>,
 ): Promise<void> {
   validateRecording(recording);
   let previous = 0;
-  for (const step of recording.steps) {
+  try { for (const step of recording.steps) {
     if (step.waitCondition !== undefined) await waitForCondition(getTree, step.waitCondition, 10000);
     else if (step.relativeMilliseconds > previous) await delay(step.relativeMilliseconds - previous);
     previous = step.relativeMilliseconds;
+    if (step.action === "game_input") {
+      if (performGameInput === undefined || step.operation === undefined || step.arguments === undefined) throw new Error("Game input replay is unavailable.");
+      await performGameInput({ type: step.operation, ...step.arguments } as GameInputCommandInput);
+      continue;
+    }
     const nodeId = await resolveTarget(step, await getTree());
     const value = step.sensitive ? secrets[step.secretKey as string] : step.value;
     if (step.sensitive && value === undefined) throw new Error(`Missing secret '${step.secretKey}'.`);
@@ -107,6 +126,8 @@ export async function replayRecording(
       modifiers: step.modifiers, deltaX: step.deltaX, deltaY: step.deltaY,
       scrollUnit: step.scrollUnit, sensitive: step.sensitive, secretKey: step.secretKey,
     });
+  } } finally {
+    if (performGameInput !== undefined) await performGameInput({ type: "release_all_game_inputs" });
   }
 }
 
@@ -168,14 +189,16 @@ export async function compareImages(
 }
 
 export function validateRecording(value: unknown): asserts value is GuaRecording {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.steps)) {
-    throw new Error("Recording must use schemaVersion 1 and contain steps.");
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2) || !Array.isArray(value.steps)) {
+    throw new Error("Recording must use schemaVersion 1 or 2 and contain steps.");
   }
   let previous = -1;
   value.steps.forEach((raw, index) => {
     if (!isRecord(raw) || typeof raw.action !== "string" || !actions.includes(raw.action as RecordedAction)) {
       throw new Error(`Recording step ${index} has an unsupported action.`);
     }
+    if (raw.action === "game_input" && (value.schemaVersion !== 2 || typeof raw.operation !== "string" || !isRecord(raw.arguments)))
+      throw new Error(`Recording step ${index} has invalid game input.`);
     if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < previous) {
       throw new Error(`Recording step ${index} has invalid timing.`);
     }
@@ -289,4 +312,4 @@ function compact<T extends Record<string, unknown>>(value: T): Partial<T> {
 
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-const actions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"];
+const actions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"];

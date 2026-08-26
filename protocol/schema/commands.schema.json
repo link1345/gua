@@ -14,6 +14,10 @@
     { "$ref": "#/$defs/captureScreenshot" },
     { "$ref": "#/$defs/clockInstall" },
     { "$ref": "#/$defs/clockRunFor" },
+    { "$ref": "#/$defs/gameInputAction" },
+    { "$ref": "#/$defs/rawKey" },
+    { "$ref": "#/$defs/pointerInput" },
+    { "$ref": "#/$defs/gamepadInput" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -141,13 +145,60 @@
         "stepMs": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "gameInputAction": {
+      "type": "object",
+      "required": ["type", "actionId"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["press_game_input_action", "set_game_input_action", "release_game_input_action"] },
+        "actionId": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "value": { "type": ["boolean", "number", "string", "object"] },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "confirmed": { "type": "boolean", "default": false },
+        "sensitive": { "type": "boolean", "default": false }
+      }
+    },
+    "rawKey": {
+      "type": "object", "required": ["type", "code"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["key_down", "key_up", "press_physical_key"] },
+        "code": { "type": "string", "minLength": 1 },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "pointerInput": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel"] },
+        "mode": { "enum": ["absolute", "delta"] },
+        "coordinateSpace": { "enum": ["viewport_normalized", "viewport_pixels"] },
+        "x": { "type": "number" }, "y": { "type": "number" },
+        "button": { "enum": ["primary", "secondary", "auxiliary", "back", "forward"] },
+        "deltaX": { "type": "number" }, "deltaY": { "type": "number" },
+        "wheelUnit": { "enum": ["pixels", "lines"] },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "gamepadInput": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad"] },
+        "gamepadIndex": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0 },
+        "button": { "type": "string", "minLength": 1 },
+        "axis": { "enum": ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] },
+        "value": { "type": "number", "minimum": -1, "maximum": 1 },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
     "textInput": {
       "type": "object",
       "required": ["type", "text"],
       "additionalProperties": false,
       "properties": {
         "type": { "const": "text_input" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "sensitive": { "type": "boolean", "default": false },
+        "secretKey": { "type": "string", "minLength": 1 }
       }
     },
     "moveGamepad": {
@@ -166,8 +217,9 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "get_clock", "clock_pause", "clock_resume"]
-        }
+          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "poll_game_input", "get_clock", "clock_pause", "clock_resume", "get_game_input_actions", "get_game_input_state", "release_all_game_inputs"]
+        },
+        "requestId": { "type": "integer", "minimum": 1 }
       }
     }
   }

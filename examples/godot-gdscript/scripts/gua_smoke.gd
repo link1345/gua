@@ -131,7 +131,19 @@ func _run() -> void:
 		return
 
 	ui.attach(screen)
+	if not ui.configure_game_input_actions("gameplay", [
+		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"]},
+		{"id": "throttle", "description": "Throttle", "value_type": "axis1d", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "move", "description": "Move", "value_type": "vector2", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "chat", "description": "Chat", "value_type": "text"},
+	]) or not ui.enable_raw_input():
+		_fail("Gua smoke failed to initialize game input capabilities.")
+		return
 	ui.update("title")
+	var game_input_actions: String = ui.context.get_game_input_actions_json()
+	if not game_input_actions.contains("\"button\"") or not game_input_actions.contains("\"axis1d\"") or not game_input_actions.contains("\"vector2\"") or not game_input_actions.contains("\"text\""):
+		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
+		return
 	if not ui.context.get_version_json().contains("virtual_clock_v1"):
 		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
 		return

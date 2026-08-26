@@ -24,6 +24,15 @@ public static class GuaUnityFixture
         Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
         legacyFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
+        var inputMapObject = new GameObject("GuaGameInputFixture");
+        var inputMap = inputMapObject.AddComponent<GuaGameInputMap>();
+        inputMap.Context = "gameplay";
+        inputMap.EnableRawInput = true;
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "jump", Description = "Jump", ValueType = Gua.Runtime.GuaGameInputValueType.Button, Holdable = true, Bindings = new[] { "Space" } });
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "throttle", Description = "Throttle", ValueType = Gua.Runtime.GuaGameInputValueType.Axis1D, HasRange = true, Minimum = -1, Maximum = 1, Holdable = true });
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "move", Description = "Move", ValueType = Gua.Runtime.GuaGameInputValueType.Vector2, HasRange = true, Minimum = -1, Maximum = 1, Holdable = true });
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "chat", Description = "Chat", ValueType = Gua.Runtime.GuaGameInputValueType.Text });
+
         if (Object.FindFirstObjectByType<EventSystem>() == null)
         {
             var events = new GameObject("EventSystem");

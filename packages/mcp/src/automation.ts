@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { PNG } from "pngjs";
 
-export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
+export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key" | "game_input";
 
 export interface RecordingTarget {
   id?: string;
@@ -30,11 +30,21 @@ export interface RecordingStep {
   deltaY?: number;
   scrollUnit?: number;
   modifiers?: number;
+  operation?: string;
+  arguments?: Record<string, unknown>;
 }
 
 export interface GuaRecording {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   steps: RecordingStep[];
+}
+
+export interface RecordGameInput {
+  operation: string;
+  requestId: number;
+  arguments: Record<string, unknown>;
+  sensitive?: boolean;
+  secretKey?: string;
 }
 
 export interface RecordActionInput {
@@ -145,12 +155,29 @@ export class GuaAutomationManager {
     }) as unknown as RecordingStep);
   }
 
+  recordGameInput(input: RecordGameInput): void {
+    if (this.recordingStartedAt === null) return;
+    if (input.sensitive === true && !nonEmpty(input.secretKey))
+      throw new Error("Sensitive game input recording requires secretKey.");
+    this.activeSteps.push(compact({
+      action: "game_input" as const,
+      requestId: input.requestId,
+      relativeMilliseconds: Date.now() - this.recordingStartedAt,
+      preRevision: 0,
+      postRevision: 0,
+      sensitive: input.sensitive === true,
+      secretKey: input.sensitive === true ? input.secretKey : undefined,
+      operation: input.operation,
+      arguments: input.arguments,
+    }) as unknown as RecordingStep);
+  }
+
   stopRecording(): GuaRecording {
     if (this.recordingStartedAt === null) {
       throw new Error("No Gua recording is active.");
     }
     this.recordingStartedAt = null;
-    const recording: GuaRecording = { schemaVersion: 1, steps: [...this.activeSteps] };
+    const recording: GuaRecording = { schemaVersion: 2, steps: [...this.activeSteps] };
     validateRecording(recording);
     this.lastRecording = recording;
     return recording;
@@ -311,13 +338,20 @@ export class GuaAutomationManager {
 }
 
 export function validateRecording(value: unknown): asserts value is GuaRecording {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.steps)) {
-    throw new Error("Recording must use schemaVersion 1 and contain steps.");
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2) || !Array.isArray(value.steps)) {
+    throw new Error("Recording must use schemaVersion 1 or 2 and contain steps.");
   }
   let previous = -1;
   value.steps.forEach((raw, index) => {
     if (!isRecord(raw) || !recordedActions.includes(raw.action as RecordedAction)) {
       throw new Error(`Recording step ${index} has an unsupported action.`);
+    }
+    if (raw.action === "game_input") {
+      if (value.schemaVersion !== 2 || !nonEmpty(raw.operation) || !isRecord(raw.arguments))
+        throw new Error(`Game input recording step ${index} requires schemaVersion 2, operation, and arguments.`);
+      if (raw.sensitive === true && (!nonEmpty(raw.secretKey) || raw.arguments.value !== undefined || raw.arguments.text !== undefined))
+        throw new Error(`Sensitive game input recording step ${index} is invalid.`);
+      return;
     }
     if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < previous) {
       throw new Error(`Recording step ${index} has non-monotonic relativeMilliseconds.`);
@@ -357,7 +391,7 @@ export function validateRecording(value: unknown): asserts value is GuaRecording
   });
 }
 
-const recordedActions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"];
+const recordedActions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"];
 
 function decodePngDataUri(dataUri: string): Buffer {
   const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUri);

@@ -53,11 +53,24 @@ struct Command {
     bool duration_ms_valid = false;
     double step_ms = 0;
     bool step_ms_present = false;
+    std::string action_id;
+    std::string code;
+    std::string button;
+    std::string axis;
+    std::string mode;
+    std::string coordinate_space;
+    std::string wheel_unit;
+    std::string raw_value = "null";
+    unsigned int lease_ms = 5000;
+    int device_index = 0;
+    double input_x = 0;
+    double input_y = 0;
 };
 
 struct ClientConnection {
     SOCKET socket = INVALID_SOCKET;
     std::shared_ptr<std::mutex> send_mutex;
+    unsigned long long game_input_owner_id = 0;
 };
 
 class Socket {
@@ -670,6 +683,33 @@ bool json_bool_field(std::string_view json, std::string_view field, bool fallbac
     return start.has_value() ? json.substr(*start, 4) == "true" : fallback;
 }
 
+std::optional<std::string> json_raw_field(std::string_view json, std::string_view field)
+{
+    const auto start_value = json_top_level_field_start(json, field);
+    if (!start_value.has_value()) return std::nullopt;
+    const std::size_t start = *start_value;
+    if (start >= json.size()) return std::nullopt;
+    bool quoted = json[start] == '"';
+    int depth = 0;
+    bool escaped = false;
+    for (std::size_t index = start; index < json.size(); ++index) {
+        const char ch = json[index];
+        if (quoted) {
+            if (escaped) { escaped = false; continue; }
+            if (ch == '\\') { escaped = true; continue; }
+            if (index > start && ch == '"') return std::string(json.substr(start, index - start + 1));
+            continue;
+        }
+        if (ch == '{' || ch == '[') ++depth;
+        else if (ch == '}' || ch == ']') {
+            if (depth == 0) return std::string(json.substr(start, index - start));
+            --depth;
+        }
+        if (depth == 0 && ch == ',') return std::string(json.substr(start, index - start));
+    }
+    return std::nullopt;
+}
+
 Command parse_command(std::string_view json)
 {
     Command command;
@@ -715,6 +755,20 @@ Command parse_command(std::string_view json)
     command.duration_ms_valid = duration_ms.has_value();
     command.step_ms = json_number_field(json, "stepMs").value_or(0);
     command.step_ms_present = json_has_field(json, "stepMs");
+    command.action_id = json_string_field(json, "actionId").value_or("");
+    command.code = json_string_field(json, "code").value_or("");
+    command.button = json_string_field(json, "button").value_or("");
+    command.axis = json_string_field(json, "axis").value_or("");
+    command.mode = json_string_field(json, "mode").value_or("");
+    command.coordinate_space = json_string_field(json, "coordinateSpace").value_or("");
+    command.wheel_unit = json_string_field(json, "wheelUnit").value_or("");
+    command.raw_value = json_raw_field(json, "value").value_or("null");
+    const auto lease_ms = json_int_field(json, "leaseMs");
+    command.lease_ms = !lease_ms.has_value() ? 5000U :
+        (*lease_ms >= 1 && *lease_ms <= 60000 ? static_cast<unsigned int>(*lease_ms) : 60001U);
+    command.device_index = std::clamp(json_int_field(json, "gamepadIndex").value_or(0), 0, 3);
+    command.input_x = json_number_field(json, "x").value_or(command.delta_x);
+    command.input_y = json_number_field(json, "y").value_or(command.delta_y);
     return command;
 }
 
@@ -742,6 +796,19 @@ std::string_view action_error_name(long long code)
     case -4: return "disabled";
     case -5: return "unsupported";
     case -6: return "invalid_value";
+    default: return "unknown";
+    }
+}
+
+std::string_view game_input_error_name(long long code)
+{
+    switch (code) {
+    case -1: return "invalid_argument";
+    case -2: return "action_not_found";
+    case -3: return "inactive";
+    case -4: return "unsupported";
+    case -5: return "invalid_value";
+    case -6: return "invalid_lease";
     default: return "unknown";
     }
 }
@@ -965,6 +1032,7 @@ private:
         ClientConnection connection {
             client,
             std::make_shared<std::mutex>(),
+            handlers_.create_game_input_owner ? handlers_.create_game_input_owner() : 0,
         };
         {
             const std::lock_guard lock(clients_mutex_);
@@ -979,9 +1047,11 @@ private:
                 break;
             }
 
-            const std::string response = handle_command(*message);
+            const std::string response = handle_command(*message, connection.game_input_owner_id);
             send_text_frame(connection, response);
         }
+        if (connection.game_input_owner_id != 0 && handlers_.release_game_input_owner)
+            handlers_.release_game_input_owner(connection.game_input_owner_id);
 
         {
             const std::lock_guard lock(clients_mutex_);
@@ -1000,7 +1070,7 @@ private:
         ::send_text_frame(client.socket, text);
     }
 
-    [[nodiscard]] std::string handle_command(std::string_view message)
+    [[nodiscard]] std::string handle_command(std::string_view message, unsigned long long game_input_owner_id)
     {
         const Command command = parse_command(message);
         try {
@@ -1068,6 +1138,62 @@ private:
                 return handlers_.poll_action_event_json
                     ? ok_response(command.id, handlers_.poll_action_event_json(command.request_id))
                     : error_response(command.id, "poll_events is not supported by this bridge");
+            }
+            if (command.type == "get_game_input_actions") {
+                return handlers_.get_game_input_actions_json && handlers_.game_input_supported &&
+                        handlers_.game_input_supported(1U)
+                    ? ok_response(command.id, handlers_.get_game_input_actions_json())
+                    : error_response(command.id, "unsupported");
+            }
+            if (command.type == "get_game_input_state") {
+                return game_input_owner_id != 0 && handlers_.get_game_input_state_json
+                    ? ok_response(command.id, handlers_.get_game_input_state_json(game_input_owner_id))
+                    : error_response(command.id, "unsupported");
+            }
+            if (command.type == "poll_game_input") {
+                return game_input_owner_id != 0 && handlers_.poll_game_input_result_json
+                    ? ok_response(command.id, handlers_.poll_game_input_result_json(game_input_owner_id, command.request_id))
+                    : error_response(command.id, "unsupported");
+            }
+            const bool game_input_command =
+                command.type == "press_game_input_action" || command.type == "set_game_input_action" ||
+                command.type == "release_game_input_action" || command.type == "release_all_game_inputs" ||
+                command.type == "key_down" || command.type == "key_up" || command.type == "press_physical_key" ||
+                command.type == "pointer_move" || command.type == "pointer_button_down" ||
+                command.type == "pointer_button_up" || command.type == "pointer_wheel" ||
+                command.type == "gamepad_button_down" || command.type == "gamepad_button_up" ||
+                command.type == "set_gamepad_axis" || command.type == "reset_gamepad" ||
+                command.type == "text_input";
+            if (game_input_command) {
+                if (game_input_owner_id == 0 || !handlers_.enqueue_game_input)
+                    return error_response(command.id, "unsupported");
+                std::string target = command.action_id;
+                std::string value_json = command.raw_value;
+                double x = command.input_x, y = command.input_y;
+                if (command.type == "key_down" || command.type == "key_up" || command.type == "press_physical_key")
+                    target = command.code;
+                else if (command.type == "pointer_move")
+                    target = command.mode + ":" + command.coordinate_space;
+                else if (command.type == "pointer_button_down" || command.type == "pointer_button_up")
+                    target = command.button;
+                else if (command.type == "pointer_wheel")
+                    target = command.wheel_unit.empty() ? "pixels" : command.wheel_unit;
+                else if (command.type == "gamepad_button_down" || command.type == "gamepad_button_up")
+                    target = command.button;
+                else if (command.type == "set_gamepad_axis")
+                    target = command.axis;
+                else if (command.type == "reset_gamepad")
+                    target = "all";
+                else if (command.type == "text_input") {
+                    target = "text";
+                    value_json = "\"" + escape_json(command.selector.text) + "\"";
+                } else if (command.type == "release_all_game_inputs") target = "all";
+                const long long request_id = handlers_.enqueue_game_input(game_input_owner_id, gua::ws::GameInputCommand {
+                    command.type, std::move(target), std::move(value_json), x, y, command.lease_ms,
+                    command.device_index, command.sensitive });
+                return request_id > 0
+                    ? ok_response(command.id, "{\"requestId\":" + std::to_string(request_id) + "}")
+                    : error_response(command.id, "Gua game input rejected: " + std::string(game_input_error_name(request_id)));
             }
             if (handlers_.enqueue_action && (command.type == "click_node" || command.type == "focus_node" || command.type == "press_key" ||
                 command.type == "set_value" || command.type == "set_checked" || command.type == "select" || command.type == "scroll")) {

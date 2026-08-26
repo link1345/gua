@@ -130,6 +130,24 @@ export const guaMcpTools = [
   "select",
   "scroll",
   "press_key",
+  "get_game_input_actions",
+  "press_game_input_action",
+  "set_game_input_action",
+  "release_game_input_action",
+  "get_game_input_state",
+  "release_all_game_inputs",
+  "key_down",
+  "key_up",
+  "press_physical_key",
+  "pointer_move",
+  "pointer_button_down",
+  "pointer_button_up",
+  "pointer_wheel",
+  "gamepad_button_down",
+  "gamepad_button_up",
+  "set_gamepad_axis",
+  "reset_gamepad",
+  "text_input",
   "wait_for_node",
   "get_screenshot",
   "get_logs",
@@ -212,6 +230,51 @@ const tools: McpTool[] = [
       modifiers: { type: "integer", minimum: 0, maximum: 15, description: "Shift=1, Alt=2, Control=4, Meta=8." },
     }, ["key"]),
   },
+  { name: "get_game_input_actions", description: "Read the host-published semantic game action map.", inputSchema: objectSchema({}) },
+  { name: "press_game_input_action", description: "Press a semantic button action and wait for host completion.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
+  }, ["actionId"]) },
+  { name: "set_game_input_action", description: "Set and optionally hold a semantic game action value.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."), value: {}, leaseMs: { type: "integer", minimum: 1, maximum: 60000 },
+    confirmed: { type: "boolean" }, sensitive: { type: "boolean" }, secretKey: stringProperty("Secret used only for recording replay."),
+  }, ["actionId", "value"]) },
+  { name: "release_game_input_action", description: "Release a held semantic game action.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."),
+  }, ["actionId"]) },
+  { name: "get_game_input_state", description: "Inspect held inputs owned by this MCP connection.", inputSchema: objectSchema({}) },
+  { name: "release_all_game_inputs", description: "Release every semantic and raw input owned by this MCP connection.", inputSchema: objectSchema({}) },
+  ...(["key_down", "key_up", "press_physical_key"] as const).map((name) => ({
+    name, description: `${name} using a W3C KeyboardEvent.code identifier.`,
+    inputSchema: objectSchema({ code: stringProperty("W3C KeyboardEvent.code such as KeyW."), leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["code"]),
+  })),
+  { name: "pointer_move", description: "Move the engine pointer using absolute or delta coordinates.", inputSchema: objectSchema({
+    mode: { type: "string", enum: ["absolute", "delta"] }, coordinateSpace: { type: "string", enum: ["viewport_normalized", "viewport_pixels"] },
+    x: { type: "number" }, y: { type: "number" },
+  }, ["mode", "x", "y"]) },
+  ...(["pointer_button_down", "pointer_button_up"] as const).map((name) => ({
+    name, description: `${name} for an engine pointer button.`,
+    inputSchema: objectSchema({ button: { type: "string", enum: ["primary", "secondary", "auxiliary", "back", "forward"] },
+      leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["button"]),
+  })),
+  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: objectSchema({
+    deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] },
+  }, ["deltaX", "deltaY"]) },
+  ...(["gamepad_button_down", "gamepad_button_up"] as const).map((name) => ({
+    name, description: `${name} using Standard Gamepad mapping names.`,
+    inputSchema: objectSchema({ gamepadIndex: { type: "integer", minimum: 0, maximum: 3 }, button: stringProperty("Standard Gamepad button name."),
+      leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["button"]),
+  })),
+  { name: "set_gamepad_axis", description: "Set and hold a Standard Gamepad axis.", inputSchema: objectSchema({
+    gamepadIndex: { type: "integer", minimum: 0, maximum: 3 },
+    axis: { type: "string", enum: ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] },
+    value: { type: "number", minimum: -1, maximum: 1 }, leaseMs: { type: "integer", minimum: 1, maximum: 60000 },
+  }, ["axis", "value"]) },
+  { name: "reset_gamepad", description: "Reset one virtual gamepad to neutral.", inputSchema: objectSchema({
+    gamepadIndex: { type: "integer", minimum: 0, maximum: 3 },
+  }) },
+  { name: "text_input", description: "Inject text through the engine input route.", inputSchema: objectSchema({
+    text: { type: "string" }, sensitive: { type: "boolean" }, secretKey: stringProperty("Secret used only for recording replay."),
+  }, ["text"]) },
   {
     name: "wait_for_node",
     description: "Poll the UI tree until a node id appears or the timeout expires.",
@@ -500,6 +563,57 @@ async function executeTool(
         action: "press_key", nodeId: readOptionalStringArg(args, "nodeId"), key: readStringArg(args, "key"),
         modifiers: readIntegerArg(args, "modifiers", 0),
       });
+    case "get_game_input_actions": return bridge.getGameInputActions();
+    case "get_game_input_state": return bridge.getGameInputState();
+    case "press_game_input_action":
+      return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId"),
+        confirmed: readBooleanArg(args, "confirmed", false) });
+    case "set_game_input_action": {
+      if (!("value" in args)) throw new Error("set_game_input_action requires value.");
+      const sensitive = readBooleanArg(args, "sensitive", false);
+      const secretKey = readOptionalStringArg(args, "secretKey");
+      if (sensitive && secretKey === undefined) throw new Error("Sensitive game input requires secretKey.");
+      return performGameInput(bridge, automation, compactResult({ type: name, actionId: readStringArg(args, "actionId"),
+        value: sensitive ? args.value : args.value, leaseMs: readIntegerArg(args, "leaseMs", 5000),
+        confirmed: readBooleanArg(args, "confirmed", false), sensitive, secretKey }) as GameInputCommandInput);
+    }
+    case "release_game_input_action":
+      return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId") });
+    case "release_all_game_inputs":
+      return performGameInput(bridge, automation, { type: name });
+    case "key_down":
+    case "key_up":
+    case "press_physical_key":
+      return performGameInput(bridge, automation, { type: name, code: readStringArg(args, "code"),
+        leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+    case "pointer_move":
+      return performGameInput(bridge, automation, { type: name, mode: readEnumArg(args, "mode", ["absolute", "delta"]),
+        coordinateSpace: readEnumArg(args, "coordinateSpace", ["viewport_normalized", "viewport_pixels"], "viewport_pixels"),
+        x: readNumberArg(args, "x", 0), y: readNumberArg(args, "y", 0) });
+    case "pointer_button_down":
+    case "pointer_button_up":
+      return performGameInput(bridge, automation, { type: name,
+        button: readEnumArg(args, "button", ["primary", "secondary", "auxiliary", "back", "forward"]),
+        leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+    case "pointer_wheel":
+      return performGameInput(bridge, automation, { type: name, deltaX: readNumberArg(args, "deltaX", 0),
+        deltaY: readNumberArg(args, "deltaY", 0), wheelUnit: readEnumArg(args, "wheelUnit", ["pixels", "lines"], "pixels") });
+    case "gamepad_button_down":
+    case "gamepad_button_up":
+      return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0),
+        button: readStringArg(args, "button"), leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+    case "set_gamepad_axis":
+      return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0),
+        axis: readEnumArg(args, "axis", ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"]),
+        value: readNumberArg(args, "value", 0), leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+    case "reset_gamepad":
+      return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0) });
+    case "text_input": {
+      const sensitive = readBooleanArg(args, "sensitive", false);
+      const secretKey = readOptionalStringArg(args, "secretKey");
+      if (sensitive && secretKey === undefined) throw new Error("Sensitive text_input requires secretKey.");
+      return performGameInput(bridge, automation, { type: name, text: readStringArg(args, "text", true), sensitive, secretKey });
+    }
     case "wait_for_node":
       return bridge.waitForNode(
         readStringArg(args, "nodeId"),
@@ -587,8 +701,44 @@ async function runTest(
   return { ok: true, steps: results };
 }
 
+type GameInputCommandInput =
+  | { type: "press_game_input_action"; actionId: string; confirmed?: boolean }
+  | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; confirmed?: boolean; sensitive?: boolean; secretKey?: string }
+  | { type: "release_game_input_action"; actionId: string }
+  | { type: "release_all_game_inputs" }
+  | { type: "key_down" | "key_up" | "press_physical_key"; code: string; leaseMs?: number }
+  | { type: "pointer_move"; mode: "absolute" | "delta"; coordinateSpace?: "viewport_normalized" | "viewport_pixels"; x: number; y: number }
+  | { type: "pointer_button_down" | "pointer_button_up"; button: "primary" | "secondary" | "auxiliary" | "back" | "forward"; leaseMs?: number }
+  | { type: "pointer_wheel"; deltaX: number; deltaY: number; wheelUnit?: "pixels" | "lines" }
+  | { type: "gamepad_button_down" | "gamepad_button_up"; gamepadIndex?: number; button: string; leaseMs?: number }
+  | { type: "set_gamepad_axis"; gamepadIndex?: number; axis: "left_stick_x" | "left_stick_y" | "right_stick_x" | "right_stick_y"; value: number; leaseMs?: number }
+  | { type: "reset_gamepad"; gamepadIndex?: number }
+  | { type: "text_input"; text: string; sensitive?: boolean; secretKey?: string };
+
+async function performGameInput(
+  bridge: GuaBridgeClient,
+  automation: GuaAutomationManager | undefined,
+  input: GameInputCommandInput,
+  timeoutMs = 10000,
+): Promise<{ ok: true; requestId: number; completion: GameInputCompletion }> {
+  const receipt = await bridge.performGameInput(input);
+  const completion = await bridge.waitForGameInput(receipt.requestId, timeoutMs);
+  if (!completion.succeeded) throw new Error(`Gua game input ${input.type} failed with error ${completion.errorCode}.`);
+  automation?.recordGameInput({
+    operation: input.type,
+    requestId: receipt.requestId,
+    arguments: compactResult({ ...input, value: "sensitive" in input && input.sensitive ? undefined : "value" in input ? input.value : undefined,
+      text: "sensitive" in input && input.sensitive ? undefined : "text" in input ? input.text : undefined }),
+    sensitive: "sensitive" in input && input.sensitive === true,
+    secretKey: "secretKey" in input ? input.secretKey : undefined,
+  });
+  return { ok: true, requestId: receipt.requestId, completion };
+}
+
+interface GameInputCompletion { completed: true; requestId: number; succeeded: boolean; errorCode: number }
+
 interface SemanticActionInput {
-  action: RecordedAction;
+  action: Exclude<RecordedAction, "game_input">;
   nodeId?: string;
   value?: string;
   checked?: boolean;
@@ -643,6 +793,8 @@ async function replayRecording(
   validateRecording(recording);
   const results: Array<{ index: number; action: RecordedAction; requestId?: number }> = [];
   let previous = 0;
+  const hasGameInput = recording.steps.some((step) => step.action === "game_input");
+  try {
   for (const [index, step] of recording.steps.entries()) {
     if (timingMode === "prefer_conditions" && step.waitCondition !== undefined) {
       await waitForCondition(bridge, step.waitCondition, timeoutMs);
@@ -650,6 +802,18 @@ async function replayRecording(
       await sleep(step.relativeMilliseconds - previous);
     }
     previous = step.relativeMilliseconds;
+    if (step.action === "game_input") {
+      const argumentsValue = { ...(step.arguments ?? {}) } as Record<string, unknown>;
+      argumentsValue.type = step.operation;
+      if (step.sensitive) {
+        const secret = readSecret(secrets, step.secretKey as string);
+        if (step.operation === "text_input") argumentsValue.text = secret;
+        else argumentsValue.value = secret;
+      }
+      const result = await performGameInput(bridge, undefined, argumentsValue as GameInputCommandInput, timeoutMs);
+      results.push({ index, action: step.action, requestId: result.requestId });
+      continue;
+    }
     const nodeId = await resolveTarget(bridge, step);
     const value = step.sensitive ? readSecret(secrets, step.secretKey as string) : step.value;
     const result = await performAndRecord(bridge, undefined, {
@@ -666,6 +830,12 @@ async function replayRecording(
       secretKey: step.secretKey,
     }, timeoutMs);
     results.push(compactResult({ index, action: step.action, requestId: result.requestId }));
+  }
+  } finally {
+    if (hasGameInput) {
+      try { await performGameInput(bridge, undefined, { type: "release_all_game_inputs" }, timeoutMs); }
+      catch { /* preserve the original replay failure after best-effort cleanup */ }
+    }
   }
   return { ok: true, steps: results };
 }
@@ -737,6 +907,7 @@ function actionCommandType(action: RecordedAction): BridgeCommandInput["type"] {
     case "select": return "select";
     case "scroll": return "scroll";
     case "press_key": return "press_key";
+    case "game_input": throw new Error("game_input uses its recorded operation directly.");
   }
 }
 
@@ -779,6 +950,22 @@ class GuaBridgeClient {
   }
 
   async getClock(): Promise<unknown> { return this.request({ type: "get_clock" }); }
+  async getGameInputActions(): Promise<unknown> { return this.request({ type: "get_game_input_actions" }); }
+  async getGameInputState(): Promise<unknown> { return this.request({ type: "get_game_input_state" }); }
+  async performGameInput(input: GameInputCommandInput): Promise<GuaActionReceipt> {
+    return this.request<GuaActionReceipt>(input as BridgeCommandInput);
+  }
+  async waitForGameInput(requestId: number, timeoutMs: number): Promise<GameInputCompletion> {
+    const started = Date.now();
+    while (Date.now() - started <= timeoutMs) {
+      const completion = await this.request<{ completed: boolean; requestId?: number; succeeded?: boolean; errorCode?: number }>({
+        type: "poll_game_input", requestId,
+      });
+      if (completion.completed) return completion as GameInputCompletion;
+      await sleep(25);
+    }
+    throw new Error(`Timed out waiting for Gua game input request ${requestId}.`);
+  }
   async controlClock(command: { type: "clock_install"; initialTimeMs?: number; stepMs?: number } |
     { type: "clock_run_for"; durationMs: number; stepMs?: number } | { type: "clock_pause" | "clock_resume" }): Promise<unknown>
   {
@@ -967,6 +1154,8 @@ type BridgeCommandInput =
   | { type: "get_screenshot" }
   | { type: "get_context_status" }
   | { type: "poll_events"; requestId: number }
+  | { type: "poll_game_input"; requestId: number }
+  | { type: "get_game_input_actions" | "get_game_input_state" }
   | { type: "get_clock" | "clock_pause" | "clock_resume" }
   | { type: "clock_install"; initialTimeMs?: number; stepMs?: number }
   | { type: "clock_run_for"; durationMs: number; stepMs?: number }
@@ -981,7 +1170,8 @@ type BridgeCommandInput =
       deltaY?: number;
       scrollUnit?: number;
       sensitive?: boolean;
-    };
+    }
+  | GameInputCommandInput;
 
 type BridgeCommand = BridgeCommandInput & { id: number };
 
@@ -1087,6 +1277,19 @@ function readBooleanArg(args: Record<string, unknown>, name: string, fallback: b
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") throw new Error(`Expected boolean argument: ${name}`);
   return value;
+}
+
+function readEnumArg<const T extends string>(
+  args: Record<string, unknown>,
+  name: string,
+  values: readonly T[],
+  fallback?: T,
+): T {
+  const value = args[name];
+  if (value === undefined && fallback !== undefined) return fallback;
+  if (typeof value !== "string" || !values.includes(value as T))
+    throw new Error(`${name} must be one of: ${values.join(", ")}.`);
+  return value as T;
 }
 
 function readRequiredBooleanArg(args: Record<string, unknown>, name: string): boolean {
