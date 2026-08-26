@@ -16,12 +16,6 @@ public sealed partial class GuaRuntime
         if (Native.gua_runtime_set_observation_profile(_handle, (int)profile) == 0)
             throw new InvalidOperationException("The observation profile cannot change while the Inspector bridge is running.");
     }
-    public void SetPlayerScreenshotEnabled(bool enabled)
-    {
-        ThrowIfDisposed();
-        if (Native.gua_runtime_set_player_screenshot_enabled(_handle, enabled ? 1 : 0) == 0)
-            throw new InvalidOperationException("Player screenshot policy cannot change while the Inspector bridge is running.");
-    }
     public void BeginWorldFrame(string scene) { ThrowIfDisposed(); if (Native.gua_runtime_begin_world_frame(_handle, scene) == 0) throw new InvalidOperationException("Failed to begin the Gua world frame."); }
     public void EndWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_end_world_frame(_handle) == 0) throw new InvalidOperationException("The Gua world frame was rejected."); }
     public void AbortWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_abort_world_frame(_handle) == 0) throw new InvalidOperationException("There is no active Gua world frame to abort."); }
@@ -31,7 +25,6 @@ public sealed partial class GuaRuntime
         ThrowIfDisposed();
         if (source is null) throw new ArgumentNullException(nameof(source));
         var allocations = new List<nint>();
-        using var policy = new RuntimeAgentPolicy(source.AgentPolicy, source.AgentExposure);
         nint Text(string? value) { if (value is null) return 0; var p = (nint)Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
         try {
             var tagPointers = (source.Tags ?? []).Select(Text).ToArray();
@@ -55,8 +48,7 @@ public sealed partial class GuaRuntime
             var native = new Native.WorldObject { StructSize = (uint)Marshal.SizeOf<Native.WorldObject>(), Id = Text(source.Id), ParentId = Text(source.ParentId), Kind = Text(source.Kind), Label = Text(source.Label), Description = Text(source.Description), Space = (int)source.Space,
                 X = source.Position.X, Y = source.Position.Y, Z = source.Position.Z, VisibleToPlayer = source.VisibleToPlayer ? 1 : 0, Active = source.Active ? 1 : 0, AgentExposure = (int)source.AgentExposure,
                 DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tags, TagCount = (uint)tagPointers.Length, StateValues = states, StateValueCount = (uint)values.Count };
-            var secured = new Native.WorldObjectV2 { StructSize = (uint)Marshal.SizeOf<Native.WorldObjectV2>(), Base = native, AgentPolicy = policy.Value };
-            if (Native.gua_runtime_register_world_object_v2(_handle, in secured) == 0) throw new InvalidOperationException($"Failed to register Gua world object '{source.Id}'.");
+            if (Native.gua_runtime_register_world_object_v1(_handle, in native) == 0) throw new InvalidOperationException($"Failed to register Gua world object '{source.Id}'.");
         } finally { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
     }
 

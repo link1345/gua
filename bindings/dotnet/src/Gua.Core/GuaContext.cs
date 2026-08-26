@@ -84,7 +84,6 @@ public sealed partial class GuaContext : IGuaContext, IGuaClockContext, IDisposa
 
         var strings = new[] { descriptor.Id, descriptor.ParentId, descriptor.Role, descriptor.Label, descriptor.Text, descriptor.Value };
         var pointers = strings.Select<string?, nint>(value => value is null ? default : System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(value)).ToArray();
-        using var policy = new NativeAgentPolicy(descriptor.AgentPolicy);
         try
         {
             var native = new Native.GuaNativeNodeDescriptorV2
@@ -115,11 +114,7 @@ public sealed partial class GuaContext : IGuaContext, IGuaClockContext, IDisposa
                 RangeValue = descriptor.RangeValue ?? 0, RangeMin = descriptor.RangeMin ?? 0, RangeMax = descriptor.RangeMax ?? 0,
                 SelectedIndex = descriptor.SelectedIndex ?? -1,
             };
-            var secured = new Native.GuaNativeNodeDescriptorV4
-            {
-                StructSize = (uint)Marshal.SizeOf<Native.GuaNativeNodeDescriptorV4>(), Base = detailed, AgentPolicy = policy.Value,
-            };
-            if (Native.gua_register_node_v4(_handle, in secured) == 0)
+            if (Native.gua_register_node_v3(_handle, in detailed) == 0)
             {
                 throw new InvalidOperationException($"Failed to register Gua v2 node: {descriptor.Id}");
             }
@@ -139,32 +134,10 @@ public sealed partial class GuaContext : IGuaContext, IGuaClockContext, IDisposa
         return ReadCopiedJson(JsonSource.UiTree, _handle);
     }
 
-    public string GetUiTreeJson(GuaObservationProfile profile) => ReadProfileJson(profile, diagnostics: false);
-
     public string GetDiagnosticsJson()
     {
         ThrowIfDisposed();
         return ReadCopiedJson(JsonSource.Diagnostics, _handle);
-    }
-
-    public string GetDiagnosticsJson(GuaObservationProfile profile) => ReadProfileJson(profile, diagnostics: true);
-
-    private unsafe string ReadProfileJson(GuaObservationProfile profile, bool diagnostics)
-    {
-        ThrowIfDisposed();
-        int Copy(byte* buffer, int size) => diagnostics
-            ? Native.gua_copy_diagnostics_json_for_profile(_handle, (int)profile, buffer, size)
-            : Native.gua_copy_ui_tree_json_for_profile(_handle, (int)profile, buffer, size);
-        var required = Copy(null, 0);
-        if (required <= 0) throw new ArgumentOutOfRangeException(nameof(profile));
-        while (true) {
-            var bytes = new byte[required];
-            fixed (byte* pointer = bytes) {
-                var actual = Copy(pointer, bytes.Length);
-                if (actual <= bytes.Length) return System.Text.Encoding.UTF8.GetString(bytes, 0, actual - 1);
-                required = actual;
-            }
-        }
     }
 
     public GuaVersion GetVersion()

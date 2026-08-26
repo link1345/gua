@@ -9,9 +9,9 @@ export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; fr
 export interface GuaWorldSelector { id?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: boolean; visibleToPlayer?: boolean; active?: boolean; state?: { key: string; value: WorldPrimitive } }
 export interface GuaWorldQueryResult { valid: boolean; matches: GuaWorldObject[]; error?: string }
 export interface GuaWorldProvider {
-  getWorldObjectTree(): Promise<GuaWorldObjectTree>;
-  findWorldObjects(selector: GuaWorldSelector): Promise<GuaWorldQueryResult>;
-  waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number): Promise<GuaWorldObject>;
+  getWorldObjectTree(profile?: "player"): Promise<GuaWorldObjectTree>;
+  findWorldObjects(selector: GuaWorldSelector, profile?: "player"): Promise<GuaWorldQueryResult>;
+  waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number, profile?: "player"): Promise<GuaWorldObject>;
 }
 const string = (description: string) => ({ type: "string", minLength: 1, description });
 const selectorProperties = {
@@ -74,17 +74,17 @@ export function registerWorldWebMcpTools(modelContext: WebMcpModelContext | unde
   for (const tool of worldObservationTools) modelContext.registerTool({ ...tool, execute: async (args) => {
     if (tool.name === "get_world_object_tree") {
       if (Object.keys(args).length !== 0) throw new TypeError(`Unknown get_world_object_tree argument: ${Object.keys(args)[0]}.`);
-      return provider.getWorldObjectTree();
+      return provider.getWorldObjectTree("player");
     }
     if (tool.name === "find_world_objects" && Object.prototype.hasOwnProperty.call(args, "timeoutMs"))
       throw new TypeError("Unknown find_world_objects argument: timeoutMs.");
     const selector = selectorFromArguments(args);
-    if (tool.name === "find_world_objects") return provider.findWorldObjects(selector);
+    if (tool.name === "find_world_objects") return provider.findWorldObjects(selector, "player");
     if (Object.prototype.hasOwnProperty.call(args, "timeoutMs") &&
         (typeof args.timeoutMs !== "number" || !Number.isInteger(args.timeoutMs) || args.timeoutMs < 1 || args.timeoutMs > 300000))
       throw new TypeError("timeoutMs must be an integer from 1 through 300000.");
     const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : 5000;
-    return provider.waitForWorldObject(selector, timeoutMs);
+    return provider.waitForWorldObject(selector, timeoutMs, "player");
   }});
   return true;
 }

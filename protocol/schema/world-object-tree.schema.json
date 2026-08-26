@@ -16,16 +16,16 @@
   "$defs": {
     "stateValue": { "type": ["string", "number", "boolean", "null"] },
     "position2d": {
-      "type": "object", "required": [], "additionalProperties": false,
+      "type": "object", "required": ["x", "y"], "additionalProperties": false,
       "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
     },
     "position3d": {
-      "type": "object", "required": [], "additionalProperties": false,
+      "type": "object", "required": ["x", "y", "z"], "additionalProperties": false,
       "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
     },
     "object": {
       "type": "object",
-      "required": ["id", "kind", "space", "position", "visibleToPlayer", "active", "agentExposure", "tags", "state"],
+      "required": ["id", "kind", "label", "space", "position", "visibleToPlayer", "active", "agentExposure", "tags", "state"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },

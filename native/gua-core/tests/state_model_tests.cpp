@@ -56,78 +56,17 @@ int main()
     assert(std::string(version.data()).find("\"godotPluginVersion\":null") != std::string::npos);
     assert(std::string(version.data()).find("\"version_v1\"") != std::string::npos);
     assert(std::string(version.data()).find("\"world_object_tree_v1\"") != std::string::npos);
-    assert(std::string(version.data()).find("\"agent_projection_v1\"") != std::string::npos);
-
-    gua_context_t* projected_ui = gua_create_context();
-    const gua_agent_field_rule_v1_t ui_rules[] {
-        { sizeof(gua_agent_field_rule_v1_t), "label", GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "bounds.x", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 10 },
-        { sizeof(gua_agent_field_rule_v1_t), "text", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "bounds.y", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, 42, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "state.checked", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "state.selected", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-    };
-    const gua_agent_policy_v1_t ui_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 1,
-        1ULL << GUA_ACTION_FOCUS, ui_rules, 6 };
-    const gua_node_descriptor_v2_t projected_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_TEXT | GUA_NODE_KNOWN_CHECKED | GUA_NODE_KNOWN_SELECTED,
-        "public", nullptr, "button", "Secret label", "Secret text", nullptr, { 17, 2, 20, 10 }, 1, 1, 0, 0, 0, 1, 1 };
-    const gua_node_descriptor_v3_t projected_detail { sizeof(gua_node_descriptor_v3_t), projected_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
-    const gua_node_descriptor_v4_t projected_node { sizeof(gua_node_descriptor_v4_t), projected_detail, ui_policy };
-    auto private_base = projected_base; private_base.id = "private"; private_base.label = "Private label";
-    const gua_node_descriptor_v3_t private_detail { sizeof(gua_node_descriptor_v3_t), private_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
-    const gua_agent_policy_v1_t private_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE, 0, 0, nullptr, 0 };
-    const gua_node_descriptor_v4_t private_node { sizeof(gua_node_descriptor_v4_t), private_detail, private_policy };
-    gua_begin_frame(projected_ui, "policy");
-    assert(gua_register_node_v4(projected_ui, &projected_node) == 1);
-    assert(gua_register_node_v4(projected_ui, &private_node) == 1);
-    gua_end_frame(projected_ui);
-    int ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
-    std::vector<char> ui_json(static_cast<std::size_t>(ui_size));
-    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
-    assert(std::string(ui_json.data()).find("[redacted]") != std::string::npos);
-    assert(std::string(ui_json.data()).find("\"x\":10.000") != std::string::npos);
-    assert(std::string(ui_json.data()).find("\"y\":42.000") != std::string::npos);
-    assert(std::string(ui_json.data()).find("Secret text") == std::string::npos);
-    assert(std::string(ui_json.data()).find("\"checked\":false") != std::string::npos);
-    assert(std::string(ui_json.data()).find("\"selected\"") == std::string::npos);
-    assert(std::string(ui_json.data()).find("Private label") == std::string::npos);
-    const gua_action_request_descriptor_t projected_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "public" };
-    assert(gua_enqueue_action_for_profile(projected_ui, &projected_click, GUA_OBSERVATION_PROFILE_PLAYER, nullptr) == GUA_ACTION_ERROR_UNSUPPORTED);
-    auto focus_request = projected_click; focus_request.action = GUA_ACTION_FOCUS;
-    uint64_t focus_id = 0;
-    assert(gua_enqueue_action_for_profile(projected_ui, &focus_request, GUA_OBSERVATION_PROFILE_PLAYER, &focus_id) == GUA_ACTION_ACCEPTED);
-    gua_begin_frame(projected_ui, "policy");
-    assert(gua_register_node_v4(projected_ui, &private_node) == 1);
-    gua_end_frame(projected_ui);
-    gua_action_request_t consumed_focus { sizeof(gua_action_request_t) };
-    assert(gua_consume_action_request(projected_ui, GUA_ACTION_FOCUS, "public", &consumed_focus) == 0);
-    gua_event_v2_t hidden_player_event { sizeof(gua_event_v2_t) };
-    assert(gua_poll_event_v2_for_request_and_profile(projected_ui, focus_id, GUA_OBSERVATION_PROFILE_PLAYER, &hidden_player_event) == 0);
-    gua_event_v2_t denied_event { sizeof(gua_event_v2_t) };
-    assert(gua_poll_event_v2_for_request(projected_ui, focus_id, &denied_event) == 1);
-    assert(denied_event.error_code == GUA_ACTION_ERROR_NODE_NOT_FOUND);
-    gua_destroy_context(projected_ui);
 
     gua_context_t* world = gua_create_context();
     const gua_world_state_value_v1_t door_state[] {
         { sizeof(gua_world_state_value_v1_t), "open", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0 },
         { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 },
-        { sizeof(gua_world_state_value_v1_t), "hp", GUA_WORLD_VALUE_NUMBER, nullptr, 37, 0 },
     };
     const char* door_tags[] { "east-corridor", "mission-critical" };
     assert(gua_begin_world_frame(world, "corridor") == 1);
-    const gua_world_object_descriptor_v1_t door { sizeof(gua_world_object_descriptor_v1_t), "door-a", nullptr, "door", "Door A", "Secret description",
-        GUA_WORLD_SPACE_2D, 640, 180, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, "door-status", door_tags, 2, door_state, 3 };
-    const gua_agent_field_rule_v1_t world_rules[] {
-        { sizeof(gua_agent_field_rule_v1_t), "position.x", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 100 },
-        { sizeof(gua_agent_field_rule_v1_t), "state.hp", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "injured", 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "description", GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "tags", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-        { sizeof(gua_agent_field_rule_v1_t), "state.locked", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
-    };
-    const gua_agent_policy_v1_t world_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0, 0, world_rules, 5 };
-    const gua_world_object_descriptor_v2_t projected_door { sizeof(gua_world_object_descriptor_v2_t), door, world_policy };
-    assert(gua_register_world_object_v2(world, &projected_door) == 1);
+    const gua_world_object_descriptor_v1_t door { sizeof(gua_world_object_descriptor_v1_t), "door-a", nullptr, "door", "Door A", nullptr,
+        GUA_WORLD_SPACE_2D, 640, 180, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, "door-status", door_tags, 2, door_state, 2 };
+    assert(gua_register_world_object_v1(world, &door) == 1);
     const gua_world_object_descriptor_v1_t private_object { sizeof(gua_world_object_descriptor_v1_t), "secret", "door-a", "item", "Secret", nullptr,
         GUA_WORLD_SPACE_3D, 1, 2, 3, 1, 1, GUA_AGENT_EXPOSURE_PRIVATE, nullptr, nullptr, nullptr, 0, nullptr, 0 };
     assert(gua_register_world_object_v1(world, &private_object) == 1);
@@ -142,12 +81,6 @@ int main()
     gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), world_size);
     assert(std::string(world_json.data()).find("\"door-a\"") != std::string::npos);
     assert(std::string(world_json.data()).find("\"secret\"") == std::string::npos);
-    assert(std::string(world_json.data()).find("\"x\":600") != std::string::npos);
-    assert(std::string(world_json.data()).find("\"hp\":\"injured\"") != std::string::npos);
-    assert(std::string(world_json.data()).find("Secret description") == std::string::npos);
-    assert(std::string(world_json.data()).find("[redacted]") != std::string::npos);
-    assert(std::string(world_json.data()).find("\"tags\":[]") != std::string::npos);
-    assert(std::string(world_json.data()).find("\"locked\":null") != std::string::npos);
     const gua_world_selector_v1_t private_query { sizeof(gua_world_selector_v1_t), "secret", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, nullptr };
     char query[512] {};
     gua_query_world_objects_json(world, &private_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
@@ -155,10 +88,6 @@ int main()
     const gua_world_state_value_v1_t locked { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 };
     const gua_world_selector_v1_t locked_query { sizeof(gua_world_selector_v1_t), nullptr, 0, "door", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, &locked };
     gua_query_world_objects_json(world, &locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
-    assert(std::string(query).find("\"matches\":[]") != std::string::npos);
-    const gua_world_state_value_v1_t projected_locked { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_NULL };
-    auto projected_locked_query = locked_query; projected_locked_query.state = &projected_locked;
-    gua_query_world_objects_json(world, &projected_locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
     assert(std::string(query).find("\"door-a\"") != std::string::npos);
 
     // Player projection must be independent of registration order while still requiring every ancestor to be public.

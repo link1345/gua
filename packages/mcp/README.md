@@ -39,12 +39,6 @@ tool arguments cannot elevate it to debug. `find_world_objects` accepts ID,
 kind, label, tag, parent scope, visibility, active, and primitive state criteria.
 There is deliberately no world action tool.
 
-The same host profile also projects the Semantic UI Tree and authorizes UI
-actions before the bridge responds. In player mode, private or effectively
-hidden nodes are indistinguishable from missing nodes, field rules are applied
-before queries and waits, debug logs are omitted, and screenshots are disabled.
-Neither `gui-mcp` nor WebMCP tool schemas accept an observation-profile override.
-
 ## Recording and replay
 
 `start_recording` records subsequent semantic action tools. `stop_recording`

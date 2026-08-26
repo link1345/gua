@@ -28,8 +28,3 @@ door.SetState("locked", true);
 The adapter publishes global transform positions each frame and links the
 nearest opted-in ancestor. It does not expose ordinary GameObjects or UI objects
 automatically. Do not place secrets in labels, tags, or state.
-
-Add `GuaAgentPolicyComponent` to a uGUI or `GuaWorldObject` GameObject to mark it
-private, transform Player-visible fields, or override allowed UI actions. For UI
-Toolkit and custom adapters, call `GuaUnityAdapterRegistry.SetAgentPolicy` with
-the reflected target object. These policies affect Player profile only.

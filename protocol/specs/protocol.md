@@ -202,16 +202,6 @@ The MCP and WebMCP tools expose the same criterion as the paired `stateKey` and 
 
 World v1 provides no actions, relationship/distance queries, pathfinding, teleportation, or arbitrary host method invocation. Capability `world_object_tree_v1` is advertised only after an adapter installs its world-frame publisher.
 
-## Agent projection policy v1
-
-Capability `agent_projection_v1` applies the host-owned `debug` or `player` observation profile before data reaches a transport. Existing C ABI entry points remain debug-compatible; runtimes use the additive profile-aware tree, query, diagnostics, and action entry points. A runtime may narrow from debug to player before starting its bridge and cannot be elevated again by a command or tool argument.
-
-Debug returns the complete registered UI and World snapshots. Player UI `auto` nodes require effective visibility through every ancestor. Player World `auto` objects require host-defined semantic visibility and active state through every ancestor; render visibility is not a substitute. A `private` ancestor removes its complete subtree, and projection never reparents descendants.
-
-`agent-policy.schema.json` defines field rules `keep`, `omit`, `redact`, typed replacement, and numeric `quantize`; UI policies validate against `$defs/uiPolicy` and World policies against `$defs/worldPolicy`. Quantization is `floor(value / quantum) * quantum`. Identity and hierarchy fields (`id`, `parentId`, `role`, and `kind`) cannot be transformed. UI action allowlists are intersected with role support and current enabled state. World actions remain outside World v1, but future world and raw-input capabilities must use the same host authorization boundary.
-
-Snapshot, query, wait, revision/count metadata, diagnostics, and action authorization use the projected view. Player actions are revalidated both when queued and when consumed; a private and an unknown ID produce the same not-found result. Player diagnostics omit debug environment metadata and unprojected history. Logs are empty. Screenshots are denied by default because rendered pixels cannot be projected semantically; a host may explicitly allow them only before starting the bridge, and transports cannot change that setting.
-
 ## Inspector Snapshots
 
 The Inspector consumes four protocol payloads:

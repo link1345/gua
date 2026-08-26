@@ -98,7 +98,6 @@ public sealed partial class GuaRuntime : IDisposable
 
         var values = new[] { descriptor.Id, descriptor.ParentId, descriptor.Role, descriptor.Label, descriptor.Text, descriptor.Value };
         var pointers = values.Select<string?, nint>(value => value is null ? 0 : Marshal.StringToCoTaskMemUTF8(value)).ToArray();
-        using var policy = new RuntimeAgentPolicy(descriptor.AgentPolicy);
         try
         {
             var node = new Native.NodeV3
@@ -117,8 +116,7 @@ public sealed partial class GuaRuntime : IDisposable
                 RangeValue = descriptor.RangeValue ?? 0, RangeMin = descriptor.RangeMin ?? 0, RangeMax = descriptor.RangeMax ?? 0,
                 SelectedIndex = descriptor.SelectedIndex ?? -1,
             };
-            var secured = new Native.NodeV4 { StructSize = (uint)Marshal.SizeOf<Native.NodeV4>(), Base = node, AgentPolicy = policy.Value };
-            if (Native.gua_runtime_register_node_v4(_handle, in secured) == 0)
+            if (Native.gua_runtime_register_node_v3(_handle, in node) == 0)
                 throw new InvalidOperationException($"Failed to register Gua runtime node '{descriptor.Id}'.");
         }
         finally { foreach (var pointer in pointers.Where(pointer => pointer != 0)) Marshal.FreeCoTaskMem(pointer); }

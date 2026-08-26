@@ -7,6 +7,7 @@ using System.Text.Json;
 namespace Gua.Core;
 
 public enum GuaWorldSpace { World2D = 1, World3D = 2 }
+public enum GuaAgentExposure { Auto = 0, Private = 1 }
 public enum GuaObservationProfile { Debug = 0, Player = 1 }
 
 public sealed record GuaWorldPosition(double X, double Y, double Z = 0);
@@ -14,8 +15,7 @@ public sealed record GuaWorldObjectDescriptor(
     string Id, string Kind, string Label, GuaWorldSpace Space, GuaWorldPosition Position,
     bool VisibleToPlayer = false, bool Active = true, string? ParentId = null, string? Description = null,
     GuaAgentExposure AgentExposure = GuaAgentExposure.Auto, IReadOnlyList<string>? Tags = null,
-    IReadOnlyDictionary<string, object?>? State = null, string? DomainId = null, string? RelatedUiNodeId = null,
-    GuaAgentPolicy? AgentPolicy = null);
+    IReadOnlyDictionary<string, object?>? State = null, string? DomainId = null, string? RelatedUiNodeId = null);
 
 public sealed record GuaWorldStateCriterion(string Key, object? Value);
 public sealed record GuaWorldSelector(
@@ -56,8 +56,8 @@ public sealed partial class GuaContext : IGuaWorldContext
         if (descriptor is null) throw new ArgumentNullException(nameof(descriptor));
         ThrowIfDisposed();
         using var native = new NativeWorldDescriptor(descriptor);
-        var value = native.ValueV2;
-        if (Native.gua_register_world_object_v2(_handle, in value) == 0)
+        var value = native.Value;
+        if (Native.gua_register_world_object_v1(_handle, in value) == 0)
             throw new InvalidOperationException($"Failed to register Gua world object '{descriptor.Id}'.");
     }
 
@@ -129,13 +129,10 @@ public sealed partial class GuaContext : IGuaWorldContext
 internal sealed class NativeWorldDescriptor : IDisposable
 {
     private readonly List<nint> allocations = [];
-    private readonly NativeAgentPolicy policy;
     public Native.GuaNativeWorldObjectDescriptorV1 Value { get; }
-    public Native.GuaNativeWorldObjectDescriptorV2 ValueV2 { get; }
 
     public NativeWorldDescriptor(GuaWorldObjectDescriptor source)
     {
-        policy = new NativeAgentPolicy(source.AgentPolicy, source.AgentExposure);
         nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
         try {
             var tags = source.Tags ?? [];
@@ -155,9 +152,6 @@ internal sealed class NativeWorldDescriptor : IDisposable
                 VisibleToPlayer = source.VisibleToPlayer ? 1 : 0, Active = source.Active ? 1 : 0, AgentExposure = (int)source.AgentExposure,
                 DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tagsMemory, TagCount = (uint)tagPointers.Length,
                 StateValues = statesMemory, StateValueCount = (uint)states.Length
-            };
-            ValueV2 = new Native.GuaNativeWorldObjectDescriptorV2 {
-                StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldObjectDescriptorV2>(), Base = Value, AgentPolicy = policy.Value
             };
         } catch { Dispose(); throw; }
     }
@@ -187,7 +181,7 @@ internal sealed class NativeWorldDescriptor : IDisposable
     }
     private static Native.GuaNativeWorldStateValueV1 New(int type, nint text = 0, double number = 0, bool boolean = false) =>
         new() { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>(), Type = type, StringValue = text, NumberValue = number, BoolValue = boolean ? 1 : 0 };
-    public void Dispose() { policy.Dispose(); foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
+    public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
 }
 
 internal sealed class NativeWorldSelector : IDisposable

@@ -24,7 +24,7 @@
   "$defs": {
     "bounds": {
       "type": "object",
-      "required": [],
+      "required": ["x", "y", "w", "h"],
       "additionalProperties": false,
       "properties": {
         "x": { "type": "number" },
