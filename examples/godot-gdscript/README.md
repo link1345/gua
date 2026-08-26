@@ -55,6 +55,22 @@ const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 var ui := GuaAutoAdapterScript.new()
 ```
 
+## Virtual clock integration
+
+Only game logic that uses the adapter's clock can be paused or advanced by Gua.
+Replace the native `Timer` or per-frame time source in each target subsystem
+with `ui.clock_schedule(...)` or the `ui.clock_tick` signal:
+
+```gdscript
+# Game-side integration. This callback now follows GuaClock time.
+ui.clock_schedule(2000.0, _show_message)
+ui.clock_tick.connect(_update_countdown)
+```
+
+Calling `clock_install` from a test, MCP, or Inspector activates the shared
+virtual clock. It does not automatically attach GuaClock to existing `Timer`,
+`SceneTreeTimer`, animation, physics, or audio logic.
+
 The adapter resolves the native `GuaContext` class through `ClassDB` when it is
 first used. If the GDExtension is not loaded, or if the vendored DLL is stale and
 does not expose a required method such as `consume_click_request`, the adapter

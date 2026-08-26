@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -42,8 +43,16 @@ struct Command {
     unsigned long long expected_session_epoch = 0;
     unsigned long long after_frame_sequence = 0;
     unsigned int timeout_ms = 10000;
-    unsigned int reset_flags = 15;
+    unsigned int reset_flags = 79;
+    unsigned int reset_flags_version = 1;
+    bool reset_flags_version_valid = true;
     bool strict = false;
+    double initial_time_ms = 0;
+    bool initial_time_ms_valid = true;
+    double duration_ms = 0;
+    bool duration_ms_valid = false;
+    double step_ms = 0;
+    bool step_ms_present = false;
 };
 
 struct ClientConnection {
@@ -428,21 +437,64 @@ void send_text_frame(SOCKET socket, std::string_view text)
     send_all(socket, frame.data(), frame.size());
 }
 
+std::optional<std::size_t> json_top_level_field_start(std::string_view json, std::string_view field)
+{
+    const std::size_t root = json.find_first_not_of(" \t\r\n");
+    if (root == std::string_view::npos || json[root] != '{') return std::nullopt;
+
+    int object_depth = 0;
+    int array_depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (std::size_t index = root; index < json.size(); ++index) {
+        const char ch = json[index];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') in_string = false;
+            continue;
+        }
+        if (ch == '"') {
+            std::size_t previous = index;
+            while (previous > root && (json[previous - 1U] == ' ' || json[previous - 1U] == '\t' ||
+                json[previous - 1U] == '\r' || json[previous - 1U] == '\n')) --previous;
+            const bool top_level_key = object_depth == 1 && array_depth == 0 && previous > root &&
+                (json[previous - 1U] == '{' || json[previous - 1U] == ',');
+            if (!top_level_key) {
+                in_string = true;
+                continue;
+            }
+
+            std::size_t end = index + 1U;
+            bool key_escaped = false;
+            for (; end < json.size(); ++end) {
+                if (key_escaped) key_escaped = false;
+                else if (json[end] == '\\') key_escaped = true;
+                else if (json[end] == '"') break;
+            }
+            if (end == json.size()) return std::nullopt;
+            std::size_t colon = json.find_first_not_of(" \t\r\n", end + 1U);
+            if (colon == std::string_view::npos || json[colon] != ':') return std::nullopt;
+            const bool matches = json.substr(index + 1U, end - index - 1U) == field;
+            std::size_t value = json.find_first_not_of(" \t\r\n", colon + 1U);
+            if (matches) return value == std::string_view::npos ? std::nullopt : std::optional<std::size_t>(value);
+            index = end;
+            continue;
+        }
+        if (ch == '{') ++object_depth;
+        else if (ch == '}') {
+            if (--object_depth == 0) break;
+        } else if (ch == '[') ++array_depth;
+        else if (ch == ']') --array_depth;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> json_string_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) {
-        return std::nullopt;
-    }
-    std::size_t quote = colon + 1U;
-    while (quote < json.size() && json[quote] == ' ') {
-        ++quote;
-    }
+    const auto start = json_top_level_field_start(json, field);
+    if (!start.has_value()) return std::nullopt;
+    const std::size_t quote = *start;
     if (quote >= json.size() || json[quote] != '"') {
         return std::nullopt;
     }
@@ -525,20 +577,9 @@ std::optional<std::string> json_string_field(std::string_view json, std::string_
 
 std::optional<int> json_int_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) {
-        return std::nullopt;
-    }
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) {
-        return std::nullopt;
-    }
-
-    std::size_t start = colon + 1U;
-    while (start < json.size() && json[start] == ' ') {
-        ++start;
-    }
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
     std::size_t end = start;
     while (end < json.size() && json[end] >= '0' && json[end] <= '9') {
         ++end;
@@ -546,48 +587,87 @@ std::optional<int> json_int_field(std::string_view json, std::string_view field)
     if (end == start) {
         return std::nullopt;
     }
-    return std::stoi(std::string(json.substr(start, end - start)));
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
+    try { return std::stoi(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<unsigned long long> json_uint64_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return std::nullopt;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return std::nullopt;
-    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
-    if (start == std::string_view::npos) return std::nullopt;
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
     std::size_t end = start;
     while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
     if (end == start) return std::nullopt;
-    return std::stoull(std::string(json.substr(start, end - start)));
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
+    try { return std::stoull(std::string(json.substr(start, end - start))); }
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 std::optional<double> json_number_field(std::string_view json, std::string_view field)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return std::nullopt;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return std::nullopt;
-    std::size_t start = json.find_first_not_of(" \t", colon + 1U);
-    if (start == std::string_view::npos) return std::nullopt;
+    const auto value_start = json_top_level_field_start(json, field);
+    if (!value_start.has_value()) return std::nullopt;
+    const std::size_t start = *value_start;
+
     std::size_t end = start;
-    while (end < json.size() && (std::isdigit(static_cast<unsigned char>(json[end])) || json[end] == '-' || json[end] == '+' || json[end] == '.' || json[end] == 'e' || json[end] == 'E')) ++end;
-    if (end == start) return std::nullopt;
-    return std::stod(std::string(json.substr(start, end - start)));
+    if (json[end] == '-') {
+        if (++end == json.size()) return std::nullopt;
+    }
+    if (json[end] == '0') {
+        ++end;
+        if (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) return std::nullopt;
+    } else if (json[end] >= '1' && json[end] <= '9') {
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+    } else {
+        return std::nullopt;
+    }
+    if (end < json.size() && json[end] == '.') {
+        ++end;
+        const std::size_t fraction_start = end;
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+        if (end == fraction_start) return std::nullopt;
+    }
+    if (end < json.size() && (json[end] == 'e' || json[end] == 'E')) {
+        ++end;
+        if (end < json.size() && (json[end] == '+' || json[end] == '-')) ++end;
+        const std::size_t exponent_start = end;
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end]))) ++end;
+        if (end == exponent_start) return std::nullopt;
+    }
+    std::size_t delimiter = end;
+    while (delimiter < json.size() && (json[delimiter] == ' ' || json[delimiter] == '\t' ||
+        json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
+    if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
+        return std::nullopt;
+    try {
+        std::size_t parsed = 0;
+        const std::string token(json.substr(start, end - start));
+        const double value = std::stod(token, &parsed);
+        return parsed == token.size() && std::isfinite(value) ? std::optional<double>(value) : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+bool json_has_field(std::string_view json, std::string_view field)
+{
+    return json_top_level_field_start(json, field).has_value();
 }
 
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
 {
-    const std::string key = "\"" + std::string(field) + "\"";
-    const std::size_t key_position = json.find(key);
-    if (key_position == std::string_view::npos) return fallback;
-    const std::size_t colon = json.find(':', key_position + key.size());
-    if (colon == std::string_view::npos) return fallback;
-    const std::size_t start = json.find_first_not_of(" \t", colon + 1U);
-    return start != std::string_view::npos && json.substr(start, 4) == "true";
+    const auto start = json_top_level_field_start(json, field);
+    return start.has_value() ? json.substr(*start, 4) == "true" : fallback;
 }
 
 Command parse_command(std::string_view json)
@@ -620,8 +700,21 @@ Command parse_command(std::string_view json)
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
     command.after_frame_sequence = json_uint64_field(json, "afterFrameSequence").value_or(0);
     command.timeout_ms = static_cast<unsigned int>(std::clamp(json_int_field(json, "timeoutMs").value_or(10000), 1, 300000));
-    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(15));
+    const bool reset_flags_present = json_has_field(json, "flags");
+    command.reset_flags = static_cast<unsigned int>(json_int_field(json, "flags").value_or(79));
+    const auto reset_flags_version = json_int_field(json, "flagsVersion");
+    command.reset_flags_version = static_cast<unsigned int>(reset_flags_version.value_or(reset_flags_present ? 0 : 1));
+    command.reset_flags_version_valid = !json_has_field(json, "flagsVersion") ||
+        (reset_flags_version.has_value() && *reset_flags_version == 1);
     command.strict = json_bool_field(json, "strict");
+    const auto initial_time_ms = json_number_field(json, "initialTimeMs");
+    command.initial_time_ms = initial_time_ms.value_or(0);
+    command.initial_time_ms_valid = !json_has_field(json, "initialTimeMs") || initial_time_ms.has_value();
+    const auto duration_ms = json_number_field(json, "durationMs");
+    command.duration_ms = duration_ms.value_or(0);
+    command.duration_ms_valid = duration_ms.has_value();
+    command.step_ms = json_number_field(json, "stepMs").value_or(0);
+    command.step_ms_present = json_has_field(json, "stepMs");
     return command;
 }
 
@@ -935,6 +1028,24 @@ private:
                     ? ok_response(command.id, handlers_.get_version_json())
                     : error_response(command.id, "get_version is not supported by this bridge");
             }
+            if (command.type == "get_clock") {
+                return handlers_.clock_supported && handlers_.clock_supported() && handlers_.get_clock_json
+                    ? ok_response(command.id, handlers_.get_clock_json())
+                    : error_response(command.id, "unsupported");
+            }
+            if (command.type == "clock_install" || command.type == "clock_pause" ||
+                command.type == "clock_run_for" || command.type == "clock_resume") {
+                if (!handlers_.clock_supported || !handlers_.clock_supported() || !handlers_.control_clock)
+                    return error_response(command.id, "unsupported");
+                if (command.type == "clock_install" && !command.initial_time_ms_valid)
+                    return error_response(command.id, "invalid_duration");
+                if (command.type == "clock_run_for" && !command.duration_ms_valid)
+                    return error_response(command.id, "invalid_duration");
+                const auto result = handlers_.control_clock(command.type,
+                    command.type == "clock_install" ? command.initial_time_ms : command.duration_ms,
+                    command.step_ms, command.step_ms_present);
+                return result.ok ? ok_response(command.id, result.json) : error_response(command.id, result.error);
+            }
             if (command.type == "query_nodes") {
                 if (!handlers_.query_nodes_json) {
                     return error_response(command.id, "query_nodes is not supported by this bridge");
@@ -949,8 +1060,9 @@ private:
             if (command.type == "reset_context") {
                 if (!handlers_.reset_context_json) return error_response(command.id, "reset_context is not supported by this bridge");
                 if (command.expected_session_epoch == 0) return error_response(command.id, "reset_context requires expectedSessionEpoch");
+                if (!command.reset_flags_version_valid) return error_response(command.id, "reset_context requires flagsVersion 1 when supplied");
                 return ok_response(command.id, handlers_.reset_context_json(
-                    command.expected_session_epoch, command.reset_flags, command.strict));
+                    command.expected_session_epoch, command.reset_flags, command.reset_flags_version, command.strict));
             }
             if (command.type == "poll_events") {
                 return handlers_.poll_action_event_json

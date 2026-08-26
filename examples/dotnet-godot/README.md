@@ -36,3 +36,10 @@ the Gua adapter to the root Godot `Control`; the adapter collects standard
 labels and buttons into the semantic UI tree, publishes snapshots, observes
 button clicks, and dispatches Inspector `click_node` requests through the normal
 Godot button signal.
+
+Game logic that explicitly participates in virtual-time control can use
+`GuaGodotRuntime.Clock.Schedule(...)` or its double-precision `Tick` event. The
+sample pumps that clock from Godot's monotonic
+microsecond counter, so changing `Engine.TimeScale` does not freeze or scale the
+running Gua clock. Godot timers and other engine-native time sources remain
+outside GuaClock control.

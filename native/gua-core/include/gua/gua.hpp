@@ -120,6 +120,19 @@ public:
         return context_;
     }
 
+    void install_clock(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0)
+    { check_clock(gua_clock_install(context_, initial_time_ms, step_ms)); }
+    void pause_clock() { check_clock(gua_clock_pause(context_)); }
+    void run_clock_for(double duration_ms)
+    { run_clock_for(duration_ms, clock_status().default_step_ms); }
+    void run_clock_for(double duration_ms, double step_ms)
+    { check_clock(gua_clock_run_for(context_, duration_ms, step_ms)); }
+    void resume_clock() { check_clock(gua_clock_resume(context_)); }
+    [[nodiscard]] gua_clock_status_t clock_status() const
+    { gua_clock_status_t value { sizeof(gua_clock_status_t) }; if (!gua_clock_get_status(context_, &value)) throw std::runtime_error("Failed to inspect Gua clock"); return value; }
+    bool poll_clock_step(gua_clock_step_t& step)
+    { step = gua_clock_step_t { sizeof(gua_clock_step_t) }; return gua_clock_consume_step(context_, &step) != 0; }
+
     void begin_frame(std::string_view screen)
     {
         screen_buffer_.assign(screen);
@@ -353,6 +366,7 @@ public:
     }
 
 private:
+    static void check_clock(int result) { if (result != GUA_CLOCK_OK) throw std::runtime_error("Gua clock operation failed: " + std::to_string(result)); }
     template <typename CopyJson>
     [[nodiscard]] std::string copy_json(CopyJson copy) const
     {

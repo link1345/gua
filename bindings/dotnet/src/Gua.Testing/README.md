@@ -1,5 +1,15 @@
 # Gua.Testing
 
+## Virtual clock
+
+Contexts implementing `IGuaClockContext` can use
+`GuaClockControls.InstallClock`, `PauseClock`, `RunClockFor`, and `ResumeClock`
+with matching async methods. The clock advances explicitly connected GuaClock
+work; it is not a wall-clock sleep or an engine-global pause.
+For a local `GuaContext`, the controls use `context.Clock`; `RunClockFor`
+returns only after its queued steps, schedules, and Tick notifications are
+drained. Remote contexts retain their adapter-correlated completion behavior.
+
 `Gua.Testing` adds locator, assertion, wait, and test-host helpers on top of
 `Gua.Core`.
 
@@ -94,7 +104,10 @@ For high-level isolation, construct `GuaTestSession` with lifecycle options.
 `GuaTestSessionOptions.Strict` enables strict startup and teardown reset.
 Policies can also be selected independently with `GuaResetPolicy.Disabled`,
 `NonStrict`, or `Strict`; their default targets are nodes, requests, events,
-and retained history. Logs and screenshots remain preserved unless selected.
+retained history, and clock state. Logs and screenshots remain preserved unless
+selected. The published `GuaResetTargets.Default` (15) and `All` (63) values are
+retained for binary compatibility; new default behavior uses `SessionDefault`,
+and `AllWithClock` selects every target.
 
 ```csharp
 using var session = new GuaTestSession(context, new GuaTestSessionOptions

@@ -69,6 +69,13 @@ internal static partial class Native
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int gua_copy_version_json(byte* outJson, int outJsonSize);
 
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_install(nint context, double initialTimeMs, double stepMs);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_pause(nint context);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_run_for(nint context, double durationMs, double stepMs);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_resume(nint context);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_get_status(nint context, ref GuaNativeClockStatus status);
+    [DllImport("gua", CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_clock_consume_step(nint context, ref GuaNativeClockStep step);
+
     [DllImport("gua", CallingConvention = CallingConvention.Cdecl)]
     internal static extern int gua_get_node_state(nint context, [MarshalAs(UnmanagedType.LPUTF8Str)] string nodeId, out GuaNodeState state);
 

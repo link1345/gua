@@ -1,5 +1,9 @@
 # gui-mcp
 
+Virtual-time tools are `get_clock`, `clock_install`, `clock_pause`,
+`clock_run_for`, and `clock_resume`. They control only work explicitly connected
+to GuaClock, not engine-global time.
+
 `gui-mcp` is the MCP server for the Gua runtime UI automation protocol.
 
 It proxies MCP tool calls to a running Gua WebSocket bridge, so game runtimes keep

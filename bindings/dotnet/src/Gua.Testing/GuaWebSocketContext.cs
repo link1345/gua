@@ -5,10 +5,12 @@ using Gua.Core;
 
 namespace Gua.Testing;
 
-public sealed class GuaWebSocketContext : IGuaContext, IDisposable
+public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IDisposable
 {
+    private static readonly TimeSpan MinimumClockPauseResponseTimeout = TimeSpan.FromSeconds(11);
     private readonly Uri uri;
     private readonly TimeSpan requestTimeout;
+    private readonly SemaphoreSlim requestGate = new(1, 1);
     private ClientWebSocket? socket;
     private readonly List<GuaActionEvent> bufferedActionEvents = new();
     private int nextId = 1;
@@ -23,6 +25,65 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
     }
     public string GetUiTreeJson() => Raw(new { type = "get_ui_tree" });
     public GuaRemoteTree GetRemoteTree() => Request<GuaRemoteTree>(new { type = "get_ui_tree" });
+    public GuaClockStatus GetClockStatus() => ToClockStatus(Request<RemoteClockStatus>(new { type = "get_clock" }));
+    public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
+    { Request<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step)); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> InstallClockAsync(TimeSpan? initialTime = null, TimeSpan? step = null, CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(ClockCommand("clock_install", "initialTimeMs", (initialTime ?? TimeSpan.Zero).TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
+    public GuaClockResult PauseClock() { Request<RemoteClockStatus>(new { type = "clock_pause" }, responseTimeout: ClockPauseResponseTimeout); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> PauseClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_pause" }, cancellationToken, responseTimeout: ClockPauseResponseTimeout).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
+    public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
+    {
+        var status = Request<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step));
+        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame ||
+            status.OperationSequence is not { } operationSequence)
+            throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
+        var deadline = DateTime.UtcNow + requestTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var context = GetContextStatus();
+            if (context.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
+            if (status.CompletedOperationSequence >= operationSequence && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            Thread.Sleep(5);
+            status = Request<RemoteClockStatus>(new { type = "get_clock" });
+        }
+        throw new TimeoutException("Timed out waiting for Gua clock run_for host completion.");
+    }
+    public async Task<GuaClockResult> RunClockForAsync(TimeSpan duration, TimeSpan? step = null, CancellationToken cancellationToken = default)
+    {
+        var status = await RequestAsync<RemoteClockStatus>(ClockCommand("clock_run_for", "durationMs", duration.TotalMilliseconds, step), cancellationToken).ConfigureAwait(false);
+        if (status.CompletionSessionEpoch is not { } completionEpoch || status.CompletionAfterFrameSequence is not { } completionFrame ||
+            status.OperationSequence is not { } operationSequence)
+            throw new NotSupportedException("The connected runtime does not provide correlated clock completion.");
+        var deadline = DateTime.UtcNow + requestTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = await RequestAsync<Status>(new { type = "get_context_status" }, cancellationToken).ConfigureAwait(false);
+            if (context.SessionEpoch != completionEpoch) throw new InvalidOperationException("stale_session");
+            if (status.CompletedOperationSequence >= operationSequence && context.FrameSequence > completionFrame) return GuaClockResult.Ok;
+            await Task.Delay(5, cancellationToken).ConfigureAwait(false);
+            status = await RequestAsync<RemoteClockStatus>(new { type = "get_clock" }, cancellationToken).ConfigureAwait(false);
+        }
+        throw new TimeoutException("Timed out waiting for Gua clock run_for host completion.");
+    }
+    public GuaClockResult ResumeClock() { Request<RemoteClockStatus>(new { type = "clock_resume" }); return GuaClockResult.Ok; }
+    public async Task<GuaClockResult> ResumeClockAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync<RemoteClockStatus>(new { type = "clock_resume" }, cancellationToken).ConfigureAwait(false);
+        return GuaClockResult.Ok;
+    }
+    private static GuaClockStatus ToClockStatus(RemoteClockStatus value) => new(value.Installed,
+        string.Equals(value.State, "paused", StringComparison.Ordinal), value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
+    private static Dictionary<string, object> ClockCommand(string type, string valueName, double value, TimeSpan? step)
+    { var command = new Dictionary<string, object> { ["type"] = type, [valueName] = value }; if (step.HasValue) command["stepMs"] = step.Value.TotalMilliseconds; return command; }
     public string GetDiagnosticsJson() => Raw(new { type = "get_diagnostics" });
     public GuaVersion GetVersion() => GuaVersion.Parse(Raw(new { type = "get_version" }));
     public string GetScreenshotJson() => Raw(new { type = "get_screenshot" });
@@ -100,7 +161,7 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
     public GuaResetReport Reset(GuaResetOptions? options = null)
     {
         options ??= new(); var epoch = options.ExpectedSessionEpoch ?? GetContextStatus().SessionEpoch;
-        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, strict = options.Strict });
+        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, flagsVersion = 1, strict = options.Strict });
         return new((GuaResetResult)r.Result, r.PreviousSessionEpoch, r.SessionEpoch, r.PendingRequestCount, r.InFlightRequestCount, r.UnconsumedEventCount,
             r.DiscardedNodeCount, r.DiscardedPendingRequestCount, r.DiscardedInFlightRequestCount, r.DiscardedEventCount, r.DiscardedLogCount, r.DiscardedScreenshot,
             Action(r.FirstPendingAction), r.FirstPendingNodeId, Action(r.FirstEventAction), r.FirstEventNodeId);
@@ -108,21 +169,54 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
     private static GuaActionType? Action(int value) => value == 0 ? null : (GuaActionType)value;
     private GuaRemoteTree Tree() => GetRemoteTree();
 
-    private T Request<T>(object command, bool allowNull = false)
+    private TimeSpan ClockPauseResponseTimeout => requestTimeout > MinimumClockPauseResponseTimeout ? requestTimeout : MinimumClockPauseResponseTimeout;
+
+    private T Request<T>(object command, bool allowNull = false, TimeSpan? responseTimeout = null)
     {
-        EnsureConnected(); var id = nextId++; var bytes = Envelope(id, command); Send(bytes);
-        while (true)
+        requestGate.Wait();
+        try
         {
-            using var document = JsonDocument.Parse(Receive()); var root = document.RootElement;
-            if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
-            if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString());
-            var result = root.GetProperty("result").Deserialize<T>(JsonOptions); if (result == null && !allowNull) throw new InvalidOperationException("Gua bridge returned an empty result."); return result!;
+            EnsureConnected(); var id = nextId++; var bytes = Envelope(id, command); Send(bytes);
+            while (true)
+            {
+                using var document = JsonDocument.Parse(Receive(responseTimeout)); var root = document.RootElement;
+                if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
+                if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString());
+                var result = root.GetProperty("result").Deserialize<T>(JsonOptions); if (result == null && !allowNull) throw new InvalidOperationException("Gua bridge returned an empty result."); return result!;
+            }
         }
+        finally { requestGate.Release(); }
+    }
+    private async Task<T> RequestAsync<T>(object command, CancellationToken cancellationToken, bool allowNull = false, TimeSpan? responseTimeout = null)
+    {
+        await requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false); var id = nextId++; var bytes = Envelope(id, command);
+            using (var sendTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                sendTimeout.CancelAfter(requestTimeout);
+                await socket!.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendTimeout.Token).ConfigureAwait(false);
+            }
+            while (true)
+            {
+                using var document = JsonDocument.Parse(await ReceiveAsync(cancellationToken, responseTimeout).ConfigureAwait(false)); var root = document.RootElement;
+                if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
+                if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString());
+                var result = root.GetProperty("result").Deserialize<T>(JsonOptions); if (result == null && !allowNull) throw new InvalidOperationException("Gua bridge returned an empty result."); return result!;
+            }
+        }
+        finally { requestGate.Release(); }
     }
     private string Raw(object command, TimeSpan? responseTimeout = null)
     {
-        EnsureConnected(); var id = nextId++; Send(Envelope(id, command));
-        while (true) { using var document = JsonDocument.Parse(Receive(responseTimeout)); var root = document.RootElement; if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue; if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString()); return root.GetProperty("result").GetRawText(); }
+        requestGate.Wait();
+        try
+        {
+            EnsureConnected(); var id = nextId++; Send(Envelope(id, command));
+            while (true) { using var document = JsonDocument.Parse(Receive(responseTimeout)); var root = document.RootElement; if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue; if (!root.GetProperty("ok").GetBoolean()) throw new InvalidOperationException(root.GetProperty("error").GetString()); return root.GetProperty("result").GetRawText(); }
+        }
+        finally { requestGate.Release(); }
     }
     private static byte[] Envelope(int id, object command)
     {
@@ -136,16 +230,30 @@ public sealed class GuaWebSocketContext : IGuaContext, IDisposable
         socket?.Dispose(); socket = new ClientWebSocket(); using var cts = new CancellationTokenSource(requestTimeout);
         try { socket.ConnectAsync(uri, cts.Token).GetAwaiter().GetResult(); } catch { socket.Dispose(); socket = null; throw; }
     }
+    private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(GuaWebSocketContext)); if (socket?.State == WebSocketState.Open) return;
+        socket?.Dispose(); socket = new ClientWebSocket(); using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(requestTimeout);
+        try { await socket.ConnectAsync(uri, timeout.Token).ConfigureAwait(false); } catch { socket.Dispose(); socket = null; throw; }
+    }
     private void Send(byte[] payload) { using var cts = new CancellationTokenSource(requestTimeout); socket!.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, cts.Token).GetAwaiter().GetResult(); }
     private string Receive(TimeSpan? timeout = null)
     {
         using var cts = new CancellationTokenSource(timeout ?? requestTimeout); var buffer = new byte[65536]; using var stream = new MemoryStream();
         while (true) { var result = socket!.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token).GetAwaiter().GetResult(); if (result.MessageType == WebSocketMessageType.Close) throw new InvalidOperationException("Gua bridge WebSocket closed."); stream.Write(buffer, 0, result.Count); if (result.EndOfMessage) return Encoding.UTF8.GetString(stream.ToArray()); }
     }
+    private async Task<string> ReceiveAsync(CancellationToken cancellationToken, TimeSpan? responseTimeout = null)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(responseTimeout ?? requestTimeout); var buffer = new byte[65536]; using var stream = new MemoryStream();
+        while (true) { var result = await socket!.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token).ConfigureAwait(false); if (result.MessageType == WebSocketMessageType.Close) throw new InvalidOperationException("Gua bridge WebSocket closed."); stream.Write(buffer, 0, result.Count); if (result.EndOfMessage) return Encoding.UTF8.GetString(stream.ToArray()); }
+    }
     public void Dispose() { if (disposed) return; disposed = true; socket?.Dispose(); socket = null; }
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private sealed record ActionResult(ulong RequestId);
+    private sealed record RemoteClockStatus(bool Installed, string State, double NowMs, double DefaultStepMs, double PendingMs, ulong Generation,
+        ulong CompletedOperationSequence = 0, ulong? OperationSequence = null,
+        ulong? CompletionSessionEpoch = null, ulong? CompletionAfterFrameSequence = null);
     private sealed record EventResult(ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive, ulong SessionEpoch, ulong FrameSequence, ulong Revision);
     private sealed record Status(ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);
     private sealed record ResetResult(int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount, uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount, uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);

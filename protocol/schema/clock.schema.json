@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/clock.schema.json",
+  "title": "Gua Virtual Clock Status",
+  "type": "object",
+  "required": ["schemaVersion", "installed", "state", "nowMs", "defaultStepMs", "pendingMs", "generation", "completedOperationSequence"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "installed": { "type": "boolean" },
+    "state": { "enum": ["running", "paused"] },
+    "nowMs": { "type": "number", "minimum": 0 },
+    "defaultStepMs": { "type": "number", "exclusiveMinimum": 0 },
+    "pendingMs": { "type": "number", "minimum": 0 },
+    "generation": { "type": "integer", "minimum": 0 },
+    "completedOperationSequence": { "type": "integer", "minimum": 0 },
+    "operationSequence": { "type": "integer", "minimum": 1 },
+    "completionSessionEpoch": { "type": "integer", "minimum": 1 },
+    "completionAfterFrameSequence": { "type": "integer", "minimum": 0 }
+  }
+}

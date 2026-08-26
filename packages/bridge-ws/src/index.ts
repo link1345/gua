@@ -4,13 +4,15 @@ import type {
   GuaLogEntry,
   GuaScreenshot,
   GuaUiTree,
+  GuaClockStatus,
+  GuaContextStatus,
 } from "@gua/inspector/core";
 
 const defaultPort = 8765;
 const port = Number.parseInt(Bun.env.GUA_BRIDGE_PORT ?? Bun.argv[2] ?? `${defaultPort}`, 10);
-type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | null;
+type GuaInspectorResult = GuaUiTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | null;
 
-function handleMessage(message: string | Buffer): GuaInspectorResponse {
+export function handleMessage(message: string | Buffer, target: DemoRuntime = runtime): GuaInspectorResponse {
   if (typeof message !== "string") {
     return { id: 0, ok: false, error: "Expected a JSON text message." };
   }
@@ -25,33 +27,39 @@ function handleMessage(message: string | Buffer): GuaInspectorResponse {
   try {
     switch (command.type) {
       case "get_ui_tree":
-        return ok(command.id, runtime.getUiTree());
+        return ok(command.id, target.getUiTree());
       case "get_logs":
-        return ok(command.id, runtime.getLogs());
+        return ok(command.id, target.getLogs());
       case "get_screenshot":
-        return ok(command.id, runtime.getScreenshot());
+        return ok(command.id, target.getScreenshot());
+      case "get_context_status": return ok(command.id, target.getContextStatus());
+      case "get_clock": return ok(command.id, target.getClock());
+      case "clock_install": return ok(command.id, target.installClock(command.initialTimeMs, command.stepMs));
+      case "clock_pause": return ok(command.id, target.pauseClock());
+      case "clock_run_for": return ok(command.id, target.runClockFor(command.durationMs, command.stepMs));
+      case "clock_resume": return ok(command.id, target.resumeClock());
       case "poll_events":
         return ok(command.id, null);
       case "click_node":
-        runtime.clickNode(command.nodeId);
+        target.clickNode(command.nodeId);
         return ok(command.id, null);
       case "focus_node":
-        runtime.focusNode(command.nodeId);
+        target.focusNode(command.nodeId);
         return ok(command.id, null);
       case "press_key":
-        runtime.pressKey(command.key);
+        target.pressKey(command.key);
         return ok(command.id, null);
       case "set_value":
-        runtime.log("info", `set_value(${command.nodeId})`);
+        target.log("info", `set_value(${command.nodeId})`);
         return ok(command.id, null);
       case "set_checked":
-        runtime.log("info", `set_checked(${command.nodeId}, ${command.checked})`);
+        target.log("info", `set_checked(${command.nodeId}, ${command.checked})`);
         return ok(command.id, null);
       case "select":
-        runtime.log("info", `select(${command.nodeId}, ${command.value})`);
+        target.log("info", `select(${command.nodeId}, ${command.value})`);
         return ok(command.id, null);
       case "scroll":
-        runtime.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
+        target.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
         return ok(command.id, null);
     }
   } catch (error) {
@@ -63,7 +71,11 @@ function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
   return { id, ok: true, result };
 }
 
-class DemoRuntime {
+export class DemoRuntime {
+  private clock: GuaClockStatus = { schemaVersion: 1, installed: false, state: "running", nowMs: 0, defaultStepMs: 1000 / 60, pendingMs: 0, generation: 0, completedOperationSequence: 0 };
+  private nextClockOperationSequence = 1;
+  private runningClockStartMs = 0;
+  private runningClockStartTimeMs = 0;
   private screen: "title" | "loading" = "title";
   private focusedNodeId = "start";
   private frameSequence = 1;
@@ -72,6 +84,8 @@ class DemoRuntime {
     { sequence: 1, level: "info", message: "Demo runtime started." },
     { sequence: 2, level: "debug", message: "Serving Gua protocol snapshots over WebSocket." },
   ];
+
+  constructor(private readonly monotonicNow: () => number = () => performance.now()) {}
 
   getUiTree(): GuaUiTree {
     if (this.screen === "loading") {
@@ -113,6 +127,63 @@ class DemoRuntime {
       width: 1280,
       height: 720,
     };
+  }
+  getContextStatus(): GuaContextStatus {
+    return {
+      sessionEpoch: 1,
+      frameSequence: this.frameSequence,
+      revision: this.revision,
+      nodeCount: this.getUiTree().nodes.length,
+      pendingRequestCount: 0,
+      inFlightRequestCount: 0,
+      unconsumedEventCount: 0,
+      logCount: this.logs.length,
+      hasScreenshot: true,
+      firstPendingAction: 0,
+      firstPendingNodeId: "",
+      firstEventAction: 0,
+      firstEventNodeId: "",
+    };
+  }
+  getClock() { this.advanceRunningClock(); return this.clock; }
+  installClock(initial = 0, step = 1000 / 60) {
+    if (this.clock.installed) throw new Error("invalid_state");
+    const nextTime = initial + step;
+    if (!Number.isFinite(initial) || initial < 0 || !Number.isFinite(step) || step <= 0 ||
+        !Number.isFinite(nextTime) || nextTime <= initial) throw new Error("invalid_duration");
+    this.clock = { ...this.clock, installed: true, state: "running", nowMs: initial, defaultStepMs: step, generation: this.clock.generation + 1 };
+    this.runningClockStartMs = initial;
+    this.runningClockStartTimeMs = this.monotonicNow();
+    return this.clock;
+  }
+  pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.advanceRunningClock(); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
+  runClockFor(duration: number, step?: number) {
+    if (this.clock.state !== "paused") throw new Error("invalid_state");
+    const nextTime = this.clock.nowMs + duration;
+    const selectedStep = step ?? this.clock.defaultStepMs;
+    const emittedStep = Math.min(duration, selectedStep);
+    if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(nextTime) || duration > 0 && nextTime <= this.clock.nowMs ||
+        !Number.isFinite(selectedStep) || selectedStep <= 0 ||
+        !Number.isFinite(this.clock.nowMs + selectedStep) || this.clock.nowMs + selectedStep <= this.clock.nowMs ||
+        duration > 0 && (this.clock.nowMs + emittedStep <= this.clock.nowMs || nextTime - emittedStep >= nextTime))
+      throw new Error("invalid_duration");
+    const operationSequence = this.nextClockOperationSequence++;
+    this.clock = { ...this.clock, nowMs: nextTime };
+    const result = { ...this.clock, operationSequence, completionSessionEpoch: 1, completionAfterFrameSequence: this.frameSequence };
+    setTimeout(() => {
+      this.clock = { ...this.clock, completedOperationSequence: operationSequence };
+      this.frameSequence += 1;
+    }, 0);
+    return result;
+  }
+  resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.advanceRunningClock(); this.clock = { ...this.clock, state: "running" }; this.runningClockStartMs = this.clock.nowMs; this.runningClockStartTimeMs = this.monotonicNow(); return this.clock; }
+
+  private advanceRunningClock() {
+    if (!this.clock.installed || this.clock.state !== "running") return;
+    const elapsedMs = Math.max(0, this.monotonicNow() - this.runningClockStartTimeMs);
+    const nextTime = this.runningClockStartMs + elapsedMs;
+    if (Number.isFinite(nextTime) && nextTime > this.clock.nowMs)
+      this.clock = { ...this.clock, nowMs: nextTime };
   }
 
   clickNode(nodeId: string): void {
@@ -209,31 +280,33 @@ function node(
 
 const runtime = new DemoRuntime();
 
-const server = Bun.serve({
-  port,
-  fetch(request, server) {
-    if (server.upgrade(request)) {
-      return undefined;
-    }
+if (import.meta.main) {
+  const server = Bun.serve({
+    port,
+    fetch(request, server) {
+      if (server.upgrade(request)) {
+        return undefined;
+      }
 
-    return Response.json({
-      name: "Gua WebSocket bridge",
-      websocket: `ws://127.0.0.1:${port}`,
-      commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node", "press_key"],
-    });
-  },
-  websocket: {
-    open() {
-      runtime.log("info", "Inspector connected.");
+      return Response.json({
+        name: "Gua WebSocket bridge",
+        websocket: `ws://127.0.0.1:${port}`,
+        commands: ["get_ui_tree", "get_logs", "get_screenshot", "click_node", "focus_node", "press_key"],
+      });
     },
-    message(socket, message) {
-      const response = handleMessage(message);
-      socket.send(JSON.stringify(response));
+    websocket: {
+      open() {
+        runtime.log("info", "Inspector connected.");
+      },
+      message(socket, message) {
+        const response = handleMessage(message);
+        socket.send(JSON.stringify(response));
+      },
+      close() {
+        runtime.log("info", "Inspector disconnected.");
+      },
     },
-    close() {
-      runtime.log("info", "Inspector disconnected.");
-    },
-  },
-});
+  });
 
-console.log(`Gua WebSocket bridge listening on ws://127.0.0.1:${server.port}`);
+  console.log(`Gua WebSocket bridge listening on ws://127.0.0.1:${server.port}`);
+}
