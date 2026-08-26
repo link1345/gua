@@ -69,6 +69,21 @@ int main()
     });
     version_writer.join();
     version_reader.join();
+    const gua_world_selector_v1_t empty_world_selector { sizeof(gua_world_selector_v1_t) };
+    std::thread world_capability_writer([runtime] {
+        for (int index = 0; index < 20'000; ++index)
+            gua_runtime_set_world_object_tree_enabled(runtime, index % 2);
+    });
+    std::thread world_capability_reader([runtime, &empty_world_selector] {
+        char buffer[2048] {};
+        for (int index = 0; index < 20'000; ++index) {
+            assert(gua_runtime_copy_world_object_tree_json(runtime, buffer, sizeof(buffer)) > 0 && buffer[0] == '{');
+            assert(gua_runtime_query_world_objects_json(runtime, &empty_world_selector, buffer, sizeof(buffer)) > 0 && buffer[0] == '{');
+        }
+    });
+    world_capability_writer.join();
+    world_capability_reader.join();
+    gua_runtime_set_world_object_tree_enabled(runtime, 0);
     gua_runtime_begin_frame(runtime, "title");
     gua_runtime_end_frame(runtime);
 

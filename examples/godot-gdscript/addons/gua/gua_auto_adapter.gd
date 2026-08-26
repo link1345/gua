@@ -6,7 +6,7 @@ signal clock_tick(delta: float)
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
 const RESET_CLOCK_FLAG := 1 << 6
-const RESET_DEFAULT_FLAGS := 79
+const RESET_DEFAULT_FLAGS := 207
 const CLOCK_CALLBACK_LIMIT := 1000000
 const CONTEXT_CLASS := "GuaContext"
 const GDEXTENSION_RESOURCE := "res://addons/gua/gua.gdextension"
@@ -40,6 +40,12 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_clock_step",
 	"consume_clock_steps",
 	"enable_virtual_clock_adapter",
+	"begin_world_frame",
+	"register_world_object",
+	"end_world_frame",
+	"abort_world_frame",
+	"get_world_object_tree_json",
+	"enable_world_object_tree_adapter",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
 ]
@@ -123,9 +129,74 @@ func update(screen: String) -> void:
 	controls_by_id.clear()
 	_collect_control(root, "")
 	context.end_frame()
+	_publish_world_frame(screen)
 	_dispatch_click_requests()
 	_dispatch_action_requests()
 	_schedule_screenshot_capture()
+
+
+func _publish_world_frame(scene: String) -> void:
+	if root == null or root.get_tree() == null or not context.begin_world_frame(scene):
+		return
+	var objects := root.get_tree().get_nodes_in_group(&"gua_world_object")
+	objects.sort_custom(func(a: Node, b: Node) -> bool: return str(a.get_path()) < str(b.get_path()))
+	for node: Node in objects:
+		if not (node is Node2D or node is Node3D):
+			continue
+		if not node.has_meta(&"gua_world_id"):
+			push_error("Gua world object requires gua_world_id metadata: %s" % node.get_path())
+			context.abort_world_frame()
+			return
+		var object_id := str(node.get_meta(&"gua_world_id", ""))
+		if object_id.is_empty():
+			push_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path())
+			context.abort_world_frame()
+			return
+		var parent_id := ""
+		var ancestor := node.get_parent()
+		while ancestor != null:
+			if ancestor.is_in_group(&"gua_world_object") and ancestor.has_meta(&"gua_world_id"):
+				var candidate_parent_id := str(ancestor.get_meta(&"gua_world_id", ""))
+				if not candidate_parent_id.is_empty():
+					parent_id = candidate_parent_id
+					break
+			ancestor = ancestor.get_parent()
+		var position := Vector3.ZERO
+		var space := "world2d"
+		if node is Node3D:
+			position = (node as Node3D).global_position
+			space = "world3d"
+		else:
+			var position_2d := (node as Node2D).global_position
+			position = Vector3(position_2d.x, position_2d.y, 0.0)
+		var visible_to_player = node.get_meta(&"gua_world_visible_to_player", false)
+		var active = node.get_meta(&"gua_world_active", true)
+		if typeof(visible_to_player) != TYPE_BOOL or typeof(active) != TYPE_BOOL:
+			push_error("Gua world visibility/active metadata must be boolean: %s" % object_id)
+			context.abort_world_frame()
+			return
+		var descriptor := {
+			"id": object_id,
+			"parent_id": parent_id,
+			"kind": str(node.get_meta(&"gua_world_kind", "object")),
+			"label": str(node.get_meta(&"gua_world_label", node.name)),
+			"description": str(node.get_meta(&"gua_world_description", "")),
+			"space": space,
+			"position": position,
+			"visible_to_player": visible_to_player,
+			"active": active,
+			"agent_exposure": str(node.get_meta(&"gua_world_agent_exposure", "auto")),
+			"tags": node.get_meta(&"gua_world_tags", []),
+			"state": node.get_meta(&"gua_world_state", {}),
+			"domain_id": str(node.get_meta(&"gua_world_domain_id", "")),
+			"related_ui_node_id": str(node.get_meta(&"gua_world_related_ui_node_id", "")),
+		}
+		if not context.register_world_object(descriptor):
+			push_error("Failed to register Gua world object: %s" % object_id)
+			context.abort_world_frame()
+			return
+	if not context.end_world_frame():
+		push_error("Gua world frame was rejected")
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
@@ -437,6 +508,7 @@ func _ensure_context() -> bool:
 		return false
 
 	context.enable_virtual_clock_adapter()
+	context.enable_world_object_tree_adapter()
 
 	return true
 

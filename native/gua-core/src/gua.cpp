@@ -16,6 +16,8 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -38,7 +40,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\",\"world_object_tree_v1\"]}";
 }
 
 struct Node {
@@ -61,6 +63,25 @@ struct Node {
     double scroll_x = 0, scroll_y = 0, scroll_max_x = 0, scroll_max_y = 0;
     double range_value = 0, range_min = 0, range_max = 0;
     long long selected_index = -1;
+};
+
+struct WorldStateValue {
+    std::string key;
+    int type = GUA_WORLD_VALUE_NULL;
+    std::string string_value;
+    double number_value = 0;
+    bool bool_value = false;
+};
+
+struct WorldObject {
+    std::string id, parent_id, kind, label, description, domain_id, related_ui_node_id;
+    int space = GUA_WORLD_SPACE_2D;
+    double x = 0, y = 0, z = 0;
+    bool visible_to_player = false;
+    bool active = true;
+    int agent_exposure = GUA_AGENT_EXPOSURE_AUTO;
+    std::vector<std::string> tags;
+    std::vector<WorldStateValue> state;
 };
 
 struct Event {
@@ -219,6 +240,30 @@ bool matches_filter(bool actual, int filter, std::string& error)
     return false;
 }
 
+bool validate_text_criterion(const char* expected, int mode, std::string& error)
+{
+    if (expected == nullptr || expected[0] == '\0') return true;
+    if (mode != GUA_MATCH_EXACT && mode != GUA_MATCH_CONTAINS && mode != GUA_MATCH_REGEX) {
+        error = "unknown match mode";
+        return false;
+    }
+    if (mode != GUA_MATCH_REGEX) return true;
+    try {
+        (void)std::regex(expected, std::regex::ECMAScript);
+        return true;
+    } catch (const std::regex_error& exception) {
+        error = exception.what();
+        return false;
+    }
+}
+
+bool validate_filter(int filter, std::string& error)
+{
+    if (filter == GUA_FILTER_ANY || filter == GUA_FILTER_FALSE || filter == GUA_FILTER_TRUE) return true;
+    error = "unknown state filter";
+    return false;
+}
+
 bool is_in_scope(const std::vector<Node>& nodes, const Node& node, const char* parent_id, bool direct_child)
 {
     if (parent_id == nullptr || parent_id[0] == '\0') return true;
@@ -265,6 +310,12 @@ bool supports_action(const Node& node, int action)
 std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_v1_t& selector)
 {
     std::string error;
+    if (!validate_text_criterion(selector.id, selector.id_match, error) ||
+        !validate_text_criterion(selector.role, selector.role_match, error) ||
+        !validate_text_criterion(selector.name, selector.name_match, error) ||
+        !validate_text_criterion(selector.text, selector.text_match, error) ||
+        !validate_filter(selector.visible, error) || !validate_filter(selector.enabled, error))
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
     std::vector<const Node*> matches;
     for (const Node& node : nodes) {
         if (!is_in_scope(nodes, node, selector.parent_id, selector.direct_child != 0)) continue;
@@ -298,6 +349,143 @@ std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_
     }
     json += "]}";
     return json;
+}
+
+std::string json_number(double value)
+{
+    if (value == 0.0) return "0";
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setprecision(17) << value;
+    return stream.str();
+}
+
+std::string world_value_json(const WorldStateValue& value)
+{
+    if (value.type == GUA_WORLD_VALUE_STRING) return "\"" + escape_json(value.string_value) + "\"";
+    if (value.type == GUA_WORLD_VALUE_NUMBER) return json_number(value.number_value);
+    if (value.type == GUA_WORLD_VALUE_BOOLEAN) return value.bool_value ? "true" : "false";
+    return "null";
+}
+
+std::string world_object_json(const WorldObject& object)
+{
+    std::string json = "{\"id\":\"" + escape_json(object.id) + "\"";
+    if (!object.parent_id.empty()) json += ",\"parentId\":\"" + escape_json(object.parent_id) + "\"";
+    json += ",\"kind\":\"" + escape_json(object.kind) + "\",\"label\":\"" + escape_json(object.label) + "\"";
+    if (!object.description.empty()) json += ",\"description\":\"" + escape_json(object.description) + "\"";
+    json += ",\"space\":\"" + std::string(object.space == GUA_WORLD_SPACE_3D ? "world3d" : "world2d") + "\",\"position\":{";
+    json += "\"x\":" + json_number(object.x) + ",\"y\":" + json_number(object.y);
+    if (object.space == GUA_WORLD_SPACE_3D) json += ",\"z\":" + json_number(object.z);
+    json += "},\"visibleToPlayer\":" + std::string(object.visible_to_player ? "true" : "false") +
+        ",\"active\":" + std::string(object.active ? "true" : "false") +
+        ",\"agentExposure\":\"" + std::string(object.agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE ? "private" : "auto") + "\"";
+    if (!object.domain_id.empty()) json += ",\"domainId\":\"" + escape_json(object.domain_id) + "\"";
+    if (!object.related_ui_node_id.empty()) json += ",\"relatedUiNodeId\":\"" + escape_json(object.related_ui_node_id) + "\"";
+    json += ",\"tags\":[";
+    for (std::size_t i = 0; i < object.tags.size(); ++i) { if (i != 0) json += ','; json += "\"" + escape_json(object.tags[i]) + "\""; }
+    json += "],\"state\":{";
+    for (std::size_t i = 0; i < object.state.size(); ++i) { if (i != 0) json += ','; json += "\"" + escape_json(object.state[i].key) + "\":" + world_value_json(object.state[i]); }
+    return json + "}}";
+}
+
+std::vector<WorldObject> project_world_objects(const std::vector<WorldObject>& objects, int profile)
+{
+    if (profile == GUA_OBSERVATION_PROFILE_DEBUG) return objects;
+    std::unordered_map<std::string, const WorldObject*> by_id;
+    for (const auto& object : objects) by_id.emplace(object.id, &object);
+    std::vector<WorldObject> result;
+    for (const auto& object : objects) {
+        bool observable = true;
+        const WorldObject* current = &object;
+        for (std::size_t depth = 0; current != nullptr && depth <= objects.size(); ++depth) {
+            if (!current->visible_to_player || current->agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE) {
+                observable = false;
+                break;
+            }
+            if (current->parent_id.empty()) break;
+            const auto parent = by_id.find(current->parent_id);
+            if (parent == by_id.end()) { observable = false; break; }
+            current = parent->second;
+        }
+        if (!observable) continue;
+        result.push_back(object);
+    }
+    return result;
+}
+
+std::string build_world_semantic_json(const std::string& scene, const std::vector<WorldObject>& objects)
+{
+    std::string json = "{\"scene\":\"" + escape_json(scene) + "\",\"objects\":[";
+    for (std::size_t i = 0; i < objects.size(); ++i) { if (i != 0) json += ','; json += world_object_json(objects[i]); }
+    return json + "]}";
+}
+
+std::string build_world_tree_json(const std::string& scene, const std::vector<WorldObject>& source,
+    unsigned long long session_epoch, unsigned long long frame_sequence, unsigned long long revision, int profile)
+{
+    const auto objects = project_world_objects(source, profile);
+    std::string semantic = build_world_semantic_json(scene, objects);
+    semantic.erase(semantic.begin());
+    return "{\"schemaVersion\":1,\"sessionEpoch\":" + std::to_string(session_epoch) +
+        ",\"frameSequence\":" + std::to_string(frame_sequence) +
+        ",\"revision\":" + std::to_string(revision) + "," + semantic;
+}
+
+bool world_in_scope(const std::vector<WorldObject>& objects, const WorldObject& object, const char* parent_id, bool direct)
+{
+    if (parent_id == nullptr || parent_id[0] == '\0') return true;
+    if (object.id == parent_id) return false;
+    if (direct) return object.parent_id == parent_id;
+    std::string current = object.parent_id;
+    for (std::size_t depth = 0; !current.empty() && depth <= objects.size(); ++depth) {
+        if (current == parent_id) return true;
+        const auto parent = std::find_if(objects.begin(), objects.end(), [&](const auto& candidate) { return candidate.id == current; });
+        if (parent == objects.end()) return false;
+        current = parent->parent_id;
+    }
+    return false;
+}
+
+bool world_state_matches(const WorldObject& object, const gua_world_state_value_v1_t* expected)
+{
+    if (expected == nullptr) return true;
+    const auto found = std::find_if(object.state.begin(), object.state.end(), [&](const auto& item) { return item.key == (expected->key == nullptr ? "" : expected->key); });
+    if (found == object.state.end() || found->type != expected->type) return false;
+    if (found->type == GUA_WORLD_VALUE_STRING) return found->string_value == (expected->string_value == nullptr ? "" : expected->string_value);
+    if (found->type == GUA_WORLD_VALUE_NUMBER) return found->number_value == expected->number_value;
+    if (found->type == GUA_WORLD_VALUE_BOOLEAN) return found->bool_value == (expected->bool_value != 0);
+    return true;
+}
+
+std::string build_world_query_json(const std::vector<WorldObject>& source, const gua_world_selector_v1_t& selector, int profile)
+{
+    std::string error;
+    if (!validate_text_criterion(selector.id, selector.id_match, error) ||
+        !validate_text_criterion(selector.kind, selector.kind_match, error) ||
+        !validate_text_criterion(selector.label, selector.label_match, error) ||
+        !validate_text_criterion(selector.tag, selector.tag_match, error) ||
+        !validate_filter(selector.visible_to_player, error) || !validate_filter(selector.active, error))
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+    const auto objects = project_world_objects(source, profile);
+    std::string json = "{\"valid\":true,\"matches\":[";
+    bool comma = false;
+    for (const auto& object : objects) {
+        if (!world_in_scope(objects, object, selector.parent_id, selector.direct_child != 0)) continue;
+        bool tag_match = selector.tag == nullptr || selector.tag[0] == '\0';
+        for (const auto& tag : object.tags) if (matches_text(tag, selector.tag, selector.tag_match, error)) { tag_match = true; break; }
+        if (!error.empty()) return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+        if (!matches_text(object.id, selector.id, selector.id_match, error) ||
+            !matches_text(object.kind, selector.kind, selector.kind_match, error) ||
+            !matches_text(object.label, selector.label, selector.label_match, error) || !tag_match ||
+            !matches_filter(object.visible_to_player, selector.visible_to_player, error) ||
+            !matches_filter(object.active, selector.active, error) || !world_state_matches(object, selector.state)) continue;
+        if (comma) json += ',';
+        json += world_object_json(object);
+        comma = true;
+    }
+    if (!error.empty()) return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+    return json + "]}";
 }
 
 const char* action_name(int action)
@@ -339,6 +527,19 @@ struct gua_context_t {
     unsigned long long next_request_id = 1;
     unsigned long long session_epoch = 1;
     std::string previous_semantic_snapshot;
+    std::string world_scene = "unknown";
+    std::vector<WorldObject> world_objects;
+    std::string staging_world_scene = "unknown";
+    std::vector<WorldObject> staging_world_objects;
+    bool world_frame_in_progress = false;
+    bool staging_world_valid = true;
+    unsigned long long world_frame_sequence = 0;
+    unsigned long long world_revision = 0;
+    unsigned long long player_world_revision = 0;
+    std::string previous_world_snapshot;
+    std::string previous_player_world_snapshot;
+    std::string world_json_cache_debug;
+    std::string world_json_cache_player;
     std::deque<HistoryEntry> operation_history;
     std::deque<HistoryEntry> event_history;
     std::size_t diagnostics_history_limit = 100;
@@ -1233,6 +1434,182 @@ extern "C" int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t*
     return copy_json_string(build_query_json(ctx->nodes, *selector), out_json, out_json_size);
 }
 
+extern "C" int gua_begin_world_frame(gua_context_t* ctx, const char* scene)
+{
+    if (ctx == nullptr || scene == nullptr || scene[0] == '\0') return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (ctx->world_frame_in_progress) return 0;
+    ctx->staging_world_scene = scene;
+    ctx->staging_world_objects.clear();
+    ctx->world_frame_in_progress = true;
+    ctx->staging_world_valid = true;
+    return 1;
+}
+
+extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (descriptor == nullptr || descriptor->struct_size < sizeof(gua_world_object_descriptor_v1_t)) {
+        if (ctx->world_frame_in_progress) ctx->staging_world_valid = false;
+        return 0;
+    }
+    const auto valid_kind = [](const char* kind) {
+        if (kind == nullptr || kind[0] == '\0' || kind[0] < 'a' || kind[0] > 'z') return false;
+        for (const char* current = kind + 1; *current != '\0'; ++current) {
+            if (!((*current >= 'a' && *current <= 'z') || (*current >= '0' && *current <= '9') || *current == '_' || *current == '-' || *current == '.')) return false;
+        }
+        return true;
+    };
+    if (!ctx->world_frame_in_progress || !ctx->staging_world_valid || descriptor->id == nullptr || descriptor->id[0] == '\0' ||
+        (descriptor->parent_id != nullptr && descriptor->parent_id[0] == '\0') ||
+        (descriptor->domain_id != nullptr && descriptor->domain_id[0] == '\0') ||
+        (descriptor->related_ui_node_id != nullptr && descriptor->related_ui_node_id[0] == '\0') ||
+        !valid_kind(descriptor->kind) || descriptor->label == nullptr ||
+        (descriptor->space != GUA_WORLD_SPACE_2D && descriptor->space != GUA_WORLD_SPACE_3D) ||
+        !std::isfinite(descriptor->position_x) || !std::isfinite(descriptor->position_y) || !std::isfinite(descriptor->position_z) ||
+        (descriptor->agent_exposure != GUA_AGENT_EXPOSURE_AUTO && descriptor->agent_exposure != GUA_AGENT_EXPOSURE_PRIVATE) ||
+        (descriptor->tag_count != 0 && descriptor->tags == nullptr) ||
+        (descriptor->state_value_count != 0 && descriptor->state_values == nullptr)) {
+        ctx->staging_world_valid = false;
+        return 0;
+    }
+    if (std::any_of(ctx->staging_world_objects.begin(), ctx->staging_world_objects.end(), [&](const auto& object) { return object.id == descriptor->id; })) {
+        ctx->staging_world_valid = false;
+        return 0;
+    }
+    WorldObject object;
+    object.id = descriptor->id;
+    object.parent_id = descriptor->parent_id == nullptr ? "" : descriptor->parent_id;
+    object.kind = descriptor->kind;
+    object.label = descriptor->label;
+    object.description = descriptor->description == nullptr ? "" : descriptor->description;
+    object.space = descriptor->space;
+    object.x = descriptor->position_x; object.y = descriptor->position_y; object.z = descriptor->position_z;
+    object.visible_to_player = descriptor->visible_to_player != 0;
+    object.active = descriptor->active != 0;
+    object.agent_exposure = descriptor->agent_exposure;
+    object.domain_id = descriptor->domain_id == nullptr ? "" : descriptor->domain_id;
+    object.related_ui_node_id = descriptor->related_ui_node_id == nullptr ? "" : descriptor->related_ui_node_id;
+    std::unordered_set<std::string> unique;
+    for (uint32_t i = 0; i < descriptor->tag_count; ++i) {
+        if (descriptor->tags[i] == nullptr || descriptor->tags[i][0] == '\0' || !unique.insert(descriptor->tags[i]).second) { ctx->staging_world_valid = false; return 0; }
+        object.tags.emplace_back(descriptor->tags[i]);
+    }
+    unique.clear();
+    for (uint32_t i = 0; i < descriptor->state_value_count; ++i) {
+        const auto& value = descriptor->state_values[i];
+        if (value.struct_size < sizeof(gua_world_state_value_v1_t) || value.key == nullptr || value.key[0] == '\0' ||
+            value.type < GUA_WORLD_VALUE_NULL || value.type > GUA_WORLD_VALUE_BOOLEAN ||
+            (value.type == GUA_WORLD_VALUE_STRING && value.string_value == nullptr) ||
+            (value.type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(value.number_value)) || !unique.insert(value.key).second) {
+            ctx->staging_world_valid = false; return 0;
+        }
+        object.state.push_back(WorldStateValue { value.key, value.type, value.string_value == nullptr ? "" : value.string_value,
+            value.number_value, value.bool_value != 0 });
+    }
+    std::sort(object.state.begin(), object.state.end(), [](const auto& left, const auto& right) {
+        return left.key < right.key;
+    });
+    ctx->staging_world_objects.push_back(std::move(object));
+    return 1;
+}
+
+extern "C" int gua_end_world_frame(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->world_frame_in_progress || !ctx->staging_world_valid) {
+        ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; ctx->staging_world_valid = true; return 0;
+    }
+    const auto reject_frame = [&]() {
+        ctx->staging_world_objects.clear();
+        ctx->world_frame_in_progress = false;
+        return 0;
+    };
+    std::unordered_map<std::string, std::size_t> world_indices;
+    world_indices.reserve(ctx->staging_world_objects.size());
+    for (std::size_t index = 0; index < ctx->staging_world_objects.size(); ++index)
+        world_indices.emplace(ctx->staging_world_objects[index].id, index);
+    std::vector<unsigned char> visit_state(ctx->staging_world_objects.size(), 0);
+    std::vector<std::size_t> path;
+    path.reserve(ctx->staging_world_objects.size());
+    for (std::size_t start = 0; start < ctx->staging_world_objects.size(); ++start) {
+        if (visit_state[start] == 2) continue;
+        path.clear();
+        std::size_t current = start;
+        while (true) {
+            if (visit_state[current] == 1) return reject_frame();
+            if (visit_state[current] == 2) break;
+            visit_state[current] = 1;
+            path.push_back(current);
+            const auto& parent_id = ctx->staging_world_objects[current].parent_id;
+            if (parent_id.empty()) break;
+            const auto parent = world_indices.find(parent_id);
+            if (parent == world_indices.end()) return reject_frame();
+            current = parent->second;
+        }
+        for (const auto index : path) visit_state[index] = 2;
+    }
+    const std::string semantic = build_world_semantic_json(ctx->staging_world_scene, ctx->staging_world_objects);
+    const std::string player_semantic = build_world_semantic_json(ctx->staging_world_scene,
+        project_world_objects(ctx->staging_world_objects, GUA_OBSERVATION_PROFILE_PLAYER));
+    ctx->world_scene.swap(ctx->staging_world_scene);
+    ctx->world_objects.swap(ctx->staging_world_objects);
+    ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false;
+    ++ctx->world_frame_sequence;
+    if (semantic != ctx->previous_world_snapshot) { ++ctx->world_revision; ctx->previous_world_snapshot = semantic; }
+    if (player_semantic != ctx->previous_player_world_snapshot) {
+        ++ctx->player_world_revision;
+        ctx->previous_player_world_snapshot = player_semantic;
+    }
+    ctx->world_json_cache_debug.clear(); ctx->world_json_cache_player.clear();
+    return 1;
+}
+
+extern "C" int gua_abort_world_frame(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->world_frame_in_progress) return 0;
+    ctx->staging_world_objects.clear();
+    ctx->staging_world_scene = "unknown";
+    ctx->world_frame_in_progress = false;
+    ctx->staging_world_valid = true;
+    return 1;
+}
+
+extern "C" int gua_copy_world_object_tree_json(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER)) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_world_tree_json(ctx->world_scene, ctx->world_objects, ctx->session_epoch,
+        ctx->world_frame_sequence, observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_world_revision : ctx->world_revision,
+        observation_profile), out_json, out_json_size);
+}
+
+extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_world_selector_v1_t) ||
+        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER) ||
+        (selector->id != nullptr && selector->id[0] == '\0') ||
+        (selector->kind != nullptr && selector->kind[0] == '\0') ||
+        (selector->label != nullptr && selector->label[0] == '\0') ||
+        (selector->tag != nullptr && selector->tag[0] == '\0') ||
+        (selector->parent_id != nullptr && selector->parent_id[0] == '\0') ||
+        (selector->direct_child != 0 && selector->direct_child != 1) ||
+        (selector->direct_child == 1 && (selector->parent_id == nullptr || selector->parent_id[0] == '\0')))
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector\",\"matches\":[]}", out_json, out_json_size);
+    if (selector->state != nullptr && (selector->state->struct_size < sizeof(gua_world_state_value_v1_t) ||
+        selector->state->key == nullptr || selector->state->key[0] == '\0' ||
+        selector->state->type < GUA_WORLD_VALUE_NULL || selector->state->type > GUA_WORLD_VALUE_BOOLEAN ||
+        (selector->state->type == GUA_WORLD_VALUE_STRING && selector->state->string_value == nullptr) ||
+        (selector->state->type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(selector->state->number_value))))
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector state\",\"matches\":[]}", out_json, out_json_size);
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_world_query_json(ctx->world_objects, *selector, observation_profile), out_json, out_json_size);
+}
+
 extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)
 {
     const gua_action_request_descriptor_t descriptor {
@@ -1467,7 +1844,9 @@ extern "C" int gua_poll_event_v3_for_request(gua_context_t* ctx, uint64_t reques
 
 extern "C" int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status)
 {
-    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < sizeof(gua_context_status_t)) return 0;
+    constexpr uint32_t legacy_size = static_cast<uint32_t>(offsetof(gua_context_status_t, world_frame_sequence));
+    if (ctx == nullptr || out_status == nullptr || out_status->struct_size < legacy_size) return 0;
+    const uint32_t output_size = out_status->struct_size;
     const std::lock_guard lock(ctx->mutex);
     out_status->session_epoch = ctx->session_epoch;
     out_status->frame_sequence = ctx->frame_sequence;
@@ -1488,6 +1867,11 @@ extern "C" int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* 
     std::snprintf(out_status->first_pending_node_id, sizeof(out_status->first_pending_node_id), "%s", summary.first_pending_node_id);
     out_status->first_event_action = summary.first_event_action;
     std::snprintf(out_status->first_event_node_id, sizeof(out_status->first_event_node_id), "%s", summary.first_event_node_id);
+    if (output_size >= sizeof(gua_context_status_t)) {
+        out_status->world_frame_sequence = ctx->world_frame_sequence;
+        out_status->world_revision = ctx->world_revision;
+        out_status->world_object_count = static_cast<uint32_t>(ctx->world_objects.size());
+    }
     return 1;
 }
 
@@ -1495,21 +1879,29 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
 {
     constexpr uint32_t legacy_options_size = static_cast<uint32_t>(offsetof(gua_reset_options_t, flags_version));
     constexpr uint32_t flags_version_size = static_cast<uint32_t>(offsetof(gua_reset_options_t, flags_version) + sizeof(uint32_t));
+    constexpr uint32_t legacy_report_size = static_cast<uint32_t>(offsetof(gua_reset_report_t, discarded_world_object_count));
     if (ctx == nullptr || options == nullptr || options->struct_size < legacy_options_size ||
-        out_report == nullptr || out_report->struct_size < sizeof(gua_reset_report_t)) return GUA_RESET_ERROR_INVALID_ARGUMENT;
+        out_report == nullptr || out_report->struct_size < legacy_report_size) return GUA_RESET_ERROR_INVALID_ARGUMENT;
     const uint32_t flags_version = options->struct_size >= flags_version_size
         ? options->flags_version : GUA_RESET_FLAGS_VERSION_LEGACY;
     if (flags_version > GUA_RESET_FLAGS_VERSION_CURRENT) return GUA_RESET_ERROR_INVALID_ARGUMENT;
     uint32_t reset_flags = options->flags;
     const uint32_t legacy_all = GUA_RESET_DEFAULT | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
-    if (flags_version == GUA_RESET_FLAGS_VERSION_LEGACY &&
-        (reset_flags == GUA_RESET_DEFAULT || reset_flags == legacy_all))
-        reset_flags |= GUA_RESET_CLOCK;
-    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT | GUA_RESET_CLOCK;
+    const uint32_t clock_all = GUA_RESET_DEFAULT_V2 | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT;
+    if (flags_version == GUA_RESET_FLAGS_VERSION_LEGACY) {
+        if (reset_flags == GUA_RESET_DEFAULT || reset_flags == legacy_all) reset_flags |= GUA_RESET_CLOCK;
+        if (reset_flags == GUA_RESET_DEFAULT_V2 || reset_flags == clock_all) reset_flags |= GUA_RESET_WORLD_OBJECTS;
+    }
+    if (flags_version == GUA_RESET_FLAGS_VERSION_V1 &&
+        (reset_flags == GUA_RESET_DEFAULT_V2 || reset_flags == clock_all))
+        reset_flags |= GUA_RESET_WORLD_OBJECTS;
+    const uint32_t known_flags = GUA_RESET_NODES | GUA_RESET_REQUESTS | GUA_RESET_EVENTS | GUA_RESET_HISTORY | GUA_RESET_LOGS | GUA_RESET_SCREENSHOT | GUA_RESET_CLOCK | GUA_RESET_WORLD_OBJECTS;
     if ((reset_flags & ~known_flags) != 0U) return GUA_RESET_ERROR_INVALID_ARGUMENT;
 
     const std::lock_guard lock(ctx->mutex);
-    *out_report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    const uint32_t output_size = out_report->struct_size;
+    std::memset(out_report, 0, output_size);
+    out_report->struct_size = output_size;
     out_report->previous_session_epoch = ctx->session_epoch;
     out_report->session_epoch = ctx->session_epoch;
     out_report->pending_request_count = static_cast<uint32_t>(ctx->action_requests.size());
@@ -1535,6 +1927,8 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     out_report->discarded_event_count = (reset_flags & GUA_RESET_EVENTS) != 0U ? static_cast<uint32_t>(ctx->events.size()) : 0;
     out_report->discarded_log_count = (reset_flags & GUA_RESET_LOGS) != 0U ? static_cast<uint32_t>(ctx->logs.size()) : 0;
     out_report->discarded_screenshot = (reset_flags & GUA_RESET_SCREENSHOT) != 0U && !ctx->screenshot.data_uri.empty() ? 1 : 0;
+    if (output_size >= sizeof(gua_reset_report_t))
+        out_report->discarded_world_object_count = (reset_flags & GUA_RESET_WORLD_OBJECTS) != 0U ? static_cast<uint32_t>(ctx->world_objects.size()) : 0;
 
     if ((reset_flags & GUA_RESET_NODES) != 0U) {
         ctx->screen = "unknown";
@@ -1574,10 +1968,22 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         ctx->clock_completed_operation_sequence = ctx->next_clock_operation_sequence - 1;
         ++ctx->clock_generation;
     }
+    if ((reset_flags & GUA_RESET_WORLD_OBJECTS) != 0U) {
+        ctx->world_scene = "unknown"; ctx->world_objects.clear(); ctx->staging_world_scene = "unknown";
+        ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; ctx->staging_world_valid = true;
+        ctx->world_frame_sequence = 0; ctx->world_revision = 0; ctx->player_world_revision = 0;
+        ctx->previous_world_snapshot.clear(); ctx->previous_player_world_snapshot.clear();
+        ctx->world_json_cache_debug.clear(); ctx->world_json_cache_player.clear();
+    }
     ctx->frame_sequence = 0;
     ctx->revision = 0;
     ctx->previous_semantic_snapshot.clear();
     ctx->json_cache.clear();
+    ctx->world_frame_sequence = 0;
+    ctx->world_revision = 0;
+    ctx->player_world_revision = 0;
+    ctx->world_json_cache_debug.clear();
+    ctx->world_json_cache_player.clear();
     ++ctx->session_epoch;
     ctx->next_request_id = 1;
     out_report->session_epoch = ctx->session_epoch;

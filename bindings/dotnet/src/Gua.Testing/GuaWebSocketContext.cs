@@ -5,7 +5,7 @@ using Gua.Core;
 
 namespace Gua.Testing;
 
-public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IDisposable
+public sealed partial class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsyncClockContext, IGuaWorldContext, IDisposable
 {
     private static readonly TimeSpan MinimumClockPauseResponseTimeout = TimeSpan.FromSeconds(11);
     private readonly Uri uri;
@@ -157,14 +157,14 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         e = default;
         return false;
     }
-    public GuaContextStatus GetContextStatus() { var s = Request<Status>(new { type = "get_context_status" }); return new(s.SessionEpoch, s.FrameSequence, s.Revision, s.NodeCount, s.PendingRequestCount, s.InFlightRequestCount, s.UnconsumedEventCount, s.LogCount, s.HasScreenshot, Action(s.FirstPendingAction), s.FirstPendingNodeId, Action(s.FirstEventAction), s.FirstEventNodeId); }
+    public GuaContextStatus GetContextStatus() { var s = Request<Status>(new { type = "get_context_status" }); return new(s.SessionEpoch, s.FrameSequence, s.Revision, s.NodeCount, s.PendingRequestCount, s.InFlightRequestCount, s.UnconsumedEventCount, s.LogCount, s.HasScreenshot, Action(s.FirstPendingAction), s.FirstPendingNodeId, Action(s.FirstEventAction), s.FirstEventNodeId) { WorldFrameSequence = s.WorldFrameSequence, WorldRevision = s.WorldRevision, WorldObjectCount = s.WorldObjectCount }; }
     public GuaResetReport Reset(GuaResetOptions? options = null)
     {
         options ??= new(); var epoch = options.ExpectedSessionEpoch ?? GetContextStatus().SessionEpoch;
-        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, flagsVersion = 1, strict = options.Strict });
+        var r = Request<ResetResult>(new { type = "reset_context", expectedSessionEpoch = epoch, flags = (uint)options.Targets, flagsVersion = 2, strict = options.Strict });
         return new((GuaResetResult)r.Result, r.PreviousSessionEpoch, r.SessionEpoch, r.PendingRequestCount, r.InFlightRequestCount, r.UnconsumedEventCount,
             r.DiscardedNodeCount, r.DiscardedPendingRequestCount, r.DiscardedInFlightRequestCount, r.DiscardedEventCount, r.DiscardedLogCount, r.DiscardedScreenshot,
-            Action(r.FirstPendingAction), r.FirstPendingNodeId, Action(r.FirstEventAction), r.FirstEventNodeId);
+            Action(r.FirstPendingAction), r.FirstPendingNodeId, Action(r.FirstEventAction), r.FirstEventNodeId) { DiscardedWorldObjectCount = r.DiscardedWorldObjectCount };
     }
     private static GuaActionType? Action(int value) => value == 0 ? null : (GuaActionType)value;
     private GuaRemoteTree Tree() => GetRemoteTree();
@@ -255,6 +255,6 @@ public sealed class GuaWebSocketContext : IGuaContext, IGuaClockContext, IGuaAsy
         ulong CompletedOperationSequence = 0, ulong? OperationSequence = null,
         ulong? CompletionSessionEpoch = null, ulong? CompletionAfterFrameSequence = null);
     private sealed record EventResult(ulong RequestId, int Action, bool Succeeded, int Error, string NodeId, string Value, bool Sensitive, ulong SessionEpoch, ulong FrameSequence, ulong Revision);
-    private sealed record Status(ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);
-    private sealed record ResetResult(int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount, uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount, uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId);
+    private sealed record Status(ulong SessionEpoch, ulong FrameSequence, ulong Revision, uint NodeCount, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint LogCount, bool HasScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId, ulong WorldFrameSequence = 0, ulong WorldRevision = 0, uint WorldObjectCount = 0);
+    private sealed record ResetResult(int Result, ulong PreviousSessionEpoch, ulong SessionEpoch, uint PendingRequestCount, uint InFlightRequestCount, uint UnconsumedEventCount, uint DiscardedNodeCount, uint DiscardedPendingRequestCount, uint DiscardedInFlightRequestCount, uint DiscardedEventCount, uint DiscardedLogCount, bool DiscardedScreenshot, int FirstPendingAction, string FirstPendingNodeId, int FirstEventAction, string FirstEventNodeId, uint DiscardedWorldObjectCount = 0);
 }
