@@ -12,6 +12,8 @@ public sealed class GuaGodotRuntime : IDisposable
     private readonly HashSet<ulong> _connectedButtons = new();
     private readonly HashSet<string> _suppressedButtonSignals = new(StringComparer.Ordinal);
     private bool _screenshotCaptureRunning;
+    private ulong _lastClockTicksUsec;
+    private bool _clockPumpEnabled;
 
     public GuaGodotRuntime()
     {
@@ -87,6 +89,12 @@ public sealed class GuaGodotRuntime : IDisposable
     {
         ThrowIfDisposed();
         _attachedRoot = root ?? throw new ArgumentNullException(nameof(root));
+        _lastClockTicksUsec = Time.GetTicksUsec();
+        if (!_clockPumpEnabled)
+        {
+            _runtime!.EnableVirtualClockAdapter();
+            _clockPumpEnabled = true;
+        }
     }
 
     public void SyncAttachedTree(string screen)
@@ -97,12 +105,37 @@ public sealed class GuaGodotRuntime : IDisposable
             throw new InvalidOperationException("Gua Godot runtime is not attached to a root Control.");
         }
 
+        PumpClock();
         BeginFrame(screen);
         _buttonsById.Clear();
         CollectControl(_attachedRoot, _attachedRoot);
         EndFrame();
         DispatchClickRequests();
         ScheduleScreenshotCapture();
+    }
+
+    /// <summary>Clock used by game logic that participates in Gua virtual-time control.</summary>
+    public GuaRuntimeClock Clock
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _runtime!.Clock;
+        }
+    }
+
+    public void AdvanceClock(TimeSpan unscaledDelta)
+    {
+        ThrowIfDisposed();
+        Clock.Advance(unscaledDelta);
+        _lastClockTicksUsec = Time.GetTicksUsec();
+    }
+
+    public void AdvanceClockMilliseconds(double unscaledDeltaMilliseconds)
+    {
+        ThrowIfDisposed();
+        Clock.AdvanceMilliseconds(unscaledDeltaMilliseconds);
+        _lastClockTicksUsec = Time.GetTicksUsec();
     }
 
     public bool EnqueueClick(string id)
@@ -160,6 +193,14 @@ public sealed class GuaGodotRuntime : IDisposable
         {
             throw new ObjectDisposedException(nameof(GuaGodotRuntime));
         }
+    }
+
+    private void PumpClock()
+    {
+        var ticksUsec = Time.GetTicksUsec();
+        var elapsedUsec = ticksUsec >= _lastClockTicksUsec ? ticksUsec - _lastClockTicksUsec : 0;
+        _lastClockTicksUsec = ticksUsec;
+        Clock.AdvanceMilliseconds(elapsedUsec / 1000.0);
     }
 
     private void CollectControl(Control root, Control control)

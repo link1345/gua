@@ -5,6 +5,7 @@
 #endif
 
 #include <cstdio>
+#include <atomic>
 #include <chrono>
 #include <algorithm>
 #include <deque>
@@ -38,6 +39,8 @@ struct gua_runtime_t {
     std::string diagnostics_json;
     std::string godot_plugin_version;
     std::map<std::string, std::string> adapter_versions;
+    bool virtual_clock_enabled = false;
+    std::atomic_bool bridge_stopping = false;
     uint64_t next_screenshot_request_id = 1;
     std::deque<gua_screenshot_request_t> screenshot_requests;
     std::unordered_map<uint64_t, ScreenshotBatch> screenshot_batches;
@@ -60,6 +63,61 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
         std::snprintf(out_json, static_cast<std::size_t>(out_json_size), "%s", json.c_str());
     }
     return required_size;
+}
+
+void filter_runtime_capabilities(std::string& json, bool virtual_clock_enabled)
+{
+    if (virtual_clock_enabled) return;
+    constexpr std::string_view key = "\"capabilities\":[";
+    constexpr std::string_view capability = "\"virtual_clock_v1\"";
+    const auto key_position = json.find(key);
+    if (key_position == std::string::npos) return;
+    const auto array_begin = key_position + key.size();
+    const auto array_end = json.find(']', array_begin);
+    auto position = json.find(capability, array_begin);
+    if (array_end == std::string::npos || position == std::string::npos || position >= array_end) return;
+    auto size = capability.size();
+    if (position > array_begin && json[position - 1] == ',') {
+        --position;
+        ++size;
+    } else if (position + size < array_end && json[position + size] == ',') {
+        ++size;
+    }
+    json.erase(position, size);
+}
+
+std::string core_version_json()
+{
+    const int size = gua_copy_version_json(nullptr, 0);
+    std::string json(static_cast<std::size_t>(size), '\0');
+    gua_copy_version_json(json.data(), size);
+    json.resize(static_cast<std::size_t>(size - 1));
+    return json;
+}
+
+std::string decorate_version_json(gua_runtime_t* runtime, std::string json)
+{
+    filter_runtime_capabilities(json, runtime->virtual_clock_enabled);
+    if (!runtime->godot_plugin_version.empty()) {
+        const std::string marker = "\"godotPluginVersion\":null";
+        const auto position = json.find(marker);
+        if (position != std::string::npos)
+            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
+    }
+    const std::string adapter_marker = "\"adapterVersions\":{}";
+    const auto adapter_position = json.find(adapter_marker);
+    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
+        std::string adapters = "\"adapterVersions\":{";
+        bool first = true;
+        for (const auto& [name, version] : runtime->adapter_versions) {
+            if (!first) adapters += ',';
+            first = false;
+            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
+        }
+        adapters += '}';
+        json.replace(adapter_position, adapter_marker.size(), adapters);
+    }
+    return json;
 }
 
 std::string copy_ui_tree_json(gua_runtime_t* runtime)
@@ -92,25 +150,13 @@ std::string copy_diagnostics_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
     std::string json = gua_get_diagnostics_json(runtime->context);
-    if (!runtime->godot_plugin_version.empty()) {
-        const std::string marker = "\"godotPluginVersion\":null";
-        const auto position = json.find(marker);
-        if (position != std::string::npos) {
-            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
-        }
-    }
-    const std::string adapter_marker = "\"adapterVersions\":{}";
-    const auto adapter_position = json.find(adapter_marker);
-    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
-        std::string adapters = "\"adapterVersions\":{";
-        bool first = true;
-        for (const auto& [name, version] : runtime->adapter_versions) {
-            if (!first) adapters += ',';
-            first = false;
-            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
-        }
-        adapters += '}';
-        json.replace(adapter_position, adapter_marker.size(), adapters);
+    const std::string unfiltered_version = core_version_json();
+    const std::string decorated_version = decorate_version_json(runtime, unfiltered_version);
+    const std::string marker = ",\"version\":" + unfiltered_version + ",\"uiTree\":";
+    const auto marker_position = json.rfind(marker);
+    if (marker_position != std::string::npos) {
+        const auto version_position = marker_position + std::string_view(",\"version\":").size();
+        json.replace(version_position, unfiltered_version.size(), decorated_version);
     }
     return json;
 }
@@ -127,30 +173,7 @@ bool valid_adapter_name(std::string_view adapter)
 std::string copy_version_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
-    char buffer[2048] {};
-    gua_copy_version_json(buffer, static_cast<int>(sizeof(buffer)));
-    std::string json = buffer;
-    if (!runtime->godot_plugin_version.empty()) {
-        const std::string marker = "\"godotPluginVersion\":null";
-        const auto position = json.find(marker);
-        if (position != std::string::npos) {
-            json.replace(position, marker.size(), "\"godotPluginVersion\":\"" + escape_json(runtime->godot_plugin_version) + "\"");
-        }
-    }
-    const std::string adapter_marker = "\"adapterVersions\":{}";
-    const auto adapter_position = json.find(adapter_marker);
-    if (adapter_position != std::string::npos && !runtime->adapter_versions.empty()) {
-        std::string adapters = "\"adapterVersions\":{";
-        bool first = true;
-        for (const auto& [name, version] : runtime->adapter_versions) {
-            if (!first) adapters += ',';
-            first = false;
-            adapters += "\"" + escape_json(name) + "\":\"" + escape_json(version) + "\"";
-        }
-        adapters += '}';
-        json.replace(adapter_position, adapter_marker.size(), adapters);
-    }
-    return json;
+    return decorate_version_json(runtime, core_version_json());
 }
 
 std::string status_json(gua_runtime_t* runtime)
@@ -198,9 +221,10 @@ void invalidate_screenshot_requests(gua_runtime_t* runtime)
         result = stale_screenshot_json(request_id, status);
 }
 
-std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags, bool strict)
+std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expected_epoch, unsigned int flags,
+    unsigned int flags_version, bool strict)
 {
-    gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch };
+    gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch, flags_version };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const std::lock_guard lock(runtime->context_mutex);
     const int result = gua_reset_context(runtime->context, &options, &report);
@@ -536,6 +560,62 @@ extern "C" int gua_runtime_copy_version_json(gua_runtime_t* runtime, char* out_j
     return copy_json_string(copy_version_json(runtime), out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_clock_install(gua_runtime_t* runtime, double initial_time_ms, double step_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_install(runtime->context, initial_time_ms, step_ms);
+}
+
+extern "C" int gua_runtime_clock_pause(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_pause(runtime->context);
+}
+
+extern "C" int gua_runtime_clock_run_for(gua_runtime_t* runtime, double duration_ms, double step_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_run_for(runtime->context, duration_ms, step_ms);
+}
+
+extern "C" int gua_runtime_clock_resume(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_resume(runtime->context);
+}
+
+extern "C" int gua_runtime_clock_advance(gua_runtime_t* runtime, double duration_ms)
+{
+    if (!valid_runtime(runtime)) return GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_advance(runtime->context, duration_ms);
+}
+
+extern "C" int gua_runtime_clock_get_status(gua_runtime_t* runtime, gua_clock_status_t* out_status)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_get_status(runtime->context, out_status);
+}
+
+extern "C" int gua_runtime_clock_copy_status_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_copy_status_json(runtime->context, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_clock_consume_step(gua_runtime_t* runtime, gua_clock_step_t* out_step)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_clock_consume_step(runtime->context, out_step);
+}
+
 extern "C" void gua_runtime_set_godot_plugin_version(gua_runtime_t* runtime, const char* version)
 {
     if (!valid_runtime(runtime)) return;
@@ -551,6 +631,13 @@ extern "C" void gua_runtime_set_adapter_version(gua_runtime_t* runtime, const ch
     const std::lock_guard lock(runtime->context_mutex);
     if (version == nullptr || version[0] == '\0') runtime->adapter_versions.erase(adapter);
     else runtime->adapter_versions[adapter] = version;
+}
+
+extern "C" void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, int enabled)
+{
+    if (!valid_runtime(runtime)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    runtime->virtual_clock_enabled = enabled != 0;
 }
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)
@@ -761,6 +848,7 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
     if (runtime->bridge != nullptr && runtime->bridge->running()) {
         return runtime->bridge->port() == static_cast<unsigned short>(port) ? 1 : 0;
     }
+    runtime->bridge_stopping.store(false);
 
     gua::ws::BridgeHandlers handlers {
         .get_ui_tree_json = [runtime] {
@@ -798,6 +886,95 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         .get_version_json = [runtime] {
             return copy_version_json(runtime);
         },
+        .clock_supported = [runtime] {
+            const std::lock_guard lock(runtime->context_mutex);
+            return runtime->virtual_clock_enabled;
+        },
+        .get_clock_json = [runtime] {
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_clock_copy_status_json(runtime->context, nullptr, 0);
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_clock_copy_status_json(runtime->context, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
+        },
+        .control_clock = [runtime](std::string_view command, double value_ms, double step_ms, bool step_ms_present) {
+            const auto clock_error = [](int result) {
+                return result == GUA_CLOCK_ERROR_NOT_INSTALLED ? "not_installed" :
+                    result == GUA_CLOCK_ERROR_INVALID_STATE ? "invalid_state" :
+                    result == GUA_CLOCK_ERROR_EXECUTION_LIMIT ? "execution_limit" : "invalid_duration";
+            };
+            const auto copy_clock = [runtime] {
+                const int size = gua_clock_copy_status_json(runtime->context, nullptr, 0);
+                std::string json(static_cast<std::size_t>(size), '\0');
+                gua_clock_copy_status_json(runtime->context, json.data(), size);
+                json.resize(static_cast<std::size_t>(size - 1));
+                return json;
+            };
+
+            if (command == "clock_pause") {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                bool waiting_for_frame = false;
+                unsigned long long completion_after_frame = 0;
+                unsigned long long session_epoch = 0;
+                while (std::chrono::steady_clock::now() < deadline) {
+                    if (runtime->bridge_stopping.load())
+                        return gua::ws::CommandResult { false, {}, "stale_session" };
+                    {
+                        const std::lock_guard lock(runtime->context_mutex);
+                        gua_clock_status_t clock { sizeof(gua_clock_status_t) };
+                        gua_clock_operation_status_t operation { sizeof(gua_clock_operation_status_t) };
+                        gua_context_status_t context { sizeof(gua_context_status_t) };
+                        if (gua_clock_get_status(runtime->context, &clock) == 0 ||
+                            gua_clock_get_operation_status(runtime->context, &operation) == 0 ||
+                            gua_get_context_status(runtime->context, &context) == 0)
+                            return gua::ws::CommandResult { false, {}, "invalid_state" };
+                        if (waiting_for_frame && context.session_epoch != session_epoch)
+                            return gua::ws::CommandResult { false, {}, "stale_session" };
+                        if (clock.pending_ms > 0.0 ||
+                            operation.latest_operation_sequence > operation.completed_operation_sequence) {
+                            waiting_for_frame = true;
+                            completion_after_frame = context.frame_sequence;
+                            session_epoch = context.session_epoch;
+                        } else if (!waiting_for_frame || context.frame_sequence > completion_after_frame) {
+                            const int result = gua_clock_pause(runtime->context);
+                            if (result == GUA_CLOCK_OK)
+                                return gua::ws::CommandResult { true, copy_clock(), {} };
+                            if (result != GUA_CLOCK_ERROR_INVALID_STATE)
+                                return gua::ws::CommandResult { false, {}, clock_error(result) };
+                        }
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                return gua::ws::CommandResult { false, {}, "invalid_state" };
+            }
+
+            const std::lock_guard lock(runtime->context_mutex);
+            int result = GUA_CLOCK_ERROR_INVALID_ARGUMENT;
+            gua_context_status_t completion_context { sizeof(gua_context_status_t) };
+            gua_clock_operation_status_t operation_status { sizeof(gua_clock_operation_status_t) };
+            if (command == "clock_install")
+                result = gua_clock_install(runtime->context, value_ms, step_ms_present ? step_ms : 1000.0 / 60.0);
+            else if (command == "clock_run_for") {
+                gua_clock_status_t clock { sizeof(gua_clock_status_t) };
+                if (gua_clock_get_status(runtime->context, &clock) != 0 &&
+                    gua_get_context_status(runtime->context, &completion_context) != 0)
+                    result = gua_clock_run_for(runtime->context, value_ms, step_ms_present ? step_ms : clock.default_step_ms);
+            } else if (command == "clock_resume") result = gua_clock_resume(runtime->context);
+            if (result != GUA_CLOCK_OK) {
+                return gua::ws::CommandResult { false, {}, clock_error(result) };
+            }
+            std::string json = copy_clock();
+            if (command == "clock_run_for") {
+                if (gua_clock_get_operation_status(runtime->context, &operation_status) == 0)
+                    return gua::ws::CommandResult { false, {}, "invalid_state" };
+                json.pop_back();
+                json += ",\"completionSessionEpoch\":" + std::to_string(completion_context.session_epoch) +
+                    ",\"completionAfterFrameSequence\":" + std::to_string(completion_context.frame_sequence) +
+                    ",\"operationSequence\":" + std::to_string(operation_status.latest_operation_sequence) + '}';
+            }
+            return gua::ws::CommandResult { true, std::move(json), {} };
+        },
         .query_nodes_json = [runtime](const gua::ws::QuerySelector& selector) {
             gua_selector_v1_t native {
                 sizeof(gua_selector_v1_t),
@@ -816,8 +993,8 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             return json;
         },
         .get_context_status_json = [runtime] { return status_json(runtime); },
-        .reset_context_json = [runtime](unsigned long long expected_epoch, unsigned int flags, bool strict) {
-            return reset_report_json(runtime, expected_epoch, flags, strict);
+        .reset_context_json = [runtime](unsigned long long expected_epoch, unsigned int flags, unsigned int flags_version, bool strict) {
+            return reset_report_json(runtime, expected_epoch, flags, flags_version, strict);
         },
         .click_node = [runtime](std::string_view node_id) {
             const std::string id(node_id);
@@ -918,6 +1095,7 @@ extern "C" void gua_runtime_stop_inspector_bridge(gua_runtime_t* runtime)
         return;
     }
 
+    runtime->bridge_stopping.store(true);
     std::unique_ptr<gua::ws::BridgeServer> bridge;
     {
         const std::lock_guard bridge_lock(runtime->bridge_mutex);

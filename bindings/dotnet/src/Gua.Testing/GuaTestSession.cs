@@ -11,7 +11,7 @@ public enum GuaResetMode
     Strict,
 }
 
-public sealed record GuaResetPolicy(GuaResetMode Mode, GuaResetTargets Targets = GuaResetTargets.Default)
+public sealed record GuaResetPolicy(GuaResetMode Mode, GuaResetTargets Targets = GuaResetTargets.SessionDefault)
 {
     public static GuaResetPolicy Disabled { get; } = new(GuaResetMode.Disabled);
     public static GuaResetPolicy NonStrict { get; } = new(GuaResetMode.NonStrict);

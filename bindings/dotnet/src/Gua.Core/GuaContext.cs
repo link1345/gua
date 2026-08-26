@@ -2,9 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace Gua.Core;
 
-public sealed class GuaContext : IGuaContext, IDisposable
+public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private nint _handle;
+    private GuaClock? _clock;
 
     public GuaContext()
     {
@@ -145,6 +146,44 @@ public sealed class GuaContext : IGuaContext, IDisposable
         return GuaVersion.Parse(ReadCopiedJson(JsonSource.Version, _handle));
     }
 
+    public GuaClock Clock
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _clock ??= new GuaClock(this, registerWithContext: false);
+        }
+    }
+
+    internal void RegisterClock(GuaClock clock)
+    {
+        ThrowIfDisposed();
+        if (_clock is not null && !ReferenceEquals(_clock, clock))
+            throw new InvalidOperationException("A GuaContext can own only one GuaClock. Reuse context.Clock instead of constructing another clock.");
+        _clock = clock;
+    }
+
+    public GuaClockResult InstallClock(TimeSpan? initialTime = null, TimeSpan? step = null)
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_install(_handle,
+        initialTime?.TotalMilliseconds ?? 0.0, step?.TotalMilliseconds ?? 1000.0 / 60.0); }
+    public GuaClockResult PauseClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_pause(_handle); }
+    public GuaClockResult RunClockFor(TimeSpan duration, TimeSpan? step = null)
+    { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_run_for(_handle, duration.TotalMilliseconds,
+        step?.TotalMilliseconds ?? GetClockStatus().DefaultStepMilliseconds); }
+    public GuaClockResult ResumeClock() { ThrowIfDisposed(); return (GuaClockResult)Native.gua_clock_resume(_handle); }
+    public GuaClockStatus GetClockStatus()
+    {
+        ThrowIfDisposed(); var value = new Native.GuaNativeClockStatus { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeClockStatus>() };
+        if (Native.gua_clock_get_status(_handle, ref value) == 0) throw new InvalidOperationException("Failed to read Gua clock status.");
+        return new(value.Installed != 0, value.Paused != 0, value.NowMs, value.DefaultStepMs, value.PendingMs, value.Generation);
+    }
+    public bool TryConsumeClockStep(out GuaClockStep step)
+    {
+        ThrowIfDisposed(); var value = new Native.GuaNativeClockStep { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeClockStep>() };
+        if (Native.gua_clock_consume_step(_handle, ref value) == 0) { step = default; return false; }
+        step = new(new GuaClockDelta(value.DeltaMs), value.FinalStep != 0, value.Generation); return true;
+    }
+
     public void ConfigureDiagnostics(uint historyLimit, string environmentJson = "{}")
     {
         ThrowIfDisposed();
@@ -184,6 +223,7 @@ public sealed class GuaContext : IGuaContext, IDisposable
             Flags = (uint)options.Targets,
             Strict = options.Strict ? 1 : 0,
             ExpectedSessionEpoch = options.ExpectedSessionEpoch ?? 0,
+            FlagsVersion = 1,
         };
         Native.GuaNativeResetReport report = default;
         report.StructSize = (uint)sizeof(Native.GuaNativeResetReport);
@@ -191,6 +231,10 @@ public sealed class GuaContext : IGuaContext, IDisposable
         if (result == (int)GuaResetResult.InvalidArgument)
         {
             throw new ArgumentException("Invalid Gua reset options.", nameof(options));
+        }
+        if (result == (int)GuaResetResult.Succeeded && _clock is not null)
+        {
+            _clock.ObserveStatus(GetClockStatus());
         }
         return new GuaResetReport(
             (GuaResetResult)result, report.PreviousSessionEpoch, report.SessionEpoch,

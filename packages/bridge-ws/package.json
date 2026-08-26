@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run src/index.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "bun test test"
   },
   "dependencies": {
     "@gua/inspector": "0.0.0"

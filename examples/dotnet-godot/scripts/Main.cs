@@ -31,7 +31,7 @@ public partial class Main : Control
 
     }
 
-    public override void _Process(double delta)
+    public override void _Process(double _delta)
     {
         _gua.SyncAttachedTree(CurrentScreen);
     }

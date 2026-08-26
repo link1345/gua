@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { PNG } from "pngjs";
 
 import { GuaAutomationManager } from "../src/automation";
-import { guaMcpTools } from "../src/index";
+import { guaMcpTools, parseClockRunForArguments } from "../src/index";
 
 const roots: string[] = [];
 
@@ -15,6 +15,15 @@ afterEach(async () => {
 });
 
 describe("GuaAutomationManager", () => {
+  test("rejects clock_run_for without its required duration", () => {
+    expect(() => parseClockRunForArguments({})).toThrow("durationMs");
+    expect(parseClockRunForArguments({ durationMs: 25 })).toEqual({
+      type: "clock_run_for",
+      durationMs: 25,
+      stepMs: undefined,
+    });
+  });
+
   test("publishes the AI recording and visual tool surface", () => {
     expect(guaMcpTools).toContain("start_recording");
     expect(guaMcpTools).toContain("stop_recording");
@@ -22,6 +31,8 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("replay_recording");
     expect(guaMcpTools).toContain("compare_screenshot");
     expect(guaMcpTools).toContain("get_visual_artifacts");
+    expect(guaMcpTools).toContain("clock_pause");
+    expect(guaMcpTools).toContain("clock_run_for");
   });
 
   test("records, redacts, saves, and reloads semantic operations", async () => {

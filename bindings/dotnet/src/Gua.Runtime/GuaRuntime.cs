@@ -25,7 +25,11 @@ public sealed class GuaRuntime : IDisposable
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         { throw new InvalidOperationException("Failed to load the native Gua runtime. Ensure gua.dll and gua_runtime.dll match the current platform and architecture.", error); }
         if (_handle == 0) throw new InvalidOperationException("Failed to create a Gua runtime.");
+        Clock = new GuaRuntimeClock(this);
     }
+
+    public GuaRuntimeClock Clock { get; }
+    internal nint Handle { get { ThrowIfDisposed(); return _handle; } }
 
     public bool InspectorBridgeRunning { get { ThrowIfDisposed(); return Native.gua_runtime_inspector_bridge_running(_handle) != 0; } }
     public string InspectorBridgeUrl { get { ThrowIfDisposed(); return ReadUtf8(Native.gua_runtime_inspector_bridge_url(_handle)); } }
@@ -50,6 +54,8 @@ public sealed class GuaRuntime : IDisposable
     }
 
     public void SetGodotPluginVersion(string version) { ThrowIfDisposed(); Native.gua_runtime_set_godot_plugin_version(_handle, version ?? string.Empty); }
+    /// <summary>Advertises virtual_clock_v1 after an adapter has installed an unscaled clock pump.</summary>
+    public void EnableVirtualClockAdapter() { ThrowIfDisposed(); Native.gua_runtime_set_virtual_clock_enabled(_handle, 1); }
     public bool EnqueueClick(string id) { ThrowIfDisposed(); return Native.gua_runtime_enqueue_click(_handle, id) != 0; }
     public bool ConsumeClickRequest(string id) { ThrowIfDisposed(); return Native.gua_runtime_consume_click_request(_handle, id) != 0; }
     public bool EmitClick(string id) { ThrowIfDisposed(); return Native.gua_runtime_emit_click(_handle, id) != 0; }

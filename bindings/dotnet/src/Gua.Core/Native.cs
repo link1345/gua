@@ -64,12 +64,21 @@ internal static partial class Native
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeClockStatus
+    { public uint StructSize; public int Installed; public int Paused; public double NowMs; public double DefaultStepMs; public double PendingMs; public ulong Generation; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GuaNativeClockStep
+    { public uint StructSize; public double DeltaMs; public int FinalStep; public ulong Generation; }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct GuaNativeResetOptions
     {
         public uint StructSize;
         public uint Flags;
         public int Strict;
         public ulong ExpectedSessionEpoch;
+        public uint FlagsVersion;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -363,6 +372,13 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_copy_version_json(byte* outJson, int outJsonSize);
+
+    [LibraryImport("gua")] internal static partial int gua_clock_install(nint context, double initialTimeMs, double stepMs);
+    [LibraryImport("gua")] internal static partial int gua_clock_pause(nint context);
+    [LibraryImport("gua")] internal static partial int gua_clock_run_for(nint context, double durationMs, double stepMs);
+    [LibraryImport("gua")] internal static partial int gua_clock_resume(nint context);
+    [LibraryImport("gua")] internal static partial int gua_clock_get_status(nint context, ref GuaNativeClockStatus status);
+    [LibraryImport("gua")] internal static partial int gua_clock_consume_step(nint context, ref GuaNativeClockStep step);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int gua_get_node_state(nint context, string nodeId, out GuaNodeState state);
