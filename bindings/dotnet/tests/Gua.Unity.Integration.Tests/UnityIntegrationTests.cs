@@ -75,14 +75,28 @@ public sealed class UnityIntegrationTests
 
         const string sensitiveValue = "unity-web-secret";
         var sensitiveError = host.Context.EnqueueAction(
-            new GuaActionRequest(GuaActionType.SetValue, "sample-input", sensitiveValue, Sensitive: true),
+            new GuaActionRequest(GuaActionType.SetValue, "sensitive-input", sensitiveValue, Sensitive: true),
             out var sensitiveRequestId);
         Assert.That(sensitiveError, Is.EqualTo(GuaActionError.None));
         Assert.That(WaitForActionEvent(host, sensitiveRequestId, out var sensitiveResult), Is.True);
         Assert.That(sensitiveResult.Succeeded, Is.True, $"Sensitive uGUI set_value failed: {sensitiveResult.Error}");
         Assert.That(sensitiveResult.Value, Is.Empty);
-        Assert.That(WaitForRedactedNode(host, "sample-input", sensitiveValue), Is.True,
+        Assert.That(WaitForRedactedNode(host, "sensitive-input", sensitiveValue), Is.True,
             "Sensitive Unity controls must omit their plaintext from semantic snapshots.");
+
+        const string detachedSensitiveValue = "unity-detached-secret";
+        Assert.That(initialTree.Nodes.Any(node => node.Id.EndsWith("/detached-sensitive-input", StringComparison.Ordinal)), Is.True);
+        var detachedSensitiveId = initialTree.Nodes.Single(node => node.Id.EndsWith("/detached-sensitive-input", StringComparison.Ordinal)).Id;
+        var detachedSensitiveError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, detachedSensitiveId, detachedSensitiveValue, Sensitive: true),
+            out var detachedSensitiveRequestId);
+        Assert.That(detachedSensitiveError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, detachedSensitiveRequestId, out var detachedSensitiveResult), Is.True);
+        Assert.That(detachedSensitiveResult.Succeeded, Is.True);
+        Assert.That(WaitForNodeAbsent(host, detachedSensitiveId), Is.True,
+            "The UI Toolkit fixture did not temporarily detach the sensitive control.");
+        Assert.That(WaitForRedactedNode(host, detachedSensitiveId, detachedSensitiveValue), Is.True,
+            "A reattached UI Toolkit control must retain its sensitive classification.");
 
         var integerSlider = initialTree.Nodes.Single(node => node.Role == "slider" && node.Label == "integer-slider");
         var integerSliderError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "7"), out var integerSliderRequestId);
@@ -259,6 +273,19 @@ public sealed class UnityIntegrationTests
             using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
             foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
                 if (node.GetProperty("id").GetString() == id && node.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String && predicate(value.GetString() ?? "")) return true;
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForNodeAbsent(UnitySceneTestHost host, string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
+            if (!tree.RootElement.GetProperty("nodes").EnumerateArray()
+                    .Any(node => node.GetProperty("id").GetString() == id)) return true;
             Thread.Sleep(20);
         }
         return false;

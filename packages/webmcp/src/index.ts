@@ -65,7 +65,7 @@ export interface GuaWebActionCompletion {
   revision?: number;
 }
 
-export interface GuaBridgeCallOptions { signal?: AbortSignal }
+export interface GuaBridgeCallOptions { signal?: AbortSignal; timeoutMs?: number }
 
 /** Implemented by the engine adapter in the same page. performAction resolves only after host completion. */
 export interface GuaBrowserBridge {
@@ -237,7 +237,7 @@ async function performActionWithCancellation(
   }
   try {
     return await withTimeout(
-      bridge.performAction(request, { signal: controller.signal }),
+      bridge.performAction(request, { signal: controller.signal, timeoutMs }),
       timeoutMs,
       signal,
       timeoutMessage,
@@ -418,6 +418,10 @@ function completionErrorCode(error: GuaWebActionCompletion["error"]): GuaWebErro
     case "unsupported":
     case "unsupported_action":
       return "unsupported_action";
+    case -6:
+    case "-6":
+    case "invalid_value":
+      return "invalid_request";
     default:
       return "action_failed";
   }

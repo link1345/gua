@@ -26,7 +26,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
     private readonly Dictionary<object, string> clickTargetIds = new();
-    private readonly HashSet<object> sensitiveTargets = new(ReferenceIdentityComparer.Instance);
+    private readonly ConditionalWeakTable<object, SensitiveTarget> sensitiveTargets = new();
     private readonly Dictionary<Button, UnityEngine.Events.UnityAction> uGuiClickHandlers = new();
     private readonly Dictionary<UnityEngine.UIElements.Button, Action> visualClickHandlers = new();
     private readonly HashSet<object> suppressedClicks = new();
@@ -35,7 +35,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
     private readonly Dictionary<ulong, int> webCalls = new();
-    private const int WebCallTimeoutMs = 5000;
+    private const int DefaultWebCallTimeoutMs = 5000;
     private string webOwnerId = string.Empty;
     private bool webInstalled;
     [DllImport("__Internal")] private static extern void GuaUnityWebInstall(string hostName, string ownerId, int timeoutMs);
@@ -62,7 +62,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 webOwnerId = Guid.NewGuid().ToString("N");
-                GuaUnityWebInstall(gameObject.name, webOwnerId, WebCallTimeoutMs);
+                GuaUnityWebInstall(gameObject.name, webOwnerId, DefaultWebCallTimeoutMs);
                 webInstalled = true;
                 Debug.Log("Gua Unity WebGL same-page bridge installed.");
             }
@@ -104,7 +104,6 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.BeginFrame(CurrentScreen());
             CollectUiToolkit();
             CollectUGui();
-            PruneSensitiveTargets();
             PruneClickObservers();
             runtime.EndFrame();
             DispatchActions();
@@ -228,7 +227,6 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         visualClickHandlers.Clear();
         clickTargetIds.Clear();
         suppressedClicks.Clear();
-        sensitiveTargets.Clear();
         runtime?.Dispose();
         runtime = null;
     }
@@ -261,7 +259,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             : $"{id}/{EscapeId(explicitId)}");
         var role = VisualRole(element);
         var label = VisualLabel(element);
-        var sensitive = sensitiveTargets.Contains(element);
+        var sensitive = sensitiveTargets.TryGetValue(element, out _);
         if (sensitive) label = string.IsNullOrWhiteSpace(element.name) ? resolved : element.name;
         var range = VisualRange(element);
         if (sensitive) range.value = null;
@@ -328,7 +326,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (GuaUnityAdapterRegistry.TryDescribe(transform, out var tmpTarget, out var tmpRole, out var tmpLabel, out var tmpValue))
         { actionTarget = tmpTarget; role = tmpRole; label = tmpLabel; value = tmpValue; }
         var selectableContentLabel = label;
-        var sensitive = sensitiveTargets.Contains(actionTarget);
+        var sensitive = sensitiveTargets.TryGetValue(actionTarget, out _);
         if (sensitive) label = transform.name;
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
@@ -380,7 +378,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             {
                 var success = Apply(pair.Value.Value, request, out var resultValue, out var failure);
                 if (success && request.Action == GuaActionType.SetValue && request.Sensitive)
-                    sensitiveTargets.Add(pair.Value.Value);
+                    sensitiveTargets.GetValue(pair.Value.Value, static _ => new SensitiveTarget());
                 runtime.EmitActionResult(request, success, success ? GuaActionError.None : failure, resultValue);
             }
             catch (Exception error)
@@ -638,11 +636,6 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         _ => transform.name,
     };
     private static string? UGuiValue(Selectable? selectable) => selectable switch { InputField i => i.text, Toggle t => t.isOn.ToString(), UnityEngine.UI.Slider s => s.value.ToString(CultureInfo.InvariantCulture), Dropdown d => d.value >= 0 && d.value < d.options.Count ? d.options[d.value].text : "", _ => null };
-    private void PruneSensitiveTargets()
-    {
-        var currentTargets = new HashSet<object>(targets.Values.Select(target => target.Value), ReferenceIdentityComparer.Instance);
-        sensitiveTargets.RemoveWhere(target => !currentTargets.Contains(target));
-    }
     private object? ResolveFocusTarget()
     {
         foreach (var document in FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
@@ -681,11 +674,6 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         internal bool Visible { get; }
         internal bool Enabled { get; }
     }
-    private sealed class ReferenceIdentityComparer : IEqualityComparer<object>
-    {
-        internal static readonly ReferenceIdentityComparer Instance = new();
-        public new bool Equals(object? left, object? right) => ReferenceEquals(left, right);
-        public int GetHashCode(object value) => RuntimeHelpers.GetHashCode(value);
-    }
+    private sealed class SensitiveTarget { }
 }
 }

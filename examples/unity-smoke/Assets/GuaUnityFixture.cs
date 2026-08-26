@@ -100,6 +100,19 @@ public static class GuaUnityFixture
         input.text = "pilot";
         input.caretPosition = input.text.Length;
 
+        var sensitiveInputObject = new GameObject("SensitiveInput", typeof(RectTransform), typeof(UnityEngine.UI.Image), typeof(InputField), typeof(GuaId));
+        sensitiveInputObject.transform.SetParent(coverage.transform, false);
+        sensitiveInputObject.GetComponent<GuaId>().Value = "sensitive-input";
+        var sensitiveInputRect = sensitiveInputObject.GetComponent<RectTransform>();
+        sensitiveInputRect.anchoredPosition = new Vector2(-420, 320);
+        sensitiveInputRect.sizeDelta = new Vector2(220, 44);
+        var sensitiveInputText = Text("Text", sensitiveInputObject.transform, "private", Vector2.zero, sensitiveInputRect.sizeDelta, 16);
+        Stretch(sensitiveInputText.rectTransform);
+        var sensitiveInput = sensitiveInputObject.GetComponent<InputField>();
+        sensitiveInput.textComponent = sensitiveInputText;
+        sensitiveInput.text = "private";
+        sensitiveInput.caretPosition = sensitiveInput.text.Length;
+
         var sliderRect = Rect("SampleSlider", coverage.transform, new Vector2(-420, 200), new Vector2(220, 32));
         sliderRect.gameObject.AddComponent<GuaId>().Value = "sample-slider";
         var slider = sliderRect.gameObject.AddComponent<UnityEngine.UI.Slider>();
@@ -154,6 +167,10 @@ public static class GuaUnityFixture
 
         var integerSlider = new SliderInt("integer-slider", 0, 10) { name = "integer-slider", value = 3 };
         root.Add(integerSlider);
+
+        var detachedSensitiveInput = new TextField("detached-sensitive-input") { name = "detached-sensitive-input", value = "attached" };
+        root.Add(detachedSensitiveInput);
+        documentObject.AddComponent<GuaUnityToolkitDetachDriver>().Configure(root, detachedSensitiveInput);
 
         var tabView = new TabView { name = "fixture-tabs" };
         tabView.Add(new Tab("First") { name = "first-tab" });
@@ -246,6 +263,36 @@ public sealed class GuaUnityHostClickDriver : MonoBehaviour
         yield return null;
         yield return null;
         Button.onClick.Invoke();
+        Destroy(this);
+    }
+}
+
+public sealed class GuaUnityToolkitDetachDriver : MonoBehaviour
+{
+    private VisualElement parent;
+    private TextField target;
+    private string initialValue;
+    private int detachedFrames = -1;
+
+    public void Configure(VisualElement targetParent, TextField targetField)
+    {
+        parent = targetParent;
+        target = targetField;
+        initialValue = targetField.value;
+    }
+
+    private void Update()
+    {
+        if (target == null || parent == null) return;
+        if (detachedFrames < 0)
+        {
+            if (string.Equals(target.value, initialValue, StringComparison.Ordinal)) return;
+            target.RemoveFromHierarchy();
+            detachedFrames = 10;
+            return;
+        }
+        if (detachedFrames-- > 0) return;
+        parent.Add(target);
         Destroy(this);
     }
 }

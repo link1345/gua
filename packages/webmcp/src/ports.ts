@@ -57,10 +57,16 @@ async function invoke(port: GuaInPagePort, command: GuaInPageCommand, options?: 
 function parseTree(value: unknown): GuaUiTree {
   const parsed = parseJson(value);
   const record = asRecord(parsed);
-  if (!record || record.schemaVersion !== 2 ||
+  if (!record || typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
+    throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
+  }
+  const hasMetadata = record.schemaVersion !== undefined || record.frameSequence !== undefined || record.revision !== undefined;
+  if (!hasMetadata) {
+    return { ...record, schemaVersion: 2, frameSequence: 0, revision: 0 } as unknown as GuaUiTree;
+  }
+  if (record.schemaVersion !== 2 ||
       !Number.isInteger(record.frameSequence) || (record.frameSequence as number) < 0 ||
-      !Number.isInteger(record.revision) || (record.revision as number) < 0 ||
-      typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
+      !Number.isInteger(record.revision) || (record.revision as number) < 0) {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
   }
   return parsed as GuaUiTree;

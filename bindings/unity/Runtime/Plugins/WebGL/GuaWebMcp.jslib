@@ -61,7 +61,12 @@ mergeInto(LibraryManager.library, {
         if (state.disposed) return Promise.reject({ code: 'engine_unsupported', message: 'The Unity WebGL Gua runtime is unavailable.' });
         if (command.type === 'get_screenshot') return Promise.reject({ code: 'engine_unsupported', message: 'Unity WebGL screenshot readback is not enabled.' });
         const signal = options && options.signal;
+        const requestedTimeoutMs = options && options.timeoutMs;
         if (signal && signal.aborted) return Promise.reject({ code: 'aborted', message: 'The Unity WebGL Gua call was aborted.' });
+        if (requestedTimeoutMs !== undefined && (!Number.isInteger(requestedTimeoutMs) || requestedTimeoutMs < 0 || requestedTimeoutMs > 2147483647)) {
+          return Promise.reject({ code: 'invalid_request', message: 'Unity WebGL timeoutMs must be an integer from 0 to 2147483647.' });
+        }
+        const effectiveTimeoutMs = requestedTimeoutMs === undefined ? callTimeoutMs : requestedTimeoutMs;
         const callId = globalThis.__guaUnityWebNextCallId || 1;
         globalThis.__guaUnityWebNextCallId = callId + 1;
         return new Promise((resolve, reject) => {
@@ -70,7 +75,7 @@ mergeInto(LibraryManager.library, {
             if (!entry) return;
             cancelHostCall(callId);
             entry.reject({ code: 'timeout', message: 'Timed out waiting for Unity WebGL host completion.' });
-          }, callTimeoutMs);
+          }, effectiveTimeoutMs);
           const aborted = function () {
             const entry = takePending(callId);
             if (!entry) return;

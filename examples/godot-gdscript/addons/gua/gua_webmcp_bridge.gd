@@ -51,7 +51,11 @@ func attach(gua_adapter: RefCounted) -> bool:
       if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
       if (!command || typeof command.type !== 'string') throw engineError('invalid_request', 'Missing Gua in-page command.');
       const signal = options && options.signal;
+      const requestedTimeoutMs = options && options.timeoutMs;
       if (signal && signal.aborted) throw engineError('aborted', 'The Godot Gua call was aborted.');
+      if (requestedTimeoutMs !== undefined && (!Number.isInteger(requestedTimeoutMs) || requestedTimeoutMs < 0 || requestedTimeoutMs > 2147483647)) {
+        throw engineError('invalid_request', 'Godot Web timeoutMs must be an integer from 0 to 2147483647.');
+      }
       if (command.type === 'get_ui_tree') {
         const tree = JSON.parse(getTree());
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
@@ -61,7 +65,7 @@ func attach(gua_adapter: RefCounted) -> bool:
       const receipt = JSON.parse(enqueueAction(JSON.stringify(command.request)));
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
-        const deadline = performance.now() + 5000;
+        const deadline = performance.now() + (requestedTimeoutMs === undefined ? 5000 : requestedTimeoutMs);
         const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false, drainDeadline: 0, cancelOrDrain: null };
         const finish = (settle) => {
           clearTimeout(call.timer);

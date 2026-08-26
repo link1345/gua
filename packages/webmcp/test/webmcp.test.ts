@@ -135,7 +135,8 @@ describe("registerGuaWebMcp", () => {
     [-4, "disabled"],
     [-5, "unsupported_action"],
     ["unsupported_action", "unsupported_action"],
-    [-6, "action_failed"],
+    [-6, "invalid_request"],
+    ["invalid_value", "invalid_request"],
   ] as const)("preserves host completion error %s as %s", async (hostError, expectedCode) => {
     const page = modelDocument();
     const bridge: GuaBrowserBridge = {
@@ -314,6 +315,23 @@ describe("registerGuaWebMcp", () => {
     expect(engineSignal?.aborted).toBe(true);
   });
 
+  test("propagates the configured timeout to the engine action call", async () => {
+    const page = modelDocument();
+    let engineTimeoutMs: number | undefined;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree([button()]),
+      performAction: async (request, options) => {
+        engineTimeoutMs = options?.timeoutMs;
+        return { requestId: 12, action: request.action, succeeded: true };
+      },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 7500 });
+
+    await page.tools.get("click_node")!.execute({ nodeId: "start" });
+
+    expect(engineTimeoutMs).toBe(7500);
+  });
+
   test("times out stalled semantic tree reads", async () => {
     const page = modelDocument();
     const bridge: GuaBrowserBridge = {
@@ -361,7 +379,18 @@ describe("registerGuaWebMcp", () => {
 });
 
 describe("Gua same-page engine port", () => {
-  test("rejects trees without required protocol metadata", async () => {
+  test("normalizes legacy trees without protocol metadata", async () => {
+    const bridge = createGuaInPageBridge({ invoke: async () => ({ screen: "legacy", nodes: [] }) });
+    await expect(bridge.getUiTree()).resolves.toEqual({
+      schemaVersion: 2,
+      frameSequence: 0,
+      revision: 0,
+      screen: "legacy",
+      nodes: [],
+    });
+  });
+
+  test("rejects malformed versioned trees", async () => {
     for (const invalid of [
       { frameSequence: 1, revision: 1, screen: "title", nodes: [] },
       { schemaVersion: 1, frameSequence: 1, revision: 1, screen: "title", nodes: [] },

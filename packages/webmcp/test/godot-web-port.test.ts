@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 type GodotWebPort = {
   __guaUninstall(): void;
-  invoke(command: unknown, options?: { signal?: AbortSignal }): Promise<unknown>;
+  invoke(command: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<unknown>;
 };
 
 const godotGlobals = globalThis as typeof globalThis & {
@@ -52,6 +52,17 @@ describe("Godot Web same-page port", () => {
     controller.abort();
 
     await expect(pending).resolves.toMatchObject({ code: "aborted" });
+    expect(cancelled).toEqual(["17"]);
+  });
+
+  test("uses the per-call action timeout", async () => {
+    const cancelled: string[] = [];
+    const port = await installGodotWebPort(cancelled);
+
+    await expect(port.invoke(
+      { type: "perform_action", request: { action: "click", nodeId: "start" } },
+      { timeoutMs: 0 },
+    )).rejects.toMatchObject({ code: "timeout" });
     expect(cancelled).toEqual(["17"]);
   });
 
