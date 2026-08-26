@@ -43,6 +43,34 @@ jobs:
         shell: bash
         run: echo "version=$(node -p \"require('./packages/webmcp/package.json').version\")" >> "${GITHUB_OUTPUT}"
 
+      - name: Read World Tools package version
+        id: world_tools_version
+        shell: bash
+        run: echo "version=$(node -p \"require('./packages/world-tools/package.json').version\")" >> "${GITHUB_OUTPUT}"
+
+      - name: Check whether World Tools version is already published
+        id: world_tools_npm_version
+        shell: bash
+        run: |
+          package_name="gua-world-tools"
+          package_version="${{ steps.world_tools_version.outputs.version }}"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://registry.npmjs.org/${package_name}/${package_version}")"
+
+          case "${status}" in
+            200)
+              echo "published=true" >> "${GITHUB_OUTPUT}"
+              echo "${package_name}@${package_version} is already published; npm publish will be skipped."
+              ;;
+            404)
+              echo "published=false" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Unexpected npm registry response for ${package_name}@${package_version}: HTTP ${status}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Check whether WebMCP version is already published
         id: webmcp_npm_version
         shell: bash
@@ -95,14 +123,26 @@ jobs:
 
       - name: Check
         run: |
+          bun run --filter gua-world-tools check
+          bun run --filter gua-world-tools test
           bun run --filter gua-webmcp check
           bun run --filter gua-webmcp test
           bun run --filter gui-mcp check
 
       - name: Build
         run: |
+          bun run --filter gua-world-tools build
           bun run --filter gua-webmcp build
           bun run --filter gui-mcp build
+
+      - name: Verify World Tools package contents
+        working-directory: packages/world-tools
+        run: npm pack --dry-run
+
+      - name: Publish World Tools to npm
+        if: steps.world_tools_npm_version.outputs.published != 'true'
+        working-directory: packages/world-tools
+        run: npm publish --access public --tag latest
 
       - name: Verify WebMCP package contents
         working-directory: packages/webmcp
@@ -133,6 +173,13 @@ jobs:
           packageJson.version = process.env.PACKAGE_VERSION;
           delete packageJson.scripts;
           delete packageJson.devDependencies;
+          for (const section of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+            for (const [name, version] of Object.entries(packageJson[section] ?? {})) {
+              if (String(version).startsWith("workspace:")) {
+                throw new Error(`Published gui-mcp manifest retains workspace dependency ${name}@${version}`);
+              }
+            }
+          }
 
           fs.writeFileSync(
             path.join(process.env.PUBLISH_DIR, "package.json"),

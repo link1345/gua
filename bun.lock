@@ -46,14 +46,25 @@
         "@types/pngjs": "^6.0.5",
         "bun-types": "^1.3.0",
         "gua-webmcp": "^0.19.1",
+        "gua-world-tools": "^0.19.2",
         "typescript": "^5.5.0",
       },
     },
     "packages/webmcp": {
       "name": "gua-webmcp",
-      "version": "0.19.1",
+      "version": "0.19.2",
+      "dependencies": {
+        "gua-world-tools": "^0.19.2",
+      },
       "devDependencies": {
         "bun-types": "^1.3.0",
+        "typescript": "^5.5.0",
+      },
+    },
+    "packages/world-tools": {
+      "name": "gua-world-tools",
+      "version": "0.19.2",
+      "devDependencies": {
         "typescript": "^5.5.0",
       },
     },
@@ -288,6 +299,8 @@
     "gensync": ["gensync@1.0.0-beta.2", "", {}, "sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg=="],
 
     "gua-webmcp": ["gua-webmcp@workspace:packages/webmcp"],
+
+    "gua-world-tools": ["gua-world-tools@workspace:packages/world-tools"],
 
     "gui-mcp": ["gui-mcp@workspace:packages/mcp"],
 

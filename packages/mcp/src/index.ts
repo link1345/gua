@@ -13,6 +13,7 @@ import {
   type RecordingStep,
   validateRecording,
 } from "./automation.js";
+import { selectorFromArguments, worldObservationTools, type GuaWorldQueryResult, type GuaWorldObjectTree, type GuaWorldSelector } from "gua-world-tools";
 
 type JsonRpcId = string | number | null;
 
@@ -129,6 +130,9 @@ const clockPauseResponseTimeoutMs = 11_000;
 
 export const guaMcpTools = [
   "get_ui_tree",
+  "get_world_object_tree",
+  "find_world_objects",
+  "wait_for_world_object",
   "click_node",
   "focus_node",
   "set_value",
@@ -157,6 +161,7 @@ export type GuaMcpTool = (typeof guaMcpTools)[number];
 
 export const guaMcpToolDefinitions: readonly McpTool[] = [
   ...guaWebMcpToolDefinitions.map(toMcpToolDefinition),
+  ...worldObservationTools,
   {
     name: "get_logs",
     description: "Read ordered runtime logs from the running game bridge.",
@@ -396,6 +401,12 @@ async function executeTool(
   switch (name) {
     case "get_ui_tree":
       return bridge.getUiTree();
+    case "get_world_object_tree":
+      return bridge.getWorldObjectTree();
+    case "find_world_objects":
+      return bridge.findWorldObjects(selectorFromArguments(args));
+    case "wait_for_world_object":
+      return bridge.waitForWorldObject(selectorFromArguments(args), readIntegerArg(args, "timeoutMs", 5000));
     case "click_node":
       return performAndRecord(bridge, automation, { action: "click", nodeId: readStringArg(args, "nodeId") });
     case "focus_node":
@@ -678,7 +689,7 @@ function compactResult<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
 
-class GuaBridgeClient {
+export class GuaBridgeClient {
   private socket: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
   private nextId = 1;
@@ -692,6 +703,42 @@ class GuaBridgeClient {
 
   async getUiTree(): Promise<GuaUiTree> {
     return this.request<GuaUiTree>({ type: "get_ui_tree" });
+  }
+
+  async getWorldObjectTree(): Promise<GuaWorldObjectTree> {
+    return this.request<GuaWorldObjectTree>({ type: "get_world_object_tree" });
+  }
+
+  async findWorldObjects(selector: GuaWorldSelector, timeoutMs = this.requestTimeoutMs): Promise<GuaWorldQueryResult> {
+    const state = selector.state;
+    return this.request<GuaWorldQueryResult>({ type: "query_world_objects", worldId: selector.id, kind: selector.kind,
+      label: selector.label, tag: selector.tag, parentId: selector.parentId, directChild: selector.directChild ? 1 : 0,
+      visibleToPlayer: filter(selector.visibleToPlayer), active: filter(selector.active), stateKey: state?.key,
+      stateType: state === undefined ? undefined : state.value === null ? 0 : typeof state.value === "string" ? 1 : typeof state.value === "number" ? 2 : 3,
+      stateString: typeof state?.value === "string" ? state.value : undefined,
+      stateNumber: typeof state?.value === "number" ? state.value : undefined,
+      stateBool: typeof state?.value === "boolean" ? state.value : undefined }, timeoutMs);
+  }
+
+  async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const remainingRequestMs = Math.max(1, deadline - Date.now());
+      let result: GuaWorldQueryResult;
+      try {
+        result = await this.findWorldObjects(selector, remainingRequestMs);
+      } catch (error) {
+        if (Date.now() >= deadline) break;
+        throw error;
+      }
+      if (!result.valid) throw new Error(result.error ?? "Invalid world selector.");
+      const match = result.matches[0];
+      if (match !== undefined) return match;
+      const remainingSleepMs = deadline - Date.now();
+      if (remainingSleepMs <= 0) break;
+      await sleep(Math.min(50, remainingSleepMs));
+    }
+    throw new Error("Timed out waiting for a Gua world object.");
   }
 
   async getLogs(): Promise<GuaLogEntry[]> {
@@ -891,6 +938,8 @@ class GuaBridgeClient {
 
 type BridgeCommandInput =
   | { type: "get_ui_tree" }
+  | { type: "get_world_object_tree" }
+  | { type: "query_world_objects"; worldId?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: number; visibleToPlayer?: number; active?: number; stateKey?: string; stateType?: number; stateString?: string; stateNumber?: number; stateBool?: boolean }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
   | { type: "get_context_status" }
@@ -910,6 +959,8 @@ type BridgeCommandInput =
       scrollUnit?: number;
       sensitive?: boolean;
     };
+
+function filter(value: boolean | undefined): number { return value === undefined ? 0 : value ? 2 : 1; }
 
 type BridgeCommand = BridgeCommandInput & { id: number };
 

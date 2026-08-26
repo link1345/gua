@@ -1,4 +1,9 @@
 import { GuaWebError, type GuaBridgeCallOptions, type GuaBrowserBridge, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest } from "./index.js";
+import {
+  parseWorldObjectTree,
+  parseWorldQueryResult,
+  type GuaWorldSelector,
+} from "gua-world-tools";
 
 export interface GuaInPagePort {
   /** A same-page engine call. No network transport or session routing is permitted here. */
@@ -7,10 +12,28 @@ export interface GuaInPagePort {
 
 export type GuaInPageCommand =
   | { type: "get_ui_tree" }
+  | { type: "get_world_object_tree" }
+  | ({ type: "query_world_objects" } & GuaWorldWireSelector)
   | { type: "perform_action"; request: GuaWebActionRequest }
   | { type: "get_screenshot" };
 
-export interface GuaInPageBridgeOptions { screenshot?: boolean }
+export interface GuaInPageBridgeOptions { screenshot?: boolean; world?: boolean }
+
+interface GuaWorldWireSelector {
+  worldId?: string;
+  kind?: string;
+  label?: string;
+  tag?: string;
+  parentId?: string;
+  directChild?: 0 | 1;
+  visibleToPlayer?: 0 | 1 | 2;
+  active?: 0 | 1 | 2;
+  stateKey?: string;
+  stateType?: 0 | 1 | 2 | 3;
+  stateString?: string;
+  stateNumber?: number;
+  stateBool?: boolean;
+}
 
 export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
   const bridge: GuaBrowserBridge = {
@@ -18,15 +41,48 @@ export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBri
     performAction: async (request, callOptions) => parseCompletion(await invoke(port, { type: "perform_action", request }, callOptions)),
   };
   if (options.screenshot) bridge.getScreenshot = async () => parseScreenshot(await invoke(port, { type: "get_screenshot" }));
+  if (options.world) {
+    bridge.getWorldObjectTree = async (callOptions) => parseWorldObjectTree(await invoke(port, { type: "get_world_object_tree" }, callOptions));
+    bridge.findWorldObjects = async (selector, callOptions) => parseWorldQueryResult(await invoke(port, worldQueryCommand(selector), callOptions));
+  }
   return bridge;
 }
 
 export function createGodotWebBridge(portName = "__guaGodotWebPort", options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
-  return createGuaInPageBridge(globalPort(portName, "Godot Web Export"), options);
+  return createGuaInPageBridge(globalPort(portName, "Godot Web Export"), { ...options, world: options.world ?? true });
 }
 
 export function createUnityWebGlBridge(portName = "__guaUnityWebPort", options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
-  return createGuaInPageBridge(globalPort(portName, "Unity WebGL"), options);
+  return createGuaInPageBridge(globalPort(portName, "Unity WebGL"), { ...options, world: options.world ?? true });
+}
+
+function worldQueryCommand(selector: GuaWorldSelector): GuaInPageCommand {
+  const state = selector.state;
+  return compact({
+    type: "query_world_objects" as const,
+    worldId: selector.id,
+    kind: selector.kind,
+    label: selector.label,
+    tag: selector.tag,
+    parentId: selector.parentId,
+    directChild: selector.directChild ? 1 as const : undefined,
+    visibleToPlayer: filter(selector.visibleToPlayer),
+    active: filter(selector.active),
+    stateKey: state?.key,
+    stateType: state === undefined ? undefined : state.value === null ? 0 as const
+      : typeof state.value === "string" ? 1 as const : typeof state.value === "number" ? 2 as const : 3 as const,
+    stateString: typeof state?.value === "string" ? state.value : undefined,
+    stateNumber: typeof state?.value === "number" ? state.value : undefined,
+    stateBool: typeof state?.value === "boolean" ? state.value : undefined,
+  }) as GuaInPageCommand;
+}
+
+function filter(value: boolean | undefined): 0 | 1 | 2 | undefined {
+  return value === undefined ? undefined : value ? 2 : 1;
+}
+
+function compact<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
 
 function globalPort(name: string, engine: string): GuaInPagePort {

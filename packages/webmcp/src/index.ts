@@ -1,5 +1,22 @@
 export * from "./tool-definitions.js";
 export * from "./ports.js";
+export type {
+  GuaWorldObject,
+  GuaWorldObjectTree,
+  GuaWorldQueryResult,
+  GuaWorldSelector,
+  WorldPrimitive,
+} from "gua-world-tools";
+export { selectorFromArguments, worldObservationTools } from "gua-world-tools";
+
+import {
+  selectorFromArguments,
+  worldObservationTools,
+  type GuaWorldObject,
+  type GuaWorldObjectTree,
+  type GuaWorldQueryResult,
+  type GuaWorldSelector,
+} from "gua-world-tools";
 
 export interface GuaBounds { x: number; y: number; w: number; h: number }
 export interface GuaNodeState {
@@ -72,6 +89,8 @@ export interface GuaBrowserBridge {
   getUiTree(): Promise<GuaUiTree>;
   performAction(request: GuaWebActionRequest, options?: GuaBridgeCallOptions): Promise<GuaWebActionCompletion>;
   getScreenshot?(): Promise<GuaScreenshot>;
+  getWorldObjectTree?(options?: GuaBridgeCallOptions): Promise<GuaWorldObjectTree>;
+  findWorldObjects?(selector: GuaWorldSelector, options?: GuaBridgeCallOptions): Promise<GuaWorldQueryResult>;
 }
 
 export type GuaWebErrorCode =
@@ -128,7 +147,11 @@ export async function registerGuaWebMcp(
     };
   }
 
-  const definitions = guaWebMcpToolDefinitions.filter((definition) => definition.name !== "get_screenshot" || bridge.getScreenshot);
+  const definitions = [
+    ...guaWebMcpToolDefinitions.filter((definition) => definition.name !== "get_screenshot" || bridge.getScreenshot),
+    ...(bridge.getWorldObjectTree ? worldObservationTools.filter((definition) => definition.name === "get_world_object_tree") : []),
+    ...(bridge.findWorldObjects ? worldObservationTools.filter((definition) => definition.name !== "get_world_object_tree") : []),
+  ];
   try {
     const pollIntervalMs = timerDelay(options.pollIntervalMs ?? 25, "pollIntervalMs");
     const defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs");
@@ -177,6 +200,37 @@ async function executeTool(
         "Timed out reading the current Gua semantic UI tree.",
       ));
     }
+    if (name === "get_world_object_tree") {
+      rejectUnknownArguments(input, new Set());
+      if (!bridge.getWorldObjectTree) throw new GuaWebError("engine_unsupported", "The engine bridge does not support the World Object Tree.");
+      return toolResult(await withTimeout(
+        bridge.getWorldObjectTree({ signal, timeoutMs: defaultTimeoutMs }),
+        defaultTimeoutMs,
+        signal,
+        "Timed out reading the current Gua World Object Tree.",
+      ));
+    }
+    if (name === "find_world_objects" || name === "wait_for_world_object") {
+      if (!bridge.findWorldObjects) throw new GuaWebError("engine_unsupported", "The engine bridge does not support world object queries.");
+      if (name === "find_world_objects" && Object.prototype.hasOwnProperty.call(input, "timeoutMs")) {
+        throw new GuaWebError("invalid_request", "Unknown find_world_objects argument: timeoutMs.");
+      }
+      const selector = worldSelector(input);
+      if (name === "find_world_objects") {
+        const result = await withTimeout(
+          bridge.findWorldObjects(selector, { signal, timeoutMs: defaultTimeoutMs }),
+          defaultTimeoutMs,
+          signal,
+          "Timed out querying the current Gua World Object Tree.",
+        );
+        if (!result.valid) throw new GuaWebError("invalid_request", result.error ?? "The host rejected the world selector.");
+        return toolResult(result);
+      }
+      const timeoutMs = input.timeoutMs === undefined
+        ? Math.min(defaultTimeoutMs, 300_000)
+        : optionalInteger(input, "timeoutMs", defaultTimeoutMs, 1, 300_000);
+      return toolResult(await waitForWorldObject(bridge, selector, timeoutMs, pollIntervalMs, signal));
+    }
     if (name === "get_screenshot") {
       if (!bridge.getScreenshot) throw new GuaWebError("engine_unsupported", "The engine bridge does not support screenshots.");
       return toolResult(await withTimeout(
@@ -218,6 +272,43 @@ async function executeTool(
     const normalized = normalizeError(error, input.sensitive === undefined || input.sensitive === false ? undefined : String(input.value ?? ""));
     return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
   }
+}
+
+function worldSelector(input: Record<string, unknown>): GuaWorldSelector {
+  try { return selectorFromArguments(input); }
+  catch (error) {
+    throw new GuaWebError("invalid_request", error instanceof Error ? error.message : "Invalid world selector.");
+  }
+}
+
+async function waitForWorldObject(
+  bridge: GuaBrowserBridge,
+  selector: GuaWorldSelector,
+  timeoutMs: number,
+  pollIntervalMs: number,
+  signal?: AbortSignal,
+): Promise<GuaWorldObject> {
+  const deadline = performance.now() + timeoutMs;
+  do {
+    throwIfAborted(signal);
+    const remainingMs = Math.max(0, deadline - performance.now());
+    const result = await withTimeout(
+      bridge.findWorldObjects!(selector, { signal, timeoutMs: remainingMs }),
+      remainingMs,
+      signal,
+      "Timed out waiting for a Gua world object.",
+    );
+    if (!result.valid) throw new GuaWebError("invalid_request", result.error ?? "The host rejected the world selector.");
+    if (result.matches[0]) return result.matches[0];
+    if (performance.now() >= deadline) break;
+    await delay(Math.min(pollIntervalMs, Math.max(0, deadline - performance.now())), signal);
+  } while (true);
+  throw new GuaWebError("timeout", "Timed out waiting for a Gua world object.", { timeoutMs });
+}
+
+function rejectUnknownArguments(input: Record<string, unknown>, allowed: Set<string>): void {
+  const unknown = Object.keys(input).find((key) => !allowed.has(key));
+  if (unknown !== undefined) throw new GuaWebError("invalid_request", `Unknown argument: ${unknown}.`);
 }
 
 async function performActionWithCancellation(

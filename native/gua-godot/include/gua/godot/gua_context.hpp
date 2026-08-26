@@ -28,6 +28,13 @@ public:
         bool visible = true,
         bool enabled = true);
     bool register_node_v2(const Dictionary& descriptor);
+    bool begin_world_frame(const String& scene);
+    bool register_world_object(const Dictionary& descriptor);
+    bool end_world_frame();
+    bool abort_world_frame();
+    String get_world_object_tree_json() const;
+    String query_world_objects_json(const Dictionary& selector) const;
+    void enable_world_object_tree_adapter();
 
     String get_ui_tree_json() const;
     String get_version_json() const;

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { PNG } from "pngjs";
 
 import { GuaAutomationManager } from "../src/automation";
-import { guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
+import { GuaBridgeClient, guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
 
 const roots: string[] = [];
 
@@ -15,6 +15,36 @@ afterEach(async () => {
 });
 
 describe("GuaAutomationManager", () => {
+  test("bounds world waits by their requested deadline", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return undefined;
+        return new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message() {
+          // Intentionally withhold the query response.
+        },
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    const startedAt = performance.now();
+    try {
+      await expect(bridge.waitForWorldObject({ kind: "door" }, 50)).rejects.toThrow("Timed out waiting for a Gua world object");
+      expect(performance.now() - startedAt).toBeLessThan(500);
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
+  test("keeps bundled workspace packages out of published dependencies", async () => {
+    const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(Object.values(manifest.dependencies ?? {}).some((version) => String(version).startsWith("workspace:"))).toBe(false);
+    expect(manifest.devDependencies["gua-world-tools"]).toBe("^0.19.2");
+  });
+
   test("rejects clock_run_for without its required duration", () => {
     expect(() => parseClockRunForArguments({})).toThrow("durationMs");
     expect(parseClockRunForArguments({ durationMs: 25 })).toEqual({
@@ -33,6 +63,10 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("get_visual_artifacts");
     expect(guaMcpTools).toContain("clock_pause");
     expect(guaMcpTools).toContain("clock_run_for");
+    expect(guaMcpTools).toContain("get_world_object_tree");
+    expect(guaMcpTools).toContain("find_world_objects");
+    expect(guaMcpTools).toContain("wait_for_world_object");
+    expect(guaMcpTools).not.toContain("interact_world_object" as never);
   });
 
   test("publishes MCP-specific sensitive value and screenshot contracts", () => {

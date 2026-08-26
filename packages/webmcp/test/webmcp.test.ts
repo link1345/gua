@@ -7,6 +7,8 @@ import {
   GuaWebError,
   registerGuaWebMcp,
   type GuaBrowserBridge,
+  type GuaWorldObject,
+  type GuaWorldObjectTree,
   type GuaUiTree,
   type GuaWebActionRequest,
 } from "../src/index";
@@ -41,6 +43,15 @@ function tree(nodes: GuaUiTree["nodes"] = []): GuaUiTree {
 
 function button(id = "start"): GuaUiTree["nodes"][number] {
   return { id, role: "button", label: "Start", visible: true, enabled: true, bounds: { x: 0, y: 0, w: 10, h: 10 }, actions: ["click", "focus"] };
+}
+
+function worldObject(id = "door"): GuaWorldObject {
+  return { id, kind: "door", label: "Door", space: "world3d", position: { x: 1, y: 2, z: 3 },
+    visibleToPlayer: true, active: true, agentExposure: "auto", tags: ["interactive"], state: { locked: true } };
+}
+
+function worldTree(objects: GuaWorldObject[] = []): GuaWorldObjectTree {
+  return { schemaVersion: 1, sessionEpoch: 1, frameSequence: 2, revision: 2, scene: "level", objects };
 }
 
 describe("registerGuaWebMcp", () => {
@@ -127,6 +138,53 @@ describe("registerGuaWebMcp", () => {
     expect(called).toBe(false);
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0]!.text).error.code).toBe("hidden");
+  });
+
+  test("registers read-only world tools and delegates selectors to the engine bridge", async () => {
+    const page = modelDocument();
+    const selectors: unknown[] = [];
+    let queryCount = 0;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getWorldObjectTree: async () => worldTree([worldObject()]),
+      findWorldObjects: async (selector) => {
+        selectors.push(selector);
+        queryCount += 1;
+        return { valid: true, matches: queryCount >= 2 ? [worldObject()] : [] };
+      },
+    };
+    const registration = await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
+    expect(registration.registeredTools).toEqual(expect.arrayContaining([
+      "get_world_object_tree", "find_world_objects", "wait_for_world_object",
+    ]));
+    expect(registration.registeredTools).not.toContain("interact_world_object");
+
+    const treeResult = await page.tools.get("get_world_object_tree")!.execute({}) as { content: Array<{ text: string }> };
+    expect(JSON.parse(treeResult.content[0]!.text).objects[0].id).toBe("door");
+    await page.tools.get("find_world_objects")!.execute({ parentId: "room", directChild: true, stateKey: "locked", stateValue: true });
+    const waitResult = await page.tools.get("wait_for_world_object")!.execute({ id: "door", timeoutMs: 100 }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(waitResult.content[0]!.text).id).toBe("door");
+    expect(selectors).toEqual([
+      { parentId: "room", directChild: true, state: { key: "locked", value: true } },
+      { id: "door" },
+    ]);
+  });
+
+  test("rejects malformed world selectors before invoking the engine", async () => {
+    const page = modelDocument();
+    let queries = 0;
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      findWorldObjects: async () => { queries += 1; return { valid: true, matches: [] }; },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    for (const input of [{ directChild: true }, { stateKey: "locked" }, { stateValue: true }, { timeoutMs: 1 }]) {
+      const result = await page.tools.get("find_world_objects")!.execute(input) as { content: Array<{ text: string }> };
+      expect(JSON.parse(result.content[0]!.text).error.code).toBe("invalid_request");
+    }
+    expect(queries).toBe(0);
   });
 
   test.each([
@@ -464,6 +522,22 @@ describe("Gua same-page engine port", () => {
       { type: "perform_action", request: { action: "click", nodeId: "start" } },
     ]);
     expect(signals).toEqual([undefined, controller.signal]);
+  });
+
+  test("maps world reads and queries to the engine-owned port", async () => {
+    const commands: unknown[] = [];
+    const bridge = createGuaInPageBridge({ invoke: async (command) => {
+      commands.push(command);
+      if (command.type === "get_world_object_tree") return worldTree([worldObject()]);
+      if (command.type === "query_world_objects") return { valid: true, matches: [worldObject()] };
+      throw new Error("unsupported");
+    } }, { world: true });
+    expect((await bridge.getWorldObjectTree!()).objects[0]?.id).toBe("door");
+    expect((await bridge.findWorldObjects!({ visibleToPlayer: false, state: { key: "locked", value: true } })).matches).toHaveLength(1);
+    expect(commands).toEqual([
+      { type: "get_world_object_tree" },
+      { type: "query_world_objects", visibleToPlayer: 1, stateKey: "locked", stateType: 3, stateBool: true },
+    ]);
   });
 
   test("preserves protocol top-level node text and value", async () => {

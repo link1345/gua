@@ -59,6 +59,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
+            runtime.EnableWorldObjectTreeAdapter();
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
                 webOwnerId = Guid.NewGuid().ToString("N");
@@ -106,6 +107,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             CollectUGui();
             PruneClickObservers();
             runtime.EndFrame();
+            try { CollectWorldObjects(); }
+            catch (Exception error) { Debug.LogError("Gua Unity world publication failed: " + error); }
             DispatchActions();
             if (Application.platform == RuntimePlatform.WebGLPlayer) FlushWebActionResults();
             ScheduleScreenshot();
@@ -123,6 +126,21 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (envelope.command.type == "get_ui_tree")
         {
             GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetUiTreeJson(), 0);
+            return;
+        }
+        if (envelope.command.type == "get_world_object_tree")
+        {
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetWorldObjectTreeJson(), 0);
+            return;
+        }
+        if (envelope.command.type == "query_world_objects")
+        {
+            if (!TryWorldSelector(envelope.command, out var selector, out var error))
+            {
+                ResolveWebError(envelope.callId, "invalid_request", error);
+                return;
+            }
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.QueryWorldObjectsJson(selector), 0);
             return;
         }
         if (envelope.command.type != "perform_action" || envelope.command.request == null)
@@ -188,6 +206,43 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         _ => "invalid_request",
     };
     private static string? EmptyToNull(string value) => string.IsNullOrEmpty(value) ? null : value;
+    private static bool TryWorldSelector(WebCommand source, out GuaWorldSelector selector, out string error)
+    {
+        selector = null!;
+        error = string.Empty;
+        if (source.directChild is < 0 or > 1 || (source.directChild != 0 && string.IsNullOrEmpty(source.parentId)))
+        {
+            error = "parentId is required when directChild is true.";
+            return false;
+        }
+        if (source.visibleToPlayer is < 0 or > 2 || source.active is < 0 or > 2)
+        {
+            error = "World boolean filters are invalid.";
+            return false;
+        }
+        GuaWorldStateCriterion? state = null;
+        if (!string.IsNullOrEmpty(source.stateKey))
+        {
+            object? value;
+            switch (source.stateType)
+            {
+                case 0: value = null; break;
+                case 1: value = source.stateString ?? string.Empty; break;
+                case 2 when double.IsFinite(source.stateNumber): value = source.stateNumber; break;
+                case 3: value = source.stateBool; break;
+                default:
+                    error = "World state criterion is invalid.";
+                    return false;
+            }
+            state = new GuaWorldStateCriterion(source.stateKey, value);
+        }
+        selector = new GuaWorldSelector(
+            Id: EmptyToNull(source.worldId), Kind: EmptyToNull(source.kind), Label: EmptyToNull(source.label), Tag: EmptyToNull(source.tag),
+            ParentId: EmptyToNull(source.parentId), DirectChild: source.directChild != 0,
+            VisibleToPlayer: WorldFilter(source.visibleToPlayer), Active: WorldFilter(source.active), State: state);
+        return true;
+    }
+    private static bool? WorldFilter(int value) => value == 0 ? null : value == 2;
     private static bool TryActionType(string value, out GuaActionType action)
     {
         action = value switch
@@ -200,7 +255,14 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     }
 
     [Serializable] private sealed class WebEnvelope { public int callId; public WebCommand command; }
-    [Serializable] private sealed class WebCommand { public string type; public WebAction request; }
+    [Serializable] private sealed class WebCommand
+    {
+        public string type; public WebAction request;
+        public string worldId, kind, label, tag, parentId, stateKey, stateString;
+        public int directChild, visibleToPlayer, active, stateType;
+        public double stateNumber;
+        public bool stateBool;
+    }
     [Serializable] private sealed class WebAction
     {
         public string action, nodeId, value, key; public float deltaX, deltaY; public bool @checked, sensitive; public int modifiers, scrollUnit;
@@ -239,6 +301,64 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         var scene = SceneManager.GetActiveScene();
         return string.IsNullOrWhiteSpace(scene.path) ? scene.name : scene.path;
     }
+
+    private void CollectWorldObjects()
+    {
+        if (runtime == null) return;
+        runtime.BeginWorldFrame(CurrentScreen());
+        var published = false;
+        try
+        {
+            var frameIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in FindObjectsByType<GuaWorldObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                .Where(item => item.gameObject.scene.IsValid() && item.gameObject.scene.isLoaded)
+                .OrderBy(item => ScenePath(item.gameObject.scene), StringComparer.Ordinal)
+                .ThenBy(item => item.gameObject.scene.handle)
+                .ThenBy(item => HierarchyPath(item.transform), StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(source.Id))
+                {
+                    runtime.AddLog(3, $"Unity GuaWorldObject on '{source.name}' requires a stable Id and rejected the world frame.");
+                    throw new InvalidOperationException($"GuaWorldObject on '{source.name}' requires a stable Id.");
+                }
+                if (!frameIds.Add(source.Id)) { runtime.AddLog(3, $"Duplicate Unity GuaWorldObject Id '{source.Id}' rejected the world frame."); throw new InvalidOperationException($"Duplicate world object Id '{source.Id}'."); }
+                var parentId = NearestWorldParentId(source.transform.parent);
+                var position = source.transform.position;
+                runtime.RegisterWorldObject(new GuaWorldObjectDescriptor(source.Id, source.Kind, source.Label, source.Space,
+                    new GuaWorldPosition(position.x, position.y, source.Space == GuaWorldSpace.World3D ? position.z : 0),
+                    source.VisibleToPlayer, source.Active, parentId, source.Description,
+                    source.AgentExposure, source.Tags, source.State,
+                    string.IsNullOrEmpty(source.DomainId) ? null : source.DomainId,
+                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId));
+            }
+            runtime.EndWorldFrame();
+            published = true;
+        }
+        finally
+        {
+            if (!published) try { runtime.AbortWorldFrame(); } catch { /* A prior native rejection may already have cleared staging. */ }
+        }
+    }
+
+    private static string? NearestWorldParentId(Transform? current)
+    {
+        for (; current != null; current = current.parent)
+        {
+            var parent = current.GetComponent<GuaWorldObject>();
+            if (parent != null && !string.IsNullOrWhiteSpace(parent.Id)) return parent.Id;
+        }
+        return null;
+    }
+
+    private static string HierarchyPath(Transform transform)
+    {
+        var parts = new Stack<string>();
+        for (var current = transform; current != null; current = current.parent) parts.Push(current.GetSiblingIndex().ToString("D6", CultureInfo.InvariantCulture));
+        return string.Join("/", parts);
+    }
+
+    private static string ScenePath(Scene scene) => string.IsNullOrWhiteSpace(scene.path) ? scene.name : scene.path;
 
     private void CollectUiToolkit()
     {

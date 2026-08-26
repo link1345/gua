@@ -18,7 +18,31 @@ WebGL builds install a tab-local `__guaUnityWebPort` from
 `gua-webmcp` with `createUnityWebGlBridge()` and `registerGuaWebMcp()`. Calls
 remain in the page. Action promises resolve from request-correlated host
 completion after Unity applies the action, not when it is enqueued.
+The same bridge exposes the host-filtered World Object Tree through the
+read-only `get_world_object_tree`, `find_world_objects`, and
+`wait_for_world_object` tools. Shared browser-safe world contracts are provided
+by `gua-world-tools`; WebMCP callers cannot elevate the runtime observation
+profile or invoke actions on world objects.
 
 The WebGL build must include the Gua C ABI runtime as a WebAssembly native plugin;
 the managed adapter remains a P/Invoke wrapper and does not implement another UI
 model. The initial Unity bridge does not advertise screenshot support.
+
+## World objects
+
+Add `GuaWorldObject` only to scene objects that are safe to observe. Assign a
+stable `Id`, semantic `Kind`, 2D/3D space, player visibility, exposure, tags,
+and primitive state explicitly:
+
+```csharp
+var door = gameObject.AddComponent<Gua.Unity.GuaWorldObject>();
+door.Id = "door-a";
+door.Kind = "door";
+door.Space = Gua.Core.GuaWorldSpace.World2D;
+door.VisibleToPlayer = true;
+door.SetState("locked", true);
+```
+
+The adapter publishes global transform positions each frame and links the
+nearest opted-in ancestor. It does not expose ordinary GameObjects or UI objects
+automatically. Do not place secrets in labels, tags, or state.

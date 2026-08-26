@@ -62,8 +62,10 @@ recognition.
 
 Godot Web Export and Unity WebGL pages can expose the same live Semantic UI Tree
 through the experimental browser `document.modelContext` API. The
-`gua-webmcp` package registers `get_ui_tree`, semantic actions, waits, and an
-optional screenshot tool against an engine-owned same-page bridge. It requires
+`gua-webmcp` package registers `get_ui_tree`, semantic actions, waits, the
+read-only World Object Tree observation tools, and an optional screenshot tool
+against an engine-owned same-page bridge. Shared world types and selector
+definitions are published as `gua-world-tools`. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
 custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
@@ -118,6 +120,14 @@ for package selection, then use the dedicated guides for
 workflows and diagrams.
 
 ## MCP and Inspector
+
+### World Object Tree
+
+Gua publishes explicitly opted-in game-world objects separately from the Semantic UI Tree. Each object has a stable ID, semantic kind, 2D or 3D position, host-defined player visibility, tags, and flat primitive state. Godot objects opt in through the `gua_world_object` group plus `gua_world_*` metadata; Unity objects use `GuaWorldObject`. Gua never dumps every scene node or GameObject automatically.
+
+The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=player` in the host process to expose only player-visible, non-private objects. Clients cannot elevate that profile. World v1 is observation-only; MCP exposes `get_world_object_tree`, `find_world_objects`, and `wait_for_world_object`, while Inspector displays a separate World Object Tree panel.
+
+Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
 
 ### Deterministic virtual time
 
@@ -566,6 +576,9 @@ The MCP tool surface is:
 
 ```text
 get_ui_tree
+get_world_object_tree
+find_world_objects
+wait_for_world_object
 click_node
 focus_node
 set_value
@@ -678,6 +691,16 @@ The adapter resolves the native `GuaContext` class through `ClassDB` on first
 use and verifies that required methods such as `consume_click_request` exist
 before dispatching Inspector click requests. If that check fails, rebuild
 `gua-godot`; the stale vendored DLL is the problem, not the game script.
+
+To publish a world object, opt a `Node2D` or `Node3D` in explicitly:
+
+```gdscript
+$Door.add_to_group(&"gua_world_object")
+$Door.set_meta(&"gua_world_id", "door-a")
+$Door.set_meta(&"gua_world_kind", "door")
+$Door.set_meta(&"gua_world_visible_to_player", true)
+$Door.set_meta(&"gua_world_state", {"locked": true})
+```
 
 Run the GDScript smoke check with:
 

@@ -3,6 +3,12 @@
 Browser-native WebMCP adapter for a Gua-enabled Godot Web Export or Unity WebGL page.
 It registers tools on the experimental `document.modelContext` API and calls an
 engine bridge in the same page. It does not start an MCP server or WebSocket.
+Alongside Semantic UI Tree actions, the Godot and Unity bridge helpers register
+the read-only `get_world_object_tree`, `find_world_objects`, and
+`wait_for_world_object` tools when the engine-owned world adapter is available.
+World types and selector definitions come from the public `gua-world-tools`
+package; observation remains host-filtered and browser callers cannot request a
+debug profile.
 
 ```ts
 import { createGodotWebBridge, registerGuaWebMcp } from "gua-webmcp";
@@ -10,6 +16,9 @@ import { createGodotWebBridge, registerGuaWebMcp } from "gua-webmcp";
 const registration = await registerGuaWebMcp(createGodotWebBridge());
 if (!registration.supported) console.info(registration.error);
 ```
+
+Only objects explicitly opted into the engine adapter are observable. World v1
+does not expose actions, arbitrary scene traversal, or host method invocation.
 
 For Unity WebGL, use `createUnityWebGlBridge()` instead. The engine export must
 run in the same document so that its `__guaGodotWebPort` or

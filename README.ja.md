@@ -64,8 +64,9 @@ GuaはAIコーディングエージェントを補完します。AIがゲーム�
 
 Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Treeを実験的な
 ブラウザ`document.modelContext` APIから公開できます。`gua-webmcp`は、エンジンが
-所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、任意の
-screenshotツールを登録します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
+所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、read-onlyの
+World Object Tree観測ツール、任意のscreenshotツールを登録します。world型とselector
+定義は`gua-world-tools`として公開します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
 ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
 独自のブラウザセッションルーターは持ちません。
 組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
@@ -159,6 +160,14 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 [Recording実践](https://gua.orizika.com/recording/)を参照してください。
 
 ## MCPとInspector
+
+### World Object Tree
+
+Guaは、明示的にopt-inしたゲーム世界のobjectをSemantic UI Treeとは別に公開できる。各objectはstable ID、意味的なkind、2Dまたは3D座標、hostが決めるplayer可視性、tag、flatなprimitive stateを持つ。Godotでは`gua_world_object` groupと`gua_world_*` metadata、Unityでは`GuaWorldObject` componentを使う。全scene nodeやGameObjectを自動公開することはない。
+
+native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_PROFILE=player`を設定すると、playerから見えるprivateでないobjectだけを公開する。client入力からdebugへ昇格することはできない。World v1は観測専用であり、MCPは`get_world_object_tree`、`find_world_objects`、`wait_for_world_object`を提供し、Inspectorは独立したWorld Object Tree panelへ表示する。
+
+Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_label`、`gua_world_visible_to_player`、`gua_world_active`、`gua_world_agent_exposure`、`gua_world_tags`、`gua_world_state`を使う。state値は文字列、有限数値、真偽値、nullだけを許可し、秘密情報を含めてはならない。整数値はv1 C ABIの`double`表現を正確に往復できる必要があり、JavaScript selector clientはsafe integer範囲外の整数を拒否する。
 
 ### 決定論的な仮想時間
 
@@ -360,6 +369,9 @@ bunx gui-mcp@latest mcp
 
 ```text
 get_ui_tree
+get_world_object_tree
+find_world_objects
+wait_for_world_object
 click_node
 focus_node
 set_value
@@ -383,6 +395,10 @@ Recording、baseline、Visual失敗artifactは既定で`.gua`へ保存します�
 `GUA_ARTIFACT_DIR`で保存rootを変更できますが、MCPツールへ渡した名前からroot外へは
 書き出せません。接続先bridgeが対応している場合、Semantic action toolは
 request IDに対応するhost完了eventまで待機します。
+
+World Object Treeのtoolはread-onlyであり、公開profileはhost側で固定されます。
+player向けMCPではhost processへ`GUA_OBSERVATION_PROFILE=player`を設定してください。
+tool引数からdebugへ昇格することはできず、world action toolも提供しません。
 
 ## Godot 4.7 C#サンプル
 

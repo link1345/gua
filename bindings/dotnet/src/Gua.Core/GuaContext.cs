@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Gua.Core;
 
-public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
+public sealed partial class GuaContext : IGuaContext, IGuaClockContext, IDisposable
 {
     private nint _handle;
     private GuaClock? _clock;
@@ -210,7 +210,8 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
             status.LogCount, status.HasScreenshot != 0, ActionOrNull(status.FirstPendingAction),
             Marshal.PtrToStringUTF8((nint)status.FirstPendingNodeId) ?? string.Empty,
             ActionOrNull(status.FirstEventAction),
-            Marshal.PtrToStringUTF8((nint)status.FirstEventNodeId) ?? string.Empty);
+            Marshal.PtrToStringUTF8((nint)status.FirstEventNodeId) ?? string.Empty)
+        { WorldFrameSequence = status.WorldFrameSequence, WorldRevision = status.WorldRevision, WorldObjectCount = status.WorldObjectCount };
     }
 
     public unsafe GuaResetReport Reset(GuaResetOptions? options = null)
@@ -223,7 +224,7 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
             Flags = (uint)options.Targets,
             Strict = options.Strict ? 1 : 0,
             ExpectedSessionEpoch = options.ExpectedSessionEpoch ?? 0,
-            FlagsVersion = 1,
+            FlagsVersion = 2,
         };
         Native.GuaNativeResetReport report = default;
         report.StructSize = (uint)sizeof(Native.GuaNativeResetReport);
@@ -242,7 +243,8 @@ public sealed class GuaContext : IGuaContext, IGuaClockContext, IDisposable
             report.DiscardedNodeCount, report.DiscardedPendingRequestCount, report.DiscardedInFlightRequestCount,
             report.DiscardedEventCount, report.DiscardedLogCount, report.DiscardedScreenshot != 0,
             ActionOrNull(report.FirstPendingAction), Marshal.PtrToStringUTF8((nint)report.FirstPendingNodeId) ?? string.Empty,
-            ActionOrNull(report.FirstEventAction), Marshal.PtrToStringUTF8((nint)report.FirstEventNodeId) ?? string.Empty);
+            ActionOrNull(report.FirstEventAction), Marshal.PtrToStringUTF8((nint)report.FirstEventNodeId) ?? string.Empty)
+        { DiscardedWorldObjectCount = report.DiscardedWorldObjectCount };
     }
 
     private static GuaActionType? ActionOrNull(int action) => action == 0 ? null : (GuaActionType)action;

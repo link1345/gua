@@ -8,6 +8,8 @@ type GodotWebPort = {
 const godotGlobals = globalThis as typeof globalThis & {
   __guaGodotWebPort?: GodotWebPort;
   __guaGodotGetTree?: () => string;
+  __guaGodotGetWorldTree?: () => string;
+  __guaGodotQueryWorld?: (request: string) => string;
   __guaGodotEnqueueAction?: (request: string) => string;
   __guaGodotPollAction?: (requestId: string) => string;
   __guaGodotCancelAction?: (requestId: string) => number;
@@ -17,6 +19,8 @@ afterEach(() => {
   godotGlobals.__guaGodotWebPort?.__guaUninstall();
   delete godotGlobals.__guaGodotWebPort;
   delete godotGlobals.__guaGodotGetTree;
+  delete godotGlobals.__guaGodotGetWorldTree;
+  delete godotGlobals.__guaGodotQueryWorld;
   delete godotGlobals.__guaGodotEnqueueAction;
   delete godotGlobals.__guaGodotPollAction;
   delete godotGlobals.__guaGodotCancelAction;
@@ -33,6 +37,8 @@ async function installGodotWebPort(
   const match = source.match(/JavaScriptBridge\.eval\("""([\s\S]*?)"""/);
   if (!match) throw new Error("Godot WebMCP install script was not found.");
   godotGlobals.__guaGodotGetTree = () => JSON.stringify({ screen: "title", nodes: [] });
+  godotGlobals.__guaGodotGetWorldTree = () => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "level", objects: [] });
+  godotGlobals.__guaGodotQueryWorld = () => JSON.stringify({ valid: true, matches: [] });
   godotGlobals.__guaGodotEnqueueAction = () => JSON.stringify({ requestId: 17 });
   godotGlobals.__guaGodotPollAction = options.pollAction ?? (() => "null");
   godotGlobals.__guaGodotCancelAction = (requestId) => { cancelled.push(requestId); return options.cancellationResult ?? 1; };
@@ -41,6 +47,11 @@ async function installGodotWebPort(
 }
 
 describe("Godot Web same-page port", () => {
+  test("routes World Object Tree reads and queries through Godot callbacks", async () => {
+    const port = await installGodotWebPort([]);
+    await expect(port.invoke({ type: "get_world_object_tree" })).resolves.toMatchObject({ scene: "level" });
+    await expect(port.invoke({ type: "query_world_objects", worldId: "door" })).resolves.toEqual({ valid: true, matches: [] });
+  });
   test("cancels the native request when the bridge signal aborts", async () => {
     const cancelled: string[] = [];
     const port = await installGodotWebPort(cancelled);

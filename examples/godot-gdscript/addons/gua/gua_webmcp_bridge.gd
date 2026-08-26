@@ -5,6 +5,8 @@ extends RefCounted
 
 var adapter_ref: WeakRef
 var get_tree_callback: JavaScriptObject
+var get_world_tree_callback: JavaScriptObject
+var query_world_callback: JavaScriptObject
 var enqueue_callback: JavaScriptObject
 var poll_callback: JavaScriptObject
 var cancel_callback: JavaScriptObject
@@ -20,10 +22,14 @@ func attach(gua_adapter: RefCounted) -> bool:
 	if window == null:
 		return false
 	get_tree_callback = JavaScriptBridge.create_callback(_get_tree)
+	get_world_tree_callback = JavaScriptBridge.create_callback(_get_world_tree)
+	query_world_callback = JavaScriptBridge.create_callback(_query_world)
 	enqueue_callback = JavaScriptBridge.create_callback(_enqueue_action)
 	poll_callback = JavaScriptBridge.create_callback(_poll_action)
 	cancel_callback = JavaScriptBridge.create_callback(_cancel_action)
 	window.__guaGodotGetTree = get_tree_callback
+	window.__guaGodotGetWorldTree = get_world_tree_callback
+	window.__guaGodotQueryWorld = query_world_callback
 	window.__guaGodotEnqueueAction = enqueue_callback
 	window.__guaGodotPollAction = poll_callback
 	window.__guaGodotCancelAction = cancel_callback
@@ -34,6 +40,8 @@ func attach(gua_adapter: RefCounted) -> bool:
   const previousPort = globalThis.__guaGodotWebPort;
   if (previousPort && typeof previousPort.__guaUninstall === 'function') previousPort.__guaUninstall();
   const getTree = globalThis.__guaGodotGetTree;
+  const getWorldTree = globalThis.__guaGodotGetWorldTree;
+  const queryWorld = globalThis.__guaGodotQueryWorld;
   const enqueueAction = globalThis.__guaGodotEnqueueAction;
   const pollAction = globalThis.__guaGodotPollAction;
   const cancelAction = globalThis.__guaGodotCancelAction;
@@ -60,6 +68,16 @@ func attach(gua_adapter: RefCounted) -> bool:
         const tree = JSON.parse(getTree());
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
         return tree;
+      }
+      if (command.type === 'get_world_object_tree') {
+        const tree = JSON.parse(getWorldTree());
+        if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua world adapter is unavailable.');
+        return tree;
+      }
+      if (command.type === 'query_world_objects') {
+        const result = JSON.parse(queryWorld(JSON.stringify(command)));
+        if (result && result.code) throw engineError(result.code, result.message || 'The Godot Gua world adapter is unavailable.');
+        return result;
       }
       if (command.type !== 'perform_action') throw engineError('engine_unsupported', `Godot Web command is unsupported: ${command.type}`);
       const receipt = JSON.parse(enqueueAction(JSON.stringify(command.request)));
@@ -146,6 +164,8 @@ func detach() -> void:
   port.__guaUninstall();
   delete globalThis.__guaGodotWebPort;
   delete globalThis.__guaGodotGetTree;
+  delete globalThis.__guaGodotGetWorldTree;
+  delete globalThis.__guaGodotQueryWorld;
   delete globalThis.__guaGodotEnqueueAction;
   delete globalThis.__guaGodotPollAction;
   delete globalThis.__guaGodotCancelAction;
@@ -153,6 +173,8 @@ func detach() -> void:
 """ % bridge_owner_id)
 	bridge_owner_id = ""
 	get_tree_callback = null
+	get_world_tree_callback = null
+	query_world_callback = null
 	enqueue_callback = null
 	poll_callback = null
 	cancel_callback = null
@@ -169,6 +191,38 @@ func _get_tree(_arguments: Array) -> String:
 	if adapter == null:
 		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
 	return adapter.get_ui_tree_json()
+
+
+func _get_world_tree(_arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
+	return adapter.get_world_object_tree_json()
+
+
+func _query_world(arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
+	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
+	if not source is Dictionary:
+		return JSON.stringify({"code": "invalid_request", "message": "World query must be an object."})
+	var command: Dictionary = source
+	return adapter.query_world_objects_json({
+		"id": command.get("worldId", ""),
+		"kind": command.get("kind", ""),
+		"label": command.get("label", ""),
+		"tag": command.get("tag", ""),
+		"parent_id": command.get("parentId", ""),
+		"direct_child": command.get("directChild", 0),
+		"visible_to_player": command.get("visibleToPlayer", 0),
+		"active": command.get("active", 0),
+		"state_key": command.get("stateKey", ""),
+		"state_type": command.get("stateType", 0),
+		"state_string": command.get("stateString", ""),
+		"state_number": command.get("stateNumber", 0.0),
+		"state_bool": command.get("stateBool", false),
+	})
 
 
 func _enqueue_action(arguments: Array) -> String:
