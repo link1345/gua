@@ -30,11 +30,15 @@ export function createUnityWebGlBridge(portName = "__guaUnityWebPort", options: 
 }
 
 function globalPort(name: string, engine: string): GuaInPagePort {
-  const port = (globalThis as Record<string, unknown>)[name] as GuaInPagePort | undefined;
-  if (!port || typeof port.invoke !== "function") {
-    throw new GuaWebError("engine_unsupported", `${engine} did not install the same-page Gua port '${name}'.`);
-  }
-  return port;
+  return {
+    async invoke(command, options) {
+      const port = (globalThis as Record<string, unknown>)[name] as GuaInPagePort | undefined;
+      if (!port || typeof port.invoke !== "function") {
+        throw new GuaWebError("engine_unsupported", `${engine} did not install the same-page Gua port '${name}'.`);
+      }
+      return await port.invoke(command, options);
+    },
+  };
 }
 
 async function invoke(port: GuaInPagePort, command: GuaInPageCommand, options?: GuaBridgeCallOptions): Promise<unknown> {
@@ -53,7 +57,10 @@ async function invoke(port: GuaInPagePort, command: GuaInPageCommand, options?: 
 function parseTree(value: unknown): GuaUiTree {
   const parsed = parseJson(value);
   const record = asRecord(parsed);
-  if (!record || typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
+  if (!record || record.schemaVersion !== 2 ||
+      !Number.isInteger(record.frameSequence) || (record.frameSequence as number) < 0 ||
+      !Number.isInteger(record.revision) || (record.revision as number) < 0 ||
+      typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
   }
   return parsed as GuaUiTree;

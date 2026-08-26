@@ -44,13 +44,8 @@ func attach(gua_adapter: RefCounted) -> bool:
     __guaUninstall() {
       if (disposed) return;
       disposed = true;
-      for (const [requestId, call] of pending) {
-        clearTimeout(call.timer);
-        if (call.signal) call.signal.removeEventListener('abort', call.aborted);
-        try { cancelAction(String(requestId)); } catch (_) {}
-        call.reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.'));
-      }
-      pending.clear();
+      const error = engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
+      for (const call of pending.values()) call.cancelOrDrain(error);
     },
     async invoke(command, options) {
       if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
@@ -67,7 +62,7 @@ func attach(gua_adapter: RefCounted) -> bool:
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + 5000;
-        const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false };
+        const call = { reject, timer: 0, signal, aborted: null, settled: false, discardResult: false, cancelOrDrain: null };
         const finish = (settle) => {
           clearTimeout(call.timer);
           if (call.signal) call.signal.removeEventListener('abort', call.aborted);
@@ -100,13 +95,14 @@ func attach(gua_adapter: RefCounted) -> bool:
           rejectWithoutDropping(error);
           schedulePoll();
         };
+        call.cancelOrDrain = cancelOrDrain;
         const aborted = () => cancelOrDrain(engineError('aborted', 'The Godot Gua call was aborted.'));
         call.aborted = aborted;
         pending.set(receipt.requestId, call);
         if (signal) signal.addEventListener('abort', aborted, { once: true });
         if (signal && signal.aborted) return aborted();
         function poll() {
-          if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
+          if (disposed && !call.discardResult) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
           try {
             const result = readResult();
             if (result) return finish(() => resolve(result));

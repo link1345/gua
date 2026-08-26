@@ -266,6 +266,13 @@ int main()
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 5.0);
+    cpp_context.begin_frame("actions");
+    cpp_context.button("cpp-cancel", "Cancel", { 0, 0, 1, 1 });
+    cpp_context.end_frame();
+    std::uint64_t cpp_request_id = 0;
+    assert(cpp_context.enqueue_action({ 0, gua::ActionType::click, "cpp-cancel" }, cpp_request_id) == GUA_ACTION_ACCEPTED);
+    assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::cancelled);
+    assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::not_found);
 
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();

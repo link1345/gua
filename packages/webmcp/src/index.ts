@@ -35,9 +35,10 @@ export interface GuaNode {
   actions: string[];
 }
 export interface GuaUiTree {
+  schemaVersion: 2;
   sessionEpoch?: number;
-  frameSequence?: number;
-  revision?: number;
+  frameSequence: number;
+  revision: number;
   screen: string;
   nodes: GuaNode[];
 }

@@ -1,4 +1,15 @@
-import type { GuaNode, GuaWebActionRequest } from "../src/index.js";
+import type { GuaNode, GuaUiTree, GuaWebActionRequest } from "../src/index.js";
+
+const tree: GuaUiTree = {
+  schemaVersion: 2,
+  frameSequence: 1,
+  revision: 1,
+  screen: "title",
+  nodes: [],
+};
+
+// @ts-expect-error protocol trees require schemaVersion, frameSequence, and revision.
+const missingTreeMetadata: GuaUiTree = { screen: "title", nodes: [] };
 
 const node: GuaNode = {
   id: "name",
@@ -43,4 +54,4 @@ const missingDelta: GuaWebActionRequest = { action: "scroll", nodeId: "list", de
 // @ts-expect-error press_key must include key.
 const missingKey: GuaWebActionRequest = { action: "press_key" };
 
-void [node, validActions, missingValue, missingChecked, missingDelta, missingKey];
+void [tree, missingTreeMetadata, node, validActions, missingValue, missingChecked, missingDelta, missingKey];

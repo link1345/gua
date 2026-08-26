@@ -42,6 +42,12 @@ enum class ActionType {
     press_key = GUA_ACTION_PRESS_KEY,
 };
 
+enum class ActionCancelResult {
+    in_flight = GUA_ACTION_CANCEL_IN_FLIGHT,
+    not_found = GUA_ACTION_CANCEL_NOT_FOUND,
+    cancelled = GUA_ACTION_CANCELLED,
+};
+
 struct ActionRequest {
     std::uint64_t request_id = 0;
     ActionType action = ActionType::click;
@@ -326,6 +332,11 @@ public:
             key_buffer_.empty() ? nullptr : key_buffer_.c_str(), request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit
         };
         return gua_enqueue_action(context_, &descriptor, &request_id);
+    }
+
+    [[nodiscard]] ActionCancelResult cancel_action(std::uint64_t request_id)
+    {
+        return static_cast<ActionCancelResult>(gua_cancel_action_request(context_, request_id));
     }
 
     [[nodiscard]] bool consume_action(ActionType action, std::string_view node_id, ActionRequest& out)

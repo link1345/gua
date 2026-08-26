@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   createGuaInPageBridge,
+  createGodotWebBridge,
+  createUnityWebGlBridge,
   GuaWebError,
   registerGuaWebMcp,
   type GuaBrowserBridge,
@@ -34,7 +36,7 @@ function modelDocument() {
 }
 
 function tree(nodes: GuaUiTree["nodes"] = []): GuaUiTree {
-  return { sessionEpoch: 1, frameSequence: 2, revision: 2, screen: "title", nodes };
+  return { schemaVersion: 2, sessionEpoch: 1, frameSequence: 2, revision: 2, screen: "title", nodes };
 }
 
 function button(id = "start"): GuaUiTree["nodes"][number] {
@@ -303,6 +305,34 @@ describe("registerGuaWebMcp", () => {
 });
 
 describe("Gua same-page engine port", () => {
+  test("rejects trees without required protocol metadata", async () => {
+    for (const invalid of [
+      { frameSequence: 1, revision: 1, screen: "title", nodes: [] },
+      { schemaVersion: 1, frameSequence: 1, revision: 1, screen: "title", nodes: [] },
+      { schemaVersion: 2, revision: 1, screen: "title", nodes: [] },
+      { schemaVersion: 2, frameSequence: 1, screen: "title", nodes: [] },
+    ]) {
+      const bridge = createGuaInPageBridge({ invoke: async () => invalid });
+      await expect(bridge.getUiTree()).rejects.toMatchObject({ code: "invalid_request" });
+    }
+  });
+
+  test("resolves replacement Godot and Unity global ports for every call", async () => {
+    for (const [portName, createBridge] of [
+      ["__guaTestGodotPort", createGodotWebBridge],
+      ["__guaTestUnityPort", createUnityWebGlBridge],
+    ] as const) {
+      const globals = globalThis as Record<string, unknown>;
+      globals[portName] = { invoke: async () => tree([{ ...button("first") }]) };
+      const bridge = createBridge(portName);
+      expect((await bridge.getUiTree()).nodes[0]?.id).toBe("first");
+      globals[portName] = { invoke: async () => tree([{ ...button("replacement") }]) };
+      expect((await bridge.getUiTree()).nodes[0]?.id).toBe("replacement");
+      delete globals[portName];
+      await expect(bridge.getUiTree()).rejects.toMatchObject({ code: "engine_unsupported" });
+    }
+  });
+
   test("maps protocol commands without a transport or session router", async () => {
     const commands: unknown[] = [];
     const signals: Array<AbortSignal | undefined> = [];
