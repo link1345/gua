@@ -169,14 +169,17 @@ inline void text(Context& context, std::string_view label)
 inline bool input_text(Context& context, std::string_view label, std::string& value, bool sensitive = false)
 {
     const std::string id = semantic_id_from_label(label);
+    if (sensitive) context.mark_node_sensitive(id);
     ActionRequest request;
     ActionRequest focus_request;
     const bool requested_focus = context.consume_action(ActionType::focus, id, focus_request);
     if (requested_focus) ImGui::SetKeyboardFocusHere();
     while (context.consume_action(ActionType::set_value, id, request)) {
         value = request.value;
-        (void)context.emit_action_result(ActionEvent { request.request_id, ActionType::set_value, GUA_ACTION_STATUS_SUCCEEDED, 0, id, value, sensitive || request.sensitive });
+        if (request.sensitive) context.mark_node_sensitive(id);
+        (void)context.emit_action_result(ActionEvent { request.request_id, ActionType::set_value, GUA_ACTION_STATUS_SUCCEEDED, 0, id, value, context.is_node_sensitive(id) });
     }
+    const bool effective_sensitive = context.is_node_sensitive(id);
     while (context.consume_action(ActionType::press_key, id, request)) {
         bool success = true;
         if (request.key == "Backspace") {
@@ -188,7 +191,7 @@ inline bool input_text(Context& context, std::string_view label, std::string& va
         }
         (void)context.emit_action_result(ActionEvent { request.request_id, ActionType::press_key,
             success ? GUA_ACTION_STATUS_SUCCEEDED : GUA_ACTION_STATUS_FAILED,
-            success ? 0 : GUA_ACTION_ERROR_INVALID_VALUE, id, "", sensitive });
+            success ? 0 : GUA_ACTION_ERROR_INVALID_VALUE, id, "", effective_sensitive });
     }
     std::array<char, 512> buffer {};
     std::snprintf(buffer.data(), buffer.size(), "%s", value.c_str());
@@ -196,13 +199,13 @@ inline bool input_text(Context& context, std::string_view label, std::string& va
     const bool changed = ImGui::InputText(label_buffer.c_str(), buffer.data(), buffer.size());
     if (changed) {
         value = buffer.data();
-        (void)context.emit_action_result(ActionEvent { 0, ActionType::set_value, GUA_ACTION_STATUS_SUCCEEDED, 0, id, value, sensitive });
+        (void)context.emit_action_result(ActionEvent { 0, ActionType::set_value, GUA_ACTION_STATUS_SUCCEEDED, 0, id, value, effective_sensitive });
     }
     const ImVec2 min = ImGui::GetItemRectMin();
     const ImVec2 max = ImGui::GetItemRectMax();
     context.node_v2(id, "textbox", visible_label(label), Rect { min.x, min.y, max.x - min.x, max.y - min.y },
-        NodeProperties { .text = sensitive ? std::optional<std::string_view>() : std::optional<std::string_view>(value),
-            .value = sensitive ? std::optional<std::string_view>() : std::optional<std::string_view>(value), .focused = ImGui::IsItemFocused() },
+        NodeProperties { .text = effective_sensitive ? std::optional<std::string_view>() : std::optional<std::string_view>(value),
+            .value = effective_sensitive ? std::optional<std::string_view>() : std::optional<std::string_view>(value), .focused = ImGui::IsItemFocused() },
         ImGui::IsItemVisible(), true);
     if (requested_focus) (void)context.emit_action_result(ActionEvent { focus_request.request_id, ActionType::focus, GUA_ACTION_STATUS_SUCCEEDED, 0, id });
     return changed;

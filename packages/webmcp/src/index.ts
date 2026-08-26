@@ -255,7 +255,7 @@ async function executeTool(
       signal,
       `Timed out waiting for ${request.action} host completion.`,
     );
-    if (!completion || typeof completion.requestId !== "number") {
+    if (!completion || !Number.isInteger(completion.requestId) || completion.requestId < 1) {
       throw new GuaWebError("invalid_request", "The engine bridge returned no request-correlated completion.");
     }
     if (!completion.succeeded) {

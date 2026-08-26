@@ -140,6 +140,23 @@ describe("registerGuaWebMcp", () => {
     expect(JSON.parse(result.content[0]!.text).error.code).toBe("hidden");
   });
 
+  test("rejects invalid completion request IDs from custom bridges", async () => {
+    for (const requestId of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const page = modelDocument();
+      const bridge: GuaBrowserBridge = {
+        getUiTree: async () => tree([button()]),
+        performAction: async () => ({ requestId, action: "click", succeeded: true }),
+      };
+      await registerGuaWebMcp(bridge, { document: page.document });
+      const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as {
+        isError: boolean;
+        content: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0]!.text).error.code).toBe("invalid_request");
+    }
+  });
+
   test("registers read-only world tools and delegates selectors to the engine bridge", async () => {
     const page = modelDocument();
     const selectors: unknown[] = [];
@@ -522,6 +539,16 @@ describe("Gua same-page engine port", () => {
       { type: "perform_action", request: { action: "click", nodeId: "start" } },
     ]);
     expect(signals).toEqual([undefined, controller.signal]);
+  });
+
+  test("rejects completions without a positive integer request ID", async () => {
+    for (const requestId of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const bridge = createGuaInPageBridge({
+        invoke: async () => ({ requestId, succeeded: true }),
+      });
+      await expect(bridge.performAction({ action: "click", nodeId: "start" }))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
   });
 
   test("maps world reads and queries to the engine-owned port", async () => {

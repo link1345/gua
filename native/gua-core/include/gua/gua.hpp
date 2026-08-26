@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 namespace gua {
 
@@ -101,7 +102,7 @@ public:
     Context& operator=(const Context&) = delete;
 
     Context(Context&& other) noexcept
-        : context_(other.context_)
+        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_))
     {
         other.context_ = nullptr;
     }
@@ -111,6 +112,7 @@ public:
         if (this != &other) {
             reset();
             context_ = other.context_;
+            sensitive_node_ids_ = std::move(other.sensitive_node_ids_);
             other.context_ = nullptr;
         }
         return *this;
@@ -124,6 +126,16 @@ public:
     [[nodiscard]] gua_context_t* native_handle() const noexcept
     {
         return context_;
+    }
+
+    void mark_node_sensitive(std::string_view id)
+    {
+        sensitive_node_ids_.emplace(id);
+    }
+
+    [[nodiscard]] bool is_node_sensitive(std::string_view id) const
+    {
+        return sensitive_node_ids_.contains(std::string(id));
     }
 
     void install_clock(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0)
@@ -404,6 +416,7 @@ private:
     {
         gua_destroy_context(context_);
         context_ = nullptr;
+        sensitive_node_ids_.clear();
     }
 
     gua_context_t* context_;
@@ -418,6 +431,7 @@ private:
     std::string screenshot_buffer_;
     std::string environment_buffer_;
     std::string screen_buffer_;
+    std::unordered_set<std::string> sensitive_node_ids_;
 };
 
 inline void begin_frame(Context& context, std::string_view screen)

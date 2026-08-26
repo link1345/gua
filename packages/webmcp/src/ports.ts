@@ -219,7 +219,8 @@ function isOptionalProtocolValue(value: unknown): boolean {
 function parseCompletion(value: unknown): GuaWebActionCompletion {
   const parsed = parseJson(value);
   const record = asRecord(parsed);
-  if (!record || typeof record.requestId !== "number" || typeof record.succeeded !== "boolean") {
+  if (!record || !Number.isInteger(record.requestId) || (record.requestId as number) < 1 ||
+      typeof record.succeeded !== "boolean") {
     throw new GuaWebError("invalid_request", "The engine returned an invalid action completion.");
   }
   return parsed as GuaWebActionCompletion;
