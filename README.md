@@ -710,8 +710,12 @@ $Door.set_meta(&"gua_world_state", {"locked": true})
 Run the GDScript smoke check with:
 
 ```powershell
-C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+.\scripts\run-godot-smoke.ps1 -GodotExecutable 'C:\path\to\Godot_v4.7-stable_win64_console.exe'
 ```
+
+The wrapper places Godot's temporary `user://` data under the ignored `build/`
+directory. This also prevents a Godot 4.7 Windows access violation when the
+normal `%APPDATA%` location is unavailable in a restricted test environment.
 
 ## Repository Layout
 

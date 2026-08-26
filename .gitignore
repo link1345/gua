@@ -13,6 +13,9 @@ cmake-build-*/
 compile_commands.json
 packages/inspector/src-tauri/gen/
 .godot/
+# Generated when the headless GDScript smoke resolves these scripts.
+examples/godot-gdscript/addons/gua/gua_auto_adapter.gd.uid
+examples/godot-gdscript/scripts/gua_smoke.gd.uid
 
 # Package managers
 node_modules/

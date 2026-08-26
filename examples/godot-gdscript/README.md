@@ -119,5 +119,9 @@ the same runtime observe the new `sessionEpoch`.
 For a headless smoke check of the load-order-safe path:
 
 ```powershell
-C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+.\scripts\run-godot-smoke.ps1 -GodotExecutable 'C:\path\to\Godot_v4.7-stable_win64_console.exe'
 ```
+
+Run the command from the repository root. The wrapper keeps Godot's temporary
+`user://` data under the ignored `build/` directory, avoiding a Godot 4.7
+Windows access violation when `%APPDATA%` is not writable.
