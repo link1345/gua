@@ -141,11 +141,17 @@ func _publish_world_frame(scene: String) -> void:
 	var objects := root.get_tree().get_nodes_in_group(&"gua_world_object")
 	objects.sort_custom(func(a: Node, b: Node) -> bool: return str(a.get_path()) < str(b.get_path()))
 	for node: Node in objects:
-		if not (node is Node2D or node is Node3D) or not node.has_meta(&"gua_world_id"):
+		if not (node is Node2D or node is Node3D):
 			continue
+		if not node.has_meta(&"gua_world_id"):
+			push_error("Gua world object requires gua_world_id metadata: %s" % node.get_path())
+			context.abort_world_frame()
+			return
 		var object_id := str(node.get_meta(&"gua_world_id", ""))
 		if object_id.is_empty():
-			continue
+			push_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path())
+			context.abort_world_frame()
+			return
 		var parent_id := ""
 		var ancestor := node.get_parent()
 		while ancestor != null:

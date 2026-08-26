@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Globalization;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 
@@ -156,9 +158,27 @@ internal sealed class NativeWorldDescriptor : IDisposable
 
     internal static Native.GuaNativeWorldStateValueV1 State(string key, object? value, Func<string?, nint> text) => value switch {
         null => New(0), string item => New(1, text(item)), bool item => New(3, boolean: item),
-        byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal => New(2, number: Convert.ToDouble(value)),
+        byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal => New(2, number: Number(key, value)),
         _ => throw new ArgumentException($"World state '{key}' must be a primitive JSON value.")
     } with { Key = text(key) };
+    private static double Number(string key, object value)
+    {
+        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        if (!double.IsFinite(number)) throw new ArgumentException($"World state '{key}' must be a finite number.");
+        if (value is byte or sbyte or short or ushort or int or uint or long or ulong) {
+            var integral = BigInteger.Parse(Convert.ToString(value, CultureInfo.InvariantCulture)!, CultureInfo.InvariantCulture);
+            if (new BigInteger(number) != integral)
+                throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+        } else if (value is decimal) {
+            try {
+                if (Convert.ToDecimal(value, CultureInfo.InvariantCulture) != Convert.ToDecimal(number))
+                    throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+            } catch (OverflowException) {
+                throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+            }
+        }
+        return number;
+    }
     private static Native.GuaNativeWorldStateValueV1 New(int type, nint text = 0, double number = 0, bool boolean = false) =>
         new() { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>(), Type = type, StringValue = text, NumberValue = number, BoolValue = boolean ? 1 : 0 };
     public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }

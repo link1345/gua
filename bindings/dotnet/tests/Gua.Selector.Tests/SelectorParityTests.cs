@@ -63,6 +63,7 @@ public sealed class SelectorParityTests
         Assert.That(runtime.StartInspectorBridge(port), Is.True);
         try
         {
+            Assert.Throws<InvalidOperationException>(() => runtime.SetObservationProfile(GuaObservationProfile.Debug));
             using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
             remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
             Assert.That(remote.GetWorldObjectTree(GuaObservationProfile.Debug).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }),
@@ -72,10 +73,25 @@ public sealed class SelectorParityTests
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))).Matches.Single().Id, Is.EqualTo("door-a"));
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("priority", (byte)7))).Matches.Single().Id, Is.EqualTo("door-a"));
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("code", ""))).Matches.Single().Id, Is.EqualTo("door-a"));
+            Assert.Throws<ArgumentException>(() => remote.QueryWorldObjects(
+                new GuaWorldSelector(State: new GuaWorldStateCriterion("code", 9_007_199_254_740_993UL))));
+            using (var godotRemote = new GuaRemoteContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(2)))
+                Assert.Throws<ArgumentException>(() => godotRemote.QueryWorldObjects(
+                    new GuaWorldSelector(State: new GuaWorldStateCriterion("code", 9_007_199_254_740_993UL))));
             foreach (var invalid in new[] {
                 new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
                 new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: ""), new GuaWorldSelector(DirectChild: true) })
                 Assert.Throws<InvalidOperationException>(() => remote.QueryWorldObjects(invalid));
+            using (var malformed = new ClientWebSocket())
+            {
+                await malformed.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
+                foreach (var command in new[] {
+                    "{\"id\":101,\"type\":\"query_world_objects\",\"visibleToPlayer\":null}",
+                    "{\"id\":102,\"type\":\"query_world_objects\",\"visibleToPlayer\":\"true\"}",
+                    "{\"id\":103,\"type\":\"query_world_objects\",\"active\":null}",
+                    "{\"id\":104,\"type\":\"query_world_objects\",\"active\":\"true\"}" })
+                    Assert.That((await SendRawCommandAsync(malformed, command)).GetProperty("ok").GetBoolean(), Is.False);
+            }
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
             Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
             Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1));
@@ -223,6 +239,42 @@ public sealed class SelectorParityTests
             new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
             new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: "") })
             Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(invalid));
+    }
+
+    [Test]
+    public void ManagedWorldStateRejectsNumbersThatAliasInTheDoubleAbi()
+    {
+        const ulong imprecise = 9_007_199_254_740_993UL;
+        using var context = new GuaContext();
+        context.BeginWorldFrame("precision");
+        Assert.Throws<ArgumentException>(() => context.RegisterWorldObject(new GuaWorldObjectDescriptor(
+            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
+            State: new Dictionary<string, object?> { ["code"] = imprecise })));
+        context.AbortWorldFrame();
+        Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(
+            new GuaWorldSelector(State: new GuaWorldStateCriterion("code", imprecise))));
+        context.BeginWorldFrame("precision");
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor(
+            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
+            State: new Dictionary<string, object?> { ["code"] = 9_007_199_254_740_992UL }));
+        context.EndWorldFrame();
+        Assert.That(context.GetWorldObjectTree().Objects.Single().State["code"].GetDouble(), Is.EqualTo(9_007_199_254_740_992d));
+        Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(
+            new GuaWorldSelector(State: new GuaWorldStateCriterion("decimal", 0.10000000000000001m))));
+
+        using var runtime = new GuaRuntime();
+        runtime.BeginWorldFrame("precision");
+        Assert.Throws<ArgumentException>(() => runtime.RegisterWorldObject(new GuaWorldObjectDescriptor(
+            "door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2),
+            State: new Dictionary<string, object?> { ["code"] = imprecise })));
+        runtime.AbortWorldFrame();
+    }
+
+    [Test]
+    public async Task RemoteWorldWaitsHonorCancellationWhileThePeerWithholdsAResponse()
+    {
+        await AssertRemoteWorldWaitCancellation((url, timeout) => new GuaWebSocketContext(url, timeout));
+        await AssertRemoteWorldWaitCancellation((url, timeout) => new GuaRemoteContext(url, timeout));
     }
 
     [Test]
@@ -1228,6 +1280,62 @@ public sealed class SelectorParityTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static async Task AssertRemoteWorldWaitCancellation(Func<string, TimeSpan, IGuaWorldContext> createContext)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var serverCancellation = new CancellationTokenSource();
+        var server = RunSilentWebSocketServer(listener, serverCancellation.Token);
+        try
+        {
+            using var context = (IDisposable)createContext($"ws://127.0.0.1:{port}", TimeSpan.FromSeconds(5));
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+            var stopwatch = Stopwatch.StartNew();
+            Assert.That(async () => await ((IGuaWorldContext)context).WaitForWorldObjectAsync(
+                new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(5), cancellationToken: cancellation.Token),
+                Throws.InstanceOf<OperationCanceledException>());
+            Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(1)));
+        }
+        finally
+        {
+            serverCancellation.Cancel();
+            listener.Stop();
+            await server;
+        }
+    }
+
+    private static async Task RunSilentWebSocketServer(TcpListener listener, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+            await using var stream = client.GetStream();
+            var header = new MemoryStream();
+            var oneByte = new byte[1];
+            while (header.Length < 16 * 1024)
+            {
+                if (await stream.ReadAsync(oneByte, cancellationToken) == 0) return;
+                header.WriteByte(oneByte[0]);
+                var bytes = header.GetBuffer();
+                var length = (int)header.Length;
+                if (length >= 4 && bytes[length - 4] == '\r' && bytes[length - 3] == '\n' && bytes[length - 2] == '\r' && bytes[length - 1] == '\n') break;
+            }
+            var request = Encoding.ASCII.GetString(header.ToArray());
+            var key = request.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase))
+                .Split(':', 2)[1].Trim();
+            var accept = Convert.ToBase64String(System.Security.Cryptography.SHA1.HashData(
+                Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+            var response = Encoding.ASCII.GetBytes("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n");
+            await stream.WriteAsync(response, cancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested) { }
+        catch (SocketException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     [Test]

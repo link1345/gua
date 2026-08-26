@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Globalization;
+using System.Numerics;
 using System.Text;
 using Gua.Core;
 
@@ -7,7 +9,13 @@ namespace Gua.Runtime;
 public sealed partial class GuaRuntime
 {
     public void EnableWorldObjectTreeAdapter() { ThrowIfDisposed(); Native.gua_runtime_set_world_object_tree_enabled(_handle, 1); }
-    public void SetObservationProfile(GuaObservationProfile profile) { ThrowIfDisposed(); if (Native.gua_runtime_set_observation_profile(_handle, (int)profile) == 0) throw new ArgumentOutOfRangeException(nameof(profile)); }
+    public void SetObservationProfile(GuaObservationProfile profile)
+    {
+        ThrowIfDisposed();
+        if (profile is not GuaObservationProfile.Debug and not GuaObservationProfile.Player) throw new ArgumentOutOfRangeException(nameof(profile));
+        if (Native.gua_runtime_set_observation_profile(_handle, (int)profile) == 0)
+            throw new InvalidOperationException("The observation profile cannot change while the Inspector bridge is running.");
+    }
     public void BeginWorldFrame(string scene) { ThrowIfDisposed(); if (Native.gua_runtime_begin_world_frame(_handle, scene) == 0) throw new InvalidOperationException("Failed to begin the Gua world frame."); }
     public void EndWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_end_world_frame(_handle) == 0) throw new InvalidOperationException("The Gua world frame was rejected."); }
     public void AbortWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_abort_world_frame(_handle) == 0) throw new InvalidOperationException("There is no active Gua world frame to abort."); }
@@ -30,7 +38,7 @@ public sealed partial class GuaRuntime
                     case string text: state.Type = 1; state.StringValue = Text(text); break;
                     case bool boolean: state.Type = 3; state.BoolValue = boolean ? 1 : 0; break;
                     case byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal:
-                        state.Type = 2; state.NumberValue = Convert.ToDouble(pair.Value); break;
+                        state.Type = 2; state.NumberValue = WorldNumber(pair.Key, pair.Value); break;
                     default: throw new ArgumentException($"World state '{pair.Key}' must be a primitive JSON value.");
                 }
                 values.Add(state);
@@ -42,6 +50,25 @@ public sealed partial class GuaRuntime
                 DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tags, TagCount = (uint)tagPointers.Length, StateValues = states, StateValueCount = (uint)values.Count };
             if (Native.gua_runtime_register_world_object_v1(_handle, in native) == 0) throw new InvalidOperationException($"Failed to register Gua world object '{source.Id}'.");
         } finally { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
+    }
+
+    private static double WorldNumber(string key, object value)
+    {
+        var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        if (!double.IsFinite(number)) throw new ArgumentException($"World state '{key}' must be a finite number.");
+        if (value is byte or sbyte or short or ushort or int or uint or long or ulong) {
+            var integral = BigInteger.Parse(Convert.ToString(value, CultureInfo.InvariantCulture)!, CultureInfo.InvariantCulture);
+            if (new BigInteger(number) != integral)
+                throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+        } else if (value is decimal) {
+            try {
+                if (Convert.ToDecimal(value, CultureInfo.InvariantCulture) != Convert.ToDecimal(number))
+                    throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+            } catch (OverflowException) {
+                throw new ArgumentException($"World state '{key}' cannot be represented precisely as an ABI double.");
+            }
+        }
+        return number;
     }
 
     public unsafe string GetWorldObjectTreeJson()

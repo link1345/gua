@@ -791,7 +791,9 @@ extern "C" void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime
 extern "C" int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int profile)
 {
     if (!valid_runtime(runtime) || (profile != GUA_OBSERVATION_PROFILE_DEBUG && profile != GUA_OBSERVATION_PROFILE_PLAYER)) return 0;
-    const std::lock_guard lock(runtime->context_mutex);
+    const std::lock_guard bridge_lock(runtime->bridge_mutex);
+    const std::lock_guard context_lock(runtime->context_mutex);
+    if (runtime->bridge != nullptr && runtime->bridge->running() && runtime->observation_profile != profile) return 0;
     runtime->observation_profile = profile;
     return 1;
 }

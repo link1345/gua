@@ -172,6 +172,15 @@ func _run() -> void:
 		return
 	door.set_meta(&"gua_world_visible_to_player", true)
 	ui._publish_world_frame("title")
+	door.set_meta(&"gua_world_id", "")
+	ui._publish_world_frame("title")
+	var missing_id_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(missing_id_world_tree, "door-a") == null \
+			or missing_id_world_tree.get("frameSequence", 0) != 2:
+		_fail("Gua removed an opted-in object with malformed ID metadata: %s" % missing_id_world_tree)
+		return
+	door.set_meta(&"gua_world_id", "door-a")
+	ui._publish_world_frame("title")
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))

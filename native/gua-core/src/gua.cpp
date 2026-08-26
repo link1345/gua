@@ -353,6 +353,7 @@ std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_
 
 std::string json_number(double value)
 {
+    if (value == 0.0) return "0";
     std::ostringstream stream;
     stream.imbue(std::locale::classic());
     stream << std::setprecision(17) << value;

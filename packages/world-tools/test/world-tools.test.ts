@@ -41,4 +41,14 @@ describe("World WebMCP tools", () => {
       expect(() => selectorFromArguments({ [key]: "true" })).toThrow(`${key} must be a boolean`);
     expect(selectorFromArguments({ id: "door" })).toEqual({ id: "door" });
   });
+
+  test("rejects unknown direct tool arguments", async () => {
+    expect(() => selectorFromArguments({ knd: "enemy" })).toThrow("Unknown world selector argument: knd");
+    const tools = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
+    const provider = { getWorldObjectTree: async () => ({ schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "test", objects: [] }), findWorldObjects: async () => ({ valid: true, matches: [] }), waitForWorldObject: async () => { throw new Error("timeout"); } };
+    registerWorldWebMcpTools({ registerTool: (tool) => tools.set(tool.name, tool.execute) }, provider);
+    await expect(tools.get("get_world_object_tree")?.({ id: "door" })).rejects.toThrow("Unknown get_world_object_tree argument");
+    await expect(tools.get("find_world_objects")?.({ timeoutMs: 10 })).rejects.toThrow("Unknown find_world_objects argument");
+    await expect(tools.get("wait_for_world_object")?.({ timeoutMs: 0 })).rejects.toThrow("timeoutMs must be an integer");
+  });
 });
