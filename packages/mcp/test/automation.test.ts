@@ -15,6 +15,12 @@ afterEach(async () => {
 });
 
 describe("GuaAutomationManager", () => {
+  test("keeps bundled workspace packages out of published dependencies", async () => {
+    const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(Object.values(manifest.dependencies ?? {}).some((version) => String(version).startsWith("workspace:"))).toBe(false);
+    expect(manifest.devDependencies["@gua/world-tools"]).toBe("workspace:*");
+  });
+
   test("rejects clock_run_for without its required duration", () => {
     expect(() => parseClockRunForArguments({})).toThrow("durationMs");
     expect(parseClockRunForArguments({ durationMs: 25 })).toEqual({

@@ -197,6 +197,7 @@ Publishers use `begin_world_frame -> register_world_object -> end_world_frame`, 
 `visibleToPlayer` is host-defined semantic visibility, not pixel occlusion. The host fixes an observation profile before transport use: `debug` returns every registered object, while `player` removes invisible or `private` objects and descendants whose parent is not observable. Commands do not accept a profile override. Queries project first, so guessing a private ID produces the same empty result as an unknown ID. Player snapshots and transport status/reset metadata use the projected revision and object count; changes confined to hidden objects cannot be detected through those fields.
 
 `query_world_objects` either omits all state criterion fields or supplies `stateKey`, `stateType`, and exactly the typed value required by that type (`stateString`, `stateNumber`, or `stateBool`; null requires no value field). Incomplete or conflicting criteria are rejected rather than treated as an unfiltered or zero-valued query.
+The MCP and WebMCP tools expose the same criterion as the paired `stateKey` and `stateValue` arguments. Supplying only one is invalid and must fail before a provider query or wait begins.
 
 World v1 provides no actions, relationship/distance queries, pathfinding, teleportation, or arbitrary host method invocation. Capability `world_object_tree_v1` is advertised only after an adapter installs its world-frame publisher.
 

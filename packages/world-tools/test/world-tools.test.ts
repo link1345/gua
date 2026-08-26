@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { registerWorldWebMcpTools } from "../src/index";
+import { registerWorldWebMcpTools, selectorFromArguments, worldObservationTools } from "../src/index";
 
 describe("World WebMCP tools", () => {
   test("feature detects and pins calls to the injected provider", async () => {
@@ -14,5 +14,14 @@ describe("World WebMCP tools", () => {
     expect(profiles).toEqual(["player", "player"]);
     expect(selectors).toEqual([{ state: { key: "locked", value: true } }]);
     expect(tools.has("interact_world_object")).toBe(false);
+  });
+
+  test("requires complete primitive state criteria", () => {
+    const schemas = worldObservationTools.filter((tool) => tool.name !== "get_world_object_tree").map((tool) => tool.inputSchema);
+    expect(schemas.every((schema) => "dependentRequired" in schema)).toBe(true);
+    expect(() => selectorFromArguments({ stateKey: "locked" })).toThrow("supplied together");
+    expect(() => selectorFromArguments({ stateValue: true })).toThrow("supplied together");
+    expect(() => selectorFromArguments({ stateKey: "locked", stateValue: {} })).toThrow("primitive JSON value");
+    expect(selectorFromArguments({ stateKey: "locked", stateValue: false })).toEqual({ state: { key: "locked", value: false } });
   });
 });

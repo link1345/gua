@@ -21,10 +21,14 @@ const selectorProperties = {
   stateKey: string("Primitive state key."),
   stateValue: { type: ["string", "number", "boolean", "null"], description: "Exact primitive state value." },
 };
+const selectorSchema = (properties: Record<string, unknown>) => ({
+  type: "object", additionalProperties: false, properties,
+  dependentRequired: { stateKey: ["stateValue"], stateValue: ["stateKey"] },
+});
 export const worldObservationTools = [
   { name: "get_world_object_tree", description: "Read the host-authorized World Object Tree.", inputSchema: { type: "object", additionalProperties: false, properties: {} } },
-  { name: "find_world_objects", description: "Find observable world objects with semantic criteria.", inputSchema: { type: "object", additionalProperties: false, properties: selectorProperties } },
-  { name: "wait_for_world_object", description: "Wait until an observable world object matches.", inputSchema: { type: "object", additionalProperties: false, properties: { ...selectorProperties, timeoutMs: { type: "integer", minimum: 1, maximum: 300000 } } } },
+  { name: "find_world_objects", description: "Find observable world objects with semantic criteria.", inputSchema: selectorSchema(selectorProperties) },
+  { name: "wait_for_world_object", description: "Wait until an observable world object matches.", inputSchema: selectorSchema({ ...selectorProperties, timeoutMs: { type: "integer", minimum: 1, maximum: 300000 } }) },
 ] as const;
 export type WorldObservationToolName = (typeof worldObservationTools)[number]["name"];
 
@@ -32,8 +36,17 @@ export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSe
   const result: Record<string, unknown> = {};
   for (const key of ["id", "kind", "label", "tag", "parentId"] as const) if (typeof args[key] === "string" && args[key].length > 0) result[key] = args[key];
   for (const key of ["directChild", "visibleToPlayer", "active"] as const) if (typeof args[key] === "boolean") result[key] = args[key];
-  if (typeof args.stateKey === "string" && args.stateKey.length > 0 && Object.prototype.hasOwnProperty.call(args, "stateValue"))
-    result.state = { key: args.stateKey, value: args.stateValue as WorldPrimitive };
+  const hasStateKey = Object.prototype.hasOwnProperty.call(args, "stateKey");
+  const hasStateValue = Object.prototype.hasOwnProperty.call(args, "stateValue");
+  if (hasStateKey !== hasStateValue) throw new TypeError("stateKey and stateValue must be supplied together.");
+  if (hasStateKey) {
+    if (typeof args.stateKey !== "string" || args.stateKey.length === 0) throw new TypeError("stateKey must be a non-empty string.");
+    const value = args.stateValue;
+    if (value !== null && typeof value !== "string" && typeof value !== "boolean" &&
+        (typeof value !== "number" || !Number.isFinite(value)))
+      throw new TypeError("stateValue must be a primitive JSON value.");
+    result.state = { key: args.stateKey, value: value as WorldPrimitive };
+  }
   return result as GuaWorldSelector;
 }
 

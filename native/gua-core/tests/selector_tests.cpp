@@ -56,6 +56,13 @@ int main()
     catch (const std::runtime_error& error) { invalid_regex = std::string(error.what()).find("Invalid Gua selector") != std::string::npos; }
     assert(invalid_regex);
 
+    gua_context_t* empty_context = gua_create_context();
+    bool empty_invalid_regex = false;
+    try { (void)query(empty_context).by_text("[", match_mode::regex).query_all(); }
+    catch (const std::runtime_error& error) { empty_invalid_regex = std::string(error.what()).find("Invalid Gua selector") != std::string::npos; }
+    assert(empty_invalid_regex);
+    gua_destroy_context(empty_context);
+
     char legacy[128] {};
     assert(gua_find_node_by_text(context, "保存", legacy, sizeof(legacy)) == 1);
     assert(std::string(legacy) == "left-save");

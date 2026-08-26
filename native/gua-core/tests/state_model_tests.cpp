@@ -166,6 +166,17 @@ int main()
     assert(std::string(query).find("\"valid\":false") != std::string::npos);
     gua_destroy_context(atomic_world);
 
+    // Selector syntax is validated before projection, scope, tags, or object scanning can short-circuit it.
+    gua_context_t* empty_world = gua_create_context();
+    gua_world_selector_v1_t invalid_world_regex { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0,
+        "[", GUA_MATCH_REGEX, nullptr, 0, nullptr, 0, 0, 0, nullptr };
+    gua_query_world_objects_json(empty_world, &invalid_world_regex, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    invalid_world_regex.label = nullptr; invalid_world_regex.tag = "["; invalid_world_regex.tag_match = GUA_MATCH_REGEX;
+    gua_query_world_objects_json(empty_world, &invalid_world_regex, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
+    assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    gua_destroy_context(empty_world);
+
     // Hidden-only changes do not advance the player projection revision.
     gua_context_t* projected_world = gua_create_context();
     assert(gua_begin_world_frame(projected_world, "privacy") == 1);

@@ -17,6 +17,7 @@ on:
       - package.json
       - tsconfig.base.json
       - packages/mcp/**
+      - packages/world-tools/**
       - packages/bridge-ws/**
       - native/gua-ws-bridge/**
       - protocol/**
@@ -86,6 +87,13 @@ jobs:
           packageJson.version = process.env.PACKAGE_VERSION;
           delete packageJson.scripts;
           delete packageJson.devDependencies;
+          for (const section of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+            for (const [name, version] of Object.entries(packageJson[section] ?? {})) {
+              if (String(version).startsWith("workspace:")) {
+                throw new Error(`Published gui-mcp manifest retains workspace dependency ${name}@${version}`);
+              }
+            }
+          }
 
           fs.writeFileSync(
             path.join(process.env.PUBLISH_DIR, "package.json"),

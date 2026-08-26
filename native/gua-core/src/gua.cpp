@@ -240,6 +240,30 @@ bool matches_filter(bool actual, int filter, std::string& error)
     return false;
 }
 
+bool validate_text_criterion(const char* expected, int mode, std::string& error)
+{
+    if (expected == nullptr || expected[0] == '\0') return true;
+    if (mode != GUA_MATCH_EXACT && mode != GUA_MATCH_CONTAINS && mode != GUA_MATCH_REGEX) {
+        error = "unknown match mode";
+        return false;
+    }
+    if (mode != GUA_MATCH_REGEX) return true;
+    try {
+        (void)std::regex(expected, std::regex::ECMAScript);
+        return true;
+    } catch (const std::regex_error& exception) {
+        error = exception.what();
+        return false;
+    }
+}
+
+bool validate_filter(int filter, std::string& error)
+{
+    if (filter == GUA_FILTER_ANY || filter == GUA_FILTER_FALSE || filter == GUA_FILTER_TRUE) return true;
+    error = "unknown state filter";
+    return false;
+}
+
 bool is_in_scope(const std::vector<Node>& nodes, const Node& node, const char* parent_id, bool direct_child)
 {
     if (parent_id == nullptr || parent_id[0] == '\0') return true;
@@ -286,6 +310,12 @@ bool supports_action(const Node& node, int action)
 std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_v1_t& selector)
 {
     std::string error;
+    if (!validate_text_criterion(selector.id, selector.id_match, error) ||
+        !validate_text_criterion(selector.role, selector.role_match, error) ||
+        !validate_text_criterion(selector.name, selector.name_match, error) ||
+        !validate_text_criterion(selector.text, selector.text_match, error) ||
+        !validate_filter(selector.visible, error) || !validate_filter(selector.enabled, error))
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
     std::vector<const Node*> matches;
     for (const Node& node : nodes) {
         if (!is_in_scope(nodes, node, selector.parent_id, selector.direct_child != 0)) continue;
@@ -429,8 +459,15 @@ bool world_state_matches(const WorldObject& object, const gua_world_state_value_
 
 std::string build_world_query_json(const std::vector<WorldObject>& source, const gua_world_selector_v1_t& selector, int profile)
 {
+    std::string error;
+    if (!validate_text_criterion(selector.id, selector.id_match, error) ||
+        !validate_text_criterion(selector.kind, selector.kind_match, error) ||
+        !validate_text_criterion(selector.label, selector.label_match, error) ||
+        !validate_text_criterion(selector.tag, selector.tag_match, error) ||
+        !validate_filter(selector.visible_to_player, error) || !validate_filter(selector.active, error))
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
     const auto objects = project_world_objects(source, profile);
-    std::string error, json = "{\"valid\":true,\"matches\":[";
+    std::string json = "{\"valid\":true,\"matches\":[";
     bool comma = false;
     for (const auto& object : objects) {
         if (!world_in_scope(objects, object, selector.parent_id, selector.direct_child != 0)) continue;
