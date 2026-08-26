@@ -38,7 +38,10 @@ interface GuaWorldWireSelector {
 export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
   const bridge: GuaBrowserBridge = {
     getUiTree: async () => parseTree(await invoke(port, { type: "get_ui_tree" })),
-    performAction: async (request, callOptions) => parseCompletion(await invoke(port, { type: "perform_action", request }, callOptions)),
+    performAction: async (request, callOptions) => {
+      const validatedRequest = validateActionRequest(request);
+      return parseCompletion(await invoke(port, { type: "perform_action", request: validatedRequest }, callOptions));
+    },
   };
   if (options.screenshot) bridge.getScreenshot = async () => parseScreenshot(await invoke(port, { type: "get_screenshot" }));
   if (options.world) {
@@ -214,6 +217,76 @@ function isNonNegativeNumber(value: unknown): boolean {
 
 function isOptionalProtocolValue(value: unknown): boolean {
   return value === undefined || value === null || typeof value === "string" || typeof value === "boolean" || isFiniteNumber(value);
+}
+
+function validateActionRequest(value: unknown): GuaWebActionRequest {
+  const request = asRecord(value);
+  if (!request || !hasProperty(request, "action") || typeof request.action !== "string") invalidActionRequest();
+  switch (request.action) {
+    case "click":
+    case "focus":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId"])) ||
+          !hasProperty(request, "nodeId") || !isNonEmptyString(request.nodeId)) invalidActionRequest();
+      return { action: request.action, nodeId: request.nodeId };
+    case "set_value":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId", "value", "sensitive"])) ||
+          !hasProperty(request, "nodeId") || !isNonEmptyString(request.nodeId) ||
+          !hasProperty(request, "value") || typeof request.value !== "string" ||
+          (hasProperty(request, "sensitive") && typeof request.sensitive !== "boolean")) invalidActionRequest();
+      return {
+        action: "set_value",
+        nodeId: request.nodeId,
+        value: request.value,
+        ...(hasProperty(request, "sensitive") ? { sensitive: request.sensitive as boolean } : {}),
+      };
+    case "set_checked":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId", "checked"])) ||
+          !hasProperty(request, "nodeId") || !isNonEmptyString(request.nodeId) ||
+          !hasProperty(request, "checked") || typeof request.checked !== "boolean") invalidActionRequest();
+      return { action: "set_checked", nodeId: request.nodeId, checked: request.checked };
+    case "select":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId", "value"])) ||
+          !hasProperty(request, "nodeId") || !isNonEmptyString(request.nodeId) ||
+          !hasProperty(request, "value") || !isNonEmptyString(request.value)) invalidActionRequest();
+      return { action: "select", nodeId: request.nodeId, value: request.value };
+    case "scroll":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId", "deltaX", "deltaY", "scrollUnit"])) ||
+          !hasProperty(request, "nodeId") || !isNonEmptyString(request.nodeId) ||
+          !hasProperty(request, "deltaX") || !isFiniteNumber(request.deltaX) ||
+          !hasProperty(request, "deltaY") || !isFiniteNumber(request.deltaY) ||
+          (hasProperty(request, "scrollUnit") && request.scrollUnit !== 0 && request.scrollUnit !== 1)) invalidActionRequest();
+      return {
+        action: "scroll",
+        nodeId: request.nodeId,
+        deltaX: request.deltaX,
+        deltaY: request.deltaY,
+        ...(hasProperty(request, "scrollUnit") ? { scrollUnit: request.scrollUnit as 0 | 1 } : {}),
+      };
+    case "press_key":
+      if (!hasOnlyProperties(request, new Set(["action", "nodeId", "key", "modifiers"])) ||
+          !hasProperty(request, "key") || !isNonEmptyString(request.key) ||
+          (hasProperty(request, "nodeId") && !isNonEmptyString(request.nodeId)) ||
+          (hasProperty(request, "modifiers") &&
+            (!Number.isInteger(request.modifiers) || (request.modifiers as number) < 0 || (request.modifiers as number) > 15))) {
+        invalidActionRequest();
+      }
+      return {
+        action: "press_key",
+        ...(hasProperty(request, "nodeId") ? { nodeId: request.nodeId as string } : {}),
+        key: request.key,
+        ...(hasProperty(request, "modifiers") ? { modifiers: request.modifiers as number } : {}),
+      };
+    default:
+      invalidActionRequest();
+  }
+}
+
+function hasProperty(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function invalidActionRequest(): never {
+  throw new GuaWebError("invalid_request", "The browser supplied an invalid Gua action request.");
 }
 
 function parseCompletion(value: unknown): GuaWebActionCompletion {

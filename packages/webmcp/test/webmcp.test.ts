@@ -541,6 +541,54 @@ describe("Gua same-page engine port", () => {
     expect(signals).toEqual([undefined, controller.signal]);
   });
 
+  test("rejects malformed direct action requests before invoking the engine port", async () => {
+    const commands: unknown[] = [];
+    const bridge = createGuaInPageBridge({
+      invoke: async (command) => {
+        commands.push(command);
+        return { requestId: 1, succeeded: true };
+      },
+    });
+    for (const request of [
+      { action: "click", nodeId: "" },
+      { action: "focus", nodeId: "start", unexpected: true },
+      { action: "set_value", nodeId: "name" },
+      { action: "set_value", nodeId: "name", value: "secret", sensitive: "true" },
+      { action: "set_checked", nodeId: "box" },
+      { action: "select", nodeId: "quality", value: "" },
+      { action: "scroll", nodeId: "list", deltaX: 0 },
+      { action: "scroll", nodeId: "list", deltaX: 0, deltaY: Number.NaN },
+      { action: "scroll", nodeId: "list", deltaX: 0, deltaY: 0, scrollUnit: 2 },
+      { action: "press_key", key: "" },
+      { action: "press_key", key: "A", modifiers: 16 },
+      { action: "unknown", nodeId: "start" },
+      Object.create({ action: "click", nodeId: "start" }),
+      Object.assign(Object.create({ nodeId: "start" }), { action: "click" }),
+    ]) {
+      await expect(bridge.performAction(request as unknown as GuaWebActionRequest))
+        .rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect(commands).toEqual([]);
+  });
+
+  test("preserves valid false, zero, and empty direct action values", async () => {
+    const commands: unknown[] = [];
+    const bridge = createGuaInPageBridge({
+      invoke: async (command) => {
+        commands.push(command);
+        return { requestId: commands.length, succeeded: true };
+      },
+    });
+    const requests: GuaWebActionRequest[] = [
+      { action: "set_value", nodeId: "name", value: "", sensitive: false },
+      { action: "set_checked", nodeId: "box", checked: false },
+      { action: "scroll", nodeId: "list", deltaX: 0, deltaY: 0, scrollUnit: 0 },
+      { action: "press_key", key: "A", modifiers: 0 },
+    ];
+    for (const request of requests) await expect(bridge.performAction(request)).resolves.toMatchObject({ succeeded: true });
+    expect(commands).toEqual(requests.map((request) => ({ type: "perform_action", request })));
+  });
+
   test("rejects completions without a positive integer request ID", async () => {
     for (const requestId of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       const bridge = createGuaInPageBridge({
