@@ -396,6 +396,17 @@ func _run() -> void:
 		_fail("Gua clock rescheduled an interval from a reset generation: %d" % reset_interval_count[0])
 		return
 
+	var stale_tick_subscriber_count := [0]
+	ui.clock_tick.connect(func(_delta: float): ui.reset_context(), CONNECT_ONE_SHOT)
+	ui.clock_tick.connect(func(_delta: float): stale_tick_subscriber_count[0] += 1, CONNECT_ONE_SHOT)
+	ui.clock_run_for(10.0, 10.0)
+	ui.update("title")
+	if stale_tick_subscriber_count[0] != 0:
+		_fail("Gua invoked a later clock_tick subscriber after an earlier subscriber reset the context.")
+		return
+	ui.clock_install(0.0, 10.0)
+	ui.clock_pause()
+
 	var limited_interval_count := [0]
 	ui.clock_schedule(1.0, func(): limited_interval_count[0] += 1, 1.0)
 	var limit_status := ui.get_clock()

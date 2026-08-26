@@ -106,7 +106,7 @@ func update(screen: String) -> void:
 			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
 			clock_run_generation = -1
 			continue
-		clock_tick.emit(float(step.get("delta_ms", 0.0)) / 1000.0)
+		_dispatch_clock_tick(float(step.get("delta_ms", 0.0)) / 1000.0, step_generation)
 		if bool(step.get("final", false)):
 			clock_run_active = false
 			clock_run_callbacks_remaining = CLOCK_CALLBACK_LIMIT
@@ -126,6 +126,28 @@ func update(screen: String) -> void:
 	_dispatch_click_requests()
 	_dispatch_action_requests()
 	_schedule_screenshot_capture()
+
+
+func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
+	for connection in get_signal_connection_list(&"clock_tick"):
+		if int(context.get_clock().get("generation", -1)) != step_generation:
+			return
+		var callback: Callable = connection.get("callable", Callable())
+		if not callback.is_valid() or not clock_tick.is_connected(callback):
+			continue
+		var flags := int(connection.get("flags", 0))
+		if flags & CONNECT_ONE_SHOT:
+			clock_tick.disconnect(callback)
+		if flags & CONNECT_DEFERRED:
+			Callable(self, "_dispatch_deferred_clock_tick").bind(
+				callback, delta_seconds, step_generation).call_deferred()
+		else:
+			callback.call(delta_seconds)
+
+
+func _dispatch_deferred_clock_tick(callback: Callable, delta_seconds: float, step_generation: int) -> void:
+	if int(context.get_clock().get("generation", -1)) == step_generation and callback.is_valid():
+		callback.call(delta_seconds)
 
 
 func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
