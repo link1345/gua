@@ -151,10 +151,10 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 ### 決定論的な仮想時間
 
 GuaClockを時刻源にしたゲームロジックは、停止したり、実時間を待たずに
-進めたりできる。既存のengine timerを自動的に置き換える機能ではない。
+進めたりできます。既存のengine timerを自動的に置き換える機能ではありません。
 まずゲーム本体の対象ロジックを、Godotの`Timer`、Unityの`Time.deltaTime`や
-Coroutineなどではなく、GuaClockのScheduleまたはTickを使う実装へ変更する。
-その後、テストから共有ClockをInstallして操作する。
+Coroutineなどではなく、GuaClockのScheduleまたはTickを使う実装へ変更します。
+その後、テストから共有ClockをInstallして操作します。
 
 ```csharp
 // ゲーム側の組み込み。production codeで一度行う。
@@ -168,25 +168,25 @@ clock.RunFor(TimeSpan.FromSeconds(2));
 ```
 
 ここで`Install`が行うのは共有仮想Clockの有効化であり、任意のgame objectへ
-Clockを自動注入することではない。`Pause`の対象は、あらかじめGuaClockの
-SchedulerまたはTickへ接続したゲームロジックだけだ。engine標準のTimer、
-物理、Animation、Audio、OS時刻、ネットワークは停止しない。
+Clockを自動注入することではありません。`Pause`の対象は、あらかじめGuaClockの
+SchedulerまたはTickへ接続したゲームロジックだけです。engine標準のTimer、
+物理、Animation、Audio、OS時刻、ネットワークは停止しません。
 bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
-`clock_run_for`、`clock_resume`を利用できる。
+`clock_run_for`、`clock_resume`を利用できます。
 
 ### Semantic Game ActionとRaw Input
 
 ホストはUI Treeと独立したGame Action Mapを明示登録し、button、axis、vector、
 textを`press_game_input_action`、`set_game_input_action`、
-`release_game_input_action`で操作できる。明示opt-inのRaw toolはW3C physical
-key code、pointer移動/button/wheel、Standard Gamepad、text inputを扱う。
-保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒だ。満了、切断、
-reset、replay失敗、session disposeではneutral状態へ戻す。InspectorにはAction
-Map、保持lease、Raw操作、緊急`Release all`を表示する。
+`release_game_input_action`で操作できます。明示opt-inのRaw toolはW3C physical
+key code、pointer移動/button/wheel、Standard Gamepad、text inputを扱います。
+保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒です。満了、切断、
+reset、replay失敗、session disposeではneutral状態へ戻します。InspectorにはAction
+Map、保持lease、Raw操作、緊急`Release all`を表示します。
 
 Unity 6000.5では`com.unity.inputsystem@1.20.0`のvirtual deviceへ注入し、
-Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡す。
-adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開する。
+Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡します。
+adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開します。
 既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
 `press_physical_key`を使う。
 

@@ -241,6 +241,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, the ImGui adapter plugin headers, and the Unity Package Manager archive for Unity 6000.0+ Windows x64 Mono projects.
+            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, the ImGui adapter plugin headers, and the Unity Package Manager archive for Unity 6000.5+ Windows x64 Mono projects.
           files: release-assets/**/*
           fail_on_unmatched_files: true
