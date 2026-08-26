@@ -860,11 +860,28 @@ int main()
 
     const uint64_t owner_a = gua_create_game_input_owner(context);
     const uint64_t owner_b = gua_create_game_input_owner(context);
+    const gua_game_input_request_descriptor_v1_t pending_key {
+        sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_KEYBOARD, GUA_GAME_INPUT_DOWN,
+        "Space", "true", 0, 0, 5000, 0, 0
+    };
+    uint64_t pending_key_id = 0;
+    assert(gua_enqueue_game_input(context, &pending_key, &pending_key_id) == GUA_GAME_INPUT_OK);
+    gua_reset_report_t game_input_reset_report { sizeof(gua_reset_report_t) };
+    const gua_reset_options_t strict_game_input_reset {
+        sizeof(gua_reset_options_t), GUA_RESET_REQUESTS, 1, 0, GUA_RESET_FLAGS_VERSION_CURRENT
+    };
+    assert(gua_reset_context(context, &strict_game_input_reset, &game_input_reset_report) == GUA_RESET_ERROR_DIRTY);
+    assert(game_input_reset_report.pending_request_count == 1 && game_input_reset_report.in_flight_request_count == 0);
+    gua_game_input_request_v1_t consumed_input { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1 && consumed_input.request_id == pending_key_id);
+    game_input_reset_report = gua_reset_report_t { sizeof(gua_reset_report_t) };
+    assert(gua_reset_context(context, &strict_game_input_reset, &game_input_reset_report) == GUA_RESET_ERROR_DIRTY);
+    assert(game_input_reset_report.pending_request_count == 0 && game_input_reset_report.in_flight_request_count == 1);
+    assert(gua_complete_game_input_request(context, pending_key_id, 0, -1) == 1);
     for (int index = 0; index < 1000; ++index) {
         const uint64_t empty_owner = gua_create_game_input_owner(context);
         assert(gua_release_game_input_owner(context, empty_owner) == 1);
     }
-    gua_game_input_request_v1_t consumed_input { sizeof(gua_game_input_request_v1_t) };
     assert(gua_consume_game_input_request(context, &consumed_input) == 0);
     uint64_t move_request_id = 0;
     const gua_game_input_request_descriptor_v1_t invalid_hold {
@@ -899,6 +916,16 @@ int main()
         "absolute:viewport_normalized", "null", 2.0, -1.0, 5000, 0, 0
     };
     assert(gua_enqueue_game_input(context, &invalid_normalized_pointer, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_pointer_space = invalid_normalized_pointer;
+    invalid_pointer_space.target = "absolute:bogus";
+    invalid_pointer_space.x = 0.5; invalid_pointer_space.y = 0.5;
+    assert(gua_enqueue_game_input(context, &invalid_pointer_space, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    invalid_pointer_space.operation = GUA_GAME_INPUT_MOVE_DELTA;
+    invalid_pointer_space.target = "delta:viewport_pixels";
+    assert(gua_enqueue_game_input(context, &invalid_pointer_space, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    invalid_pointer_space.operation = GUA_GAME_INPUT_WHEEL;
+    invalid_pointer_space.target = "pages";
+    assert(gua_enqueue_game_input(context, &invalid_pointer_space, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     const gua_game_input_request_descriptor_v1_t set_move {
         sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_SET,
         "move", "{\"x\":1,\"y\":0}", 0, 0, 5000, 0, 0

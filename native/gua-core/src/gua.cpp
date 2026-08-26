@@ -2261,8 +2261,9 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     out_report->struct_size = output_size;
     out_report->previous_session_epoch = ctx->session_epoch;
     out_report->session_epoch = ctx->session_epoch;
-    out_report->pending_request_count = static_cast<uint32_t>(ctx->action_requests.size());
-    out_report->in_flight_request_count = static_cast<uint32_t>(ctx->consumed_requests.size());
+    const auto pending_game_input_count = ctx->game_input_requests.size() + ctx->game_input_cleanup_requests.size();
+    out_report->pending_request_count = static_cast<uint32_t>(ctx->action_requests.size() + pending_game_input_count);
+    out_report->in_flight_request_count = static_cast<uint32_t>(ctx->consumed_requests.size() + ctx->consumed_game_input_requests.size());
     out_report->unconsumed_event_count = static_cast<uint32_t>(ctx->events.size());
     fill_reset_summary(*ctx, *out_report);
 
@@ -2271,7 +2272,8 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
         return out_report->result;
     }
     const bool dirty_requests = (reset_flags & GUA_RESET_REQUESTS) != 0U &&
-        (!ctx->action_requests.empty() || !ctx->consumed_requests.empty());
+        (!ctx->action_requests.empty() || !ctx->consumed_requests.empty() || pending_game_input_count != 0 ||
+            !ctx->consumed_game_input_requests.empty());
     const bool dirty_events = (reset_flags & GUA_RESET_EVENTS) != 0U && !ctx->events.empty();
     if (options->strict != 0 && (dirty_requests || dirty_events)) {
         out_report->result = GUA_RESET_ERROR_DIRTY;
@@ -2279,8 +2281,10 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     }
 
     out_report->discarded_node_count = (reset_flags & GUA_RESET_NODES) != 0U ? static_cast<uint32_t>(ctx->nodes.size()) : 0;
-    out_report->discarded_pending_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->action_requests.size()) : 0;
-    out_report->discarded_in_flight_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U ? static_cast<uint32_t>(ctx->consumed_requests.size()) : 0;
+    out_report->discarded_pending_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U
+        ? static_cast<uint32_t>(ctx->action_requests.size() + pending_game_input_count) : 0;
+    out_report->discarded_in_flight_request_count = (reset_flags & GUA_RESET_REQUESTS) != 0U
+        ? static_cast<uint32_t>(ctx->consumed_requests.size() + ctx->consumed_game_input_requests.size()) : 0;
     out_report->discarded_event_count = (reset_flags & GUA_RESET_EVENTS) != 0U ? static_cast<uint32_t>(ctx->events.size()) : 0;
     out_report->discarded_log_count = (reset_flags & GUA_RESET_LOGS) != 0U ? static_cast<uint32_t>(ctx->logs.size()) : 0;
     out_report->discarded_screenshot = (reset_flags & GUA_RESET_SCREENSHOT) != 0U && !ctx->screenshot.data_uri.empty() ? 1 : 0;
@@ -2496,12 +2500,22 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
         if (!one_of(descriptor->operation, { GUA_GAME_INPUT_PRESS, GUA_GAME_INPUT_DOWN, GUA_GAME_INPUT_UP }) ||
             !valid_keyboard_code(target)) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     } else if (descriptor->kind == GUA_GAME_INPUT_POINTER) {
-        if ((descriptor->operation == GUA_GAME_INPUT_DOWN || descriptor->operation == GUA_GAME_INPUT_UP) &&
-            !one_of(target, { "primary", "secondary", "auxiliary", "back", "forward" }))
+        if (descriptor->operation == GUA_GAME_INPUT_DOWN || descriptor->operation == GUA_GAME_INPUT_UP) {
+            if (!one_of(target, { "primary", "secondary", "auxiliary", "back", "forward" }))
+                return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        } else if (descriptor->operation == GUA_GAME_INPUT_MOVE_ABSOLUTE) {
+            if (!one_of(target, { "absolute:viewport_normalized", "absolute:viewport_pixels" }))
+                return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+            if (target == "absolute:viewport_normalized" &&
+                (descriptor->x < 0.0 || descriptor->x > 1.0 || descriptor->y < 0.0 || descriptor->y > 1.0))
+                return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        } else if (descriptor->operation == GUA_GAME_INPUT_MOVE_DELTA) {
+            if (target != "delta:") return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        } else if (descriptor->operation == GUA_GAME_INPUT_WHEEL) {
+            if (!one_of(target, { "pixels", "lines" })) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        } else {
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
-        if (descriptor->operation == GUA_GAME_INPUT_MOVE_ABSOLUTE && target == "absolute:viewport_normalized" &&
-            (descriptor->x < 0.0 || descriptor->x > 1.0 || descriptor->y < 0.0 || descriptor->y > 1.0))
-            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        }
     } else if (descriptor->kind == GUA_GAME_INPUT_GAMEPAD) {
         if (descriptor->device_index < 0 || descriptor->device_index > 3)
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;

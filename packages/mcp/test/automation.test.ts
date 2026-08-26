@@ -7,6 +7,7 @@ import { PNG } from "pngjs";
 
 import { GuaAutomationManager } from "../src/automation";
 import { GuaBridgeClient, guaMcpTools, parseClockRunForArguments } from "../src/index";
+import { validateRecording as validateInspectorRecording } from "../../inspector/src/automation";
 
 const roots: string[] = [];
 
@@ -90,6 +91,22 @@ describe("GuaAutomationManager", () => {
     const saved = await manager.saveRecording("login-flow");
     expect(await readFile(saved.path, "utf8")).not.toContain("not-written");
     expect((await manager.loadRecording("login-flow")).steps).toEqual(recording.steps);
+  });
+
+  test("keeps game-input command metadata out of recorded arguments", async () => {
+    const manager = await createManager();
+    manager.startRecording();
+    manager.recordGameInput({
+      operation: "set_game_input_action", requestId: 12, sensitive: true, secretKey: "chat-secret",
+      arguments: { type: "set_game_input_action", actionId: "chat", sensitive: true, secretKey: "chat-secret" },
+    });
+
+    const recording = manager.stopRecording();
+    validateInspectorRecording(recording);
+    const step = recording.steps[0];
+    expect(step?.operation).toBe("set_game_input_action");
+    expect(step?.secretKey).toBe("chat-secret");
+    expect(step?.arguments).toEqual({ actionId: "chat", sensitive: true });
   });
 
   test("creates an explicit baseline and emits diff artifacts on mismatch", async () => {

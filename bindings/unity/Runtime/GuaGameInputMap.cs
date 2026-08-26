@@ -12,7 +12,7 @@ public sealed class GuaGameInputAction
 {
     public string Id = "";
     [TextArea] public string Description = "";
-    public GuaGameInputValueType ValueType;
+    public GuaGameInputValueType ValueType = GuaGameInputValueType.Button;
     public bool HasRange;
     public float Minimum = -1;
     public float Maximum = 1;

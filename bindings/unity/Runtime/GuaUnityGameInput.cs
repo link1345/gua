@@ -238,6 +238,7 @@ public sealed partial class GuaUnityRuntime
     private void DisposeGameInput()
     {
         ReleaseAllInjectedInput();
+        gameInputValues.Clear();
 #if ENABLE_INPUT_SYSTEM
         if (virtualKeyboard != null) InputSystem.RemoveDevice(virtualKeyboard);
         if (virtualMouse != null) InputSystem.RemoveDevice(virtualMouse);
@@ -270,13 +271,34 @@ public sealed partial class GuaUnityRuntime
     }
 
 #if ENABLE_INPUT_SYSTEM
+    private static readonly IReadOnlyDictionary<string, Key> W3cNamedKeys = new Dictionary<string, Key>(StringComparer.Ordinal)
+    {
+        ["Backquote"] = Key.Backquote, ["Backslash"] = Key.Backslash, ["Backspace"] = Key.Backspace,
+        ["BracketLeft"] = Key.LeftBracket, ["BracketRight"] = Key.RightBracket, ["CapsLock"] = Key.CapsLock,
+        ["Comma"] = Key.Comma, ["ContextMenu"] = Key.ContextMenu, ["Delete"] = Key.Delete, ["End"] = Key.End,
+        ["Enter"] = Key.Enter, ["Equal"] = Key.Equals, ["Escape"] = Key.Escape, ["Home"] = Key.Home,
+        ["Insert"] = Key.Insert, ["MetaLeft"] = Key.LeftMeta, ["MetaRight"] = Key.RightMeta, ["Minus"] = Key.Minus,
+        ["NumLock"] = Key.NumLock, ["PageDown"] = Key.PageDown, ["PageUp"] = Key.PageUp, ["Pause"] = Key.Pause,
+        ["Period"] = Key.Period, ["Quote"] = Key.Quote, ["ScrollLock"] = Key.ScrollLock,
+        ["Semicolon"] = Key.Semicolon, ["ShiftLeft"] = Key.LeftShift, ["ShiftRight"] = Key.RightShift,
+        ["Slash"] = Key.Slash, ["Space"] = Key.Space, ["Tab"] = Key.Tab,
+        ["ControlLeft"] = Key.LeftCtrl, ["ControlRight"] = Key.RightCtrl,
+        ["AltLeft"] = Key.LeftAlt, ["AltRight"] = Key.RightAlt,
+        ["ArrowDown"] = Key.DownArrow, ["ArrowLeft"] = Key.LeftArrow,
+        ["ArrowRight"] = Key.RightArrow, ["ArrowUp"] = Key.UpArrow,
+    };
+
     private static bool TryKey(string code, out Key key)
     {
+        if (W3cNamedKeys.TryGetValue(code, out key)) return true;
         if (code.StartsWith("Key", StringComparison.Ordinal) && code.Length == 4)
             return Enum.TryParse(code.Substring(3), true, out key);
         if (code.StartsWith("Digit", StringComparison.Ordinal) && code.Length == 6)
-            return Enum.TryParse("Digit" + code.Substring(5), true, out key);
-        return Enum.TryParse(code.Replace("Arrow", ""), true, out key);
+            return Enum.TryParse(code, true, out key);
+        if ((code.StartsWith("F", StringComparison.Ordinal) || code.StartsWith("Numpad", StringComparison.Ordinal)) &&
+            Enum.TryParse(code, true, out key) && key != Key.None) return true;
+        key = Key.None;
+        return false;
     }
     private ButtonControl? PointerButton(string name) => name switch
     {

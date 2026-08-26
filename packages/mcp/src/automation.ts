@@ -159,6 +159,9 @@ export class GuaAutomationManager {
     if (this.recordingStartedAt === null) return;
     if (input.sensitive === true && !nonEmpty(input.secretKey))
       throw new Error("Sensitive game input recording requires secretKey.");
+    const argumentsValue = { ...input.arguments };
+    delete argumentsValue.type;
+    delete argumentsValue.secretKey;
     this.activeSteps.push(compact({
       action: "game_input" as const,
       requestId: input.requestId,
@@ -168,7 +171,7 @@ export class GuaAutomationManager {
       sensitive: input.sensitive === true,
       secretKey: input.sensitive === true ? input.secretKey : undefined,
       operation: input.operation,
-      arguments: input.arguments,
+      arguments: argumentsValue,
     }) as unknown as RecordingStep);
   }
 

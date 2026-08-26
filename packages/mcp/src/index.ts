@@ -747,10 +747,13 @@ async function performGameInput(
   const receipt = await bridge.performGameInput(input);
   const completion = await bridge.waitForGameInput(receipt.requestId, timeoutMs);
   if (!completion.succeeded) throw new Error(`Gua game input ${input.type} failed with error ${completion.errorCode}.`);
+  const recordedArguments = { ...input } as Record<string, unknown>;
+  delete recordedArguments.type;
+  delete recordedArguments.secretKey;
   automation?.recordGameInput({
     operation: input.type,
     requestId: receipt.requestId,
-    arguments: compactResult({ ...input, value: "sensitive" in input && input.sensitive ? undefined : "value" in input ? input.value : undefined,
+    arguments: compactResult({ ...recordedArguments, value: "sensitive" in input && input.sensitive ? undefined : "value" in input ? input.value : undefined,
       text: "sensitive" in input && input.sensitive ? undefined : "text" in input ? input.text : undefined }),
     sensitive: "sensitive" in input && input.sensitive === true,
     secretKey: "secretKey" in input ? input.secretKey : undefined,

@@ -60,6 +60,11 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         catch (Exception error)
         {
             Debug.LogError("Failed to initialize the Gua Unity adapter: " + error);
+            try { runtime?.Dispose(); }
+            catch (Exception cleanupError) { Debug.LogError("Failed to dispose the partially initialized Gua Unity runtime: " + cleanupError); }
+            finally { runtime = null; }
+            try { DisposeGameInput(); }
+            catch (Exception cleanupError) { Debug.LogError("Failed to remove partially initialized Gua Unity input devices: " + cleanupError); }
             enabled = false;
         }
     }
