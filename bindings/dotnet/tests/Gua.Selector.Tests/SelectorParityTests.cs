@@ -74,7 +74,7 @@ public sealed class SelectorParityTests
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("code", ""))).Matches.Single().Id, Is.EqualTo("door-a"));
             foreach (var invalid in new[] {
                 new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
-                new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: "") })
+                new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: ""), new GuaWorldSelector(DirectChild: true) })
                 Assert.Throws<InvalidOperationException>(() => remote.QueryWorldObjects(invalid));
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
             Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
@@ -93,6 +93,31 @@ public sealed class SelectorParityTests
             runtime.EndWorldFrame();
             Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1), "Hidden-only changes must not alter player diagnostics.");
             Assert.That(remote.GetWorldObjectTree().Revision, Is.EqualTo(1));
+            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(1));
+        }
+        finally
+        {
+            runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public void RemotePlayerCountsIgnoreIdKeysInsideObjectState()
+    {
+        var port = ReservePort();
+        using var runtime = new GuaRuntime();
+        runtime.EnableWorldObjectTreeAdapter();
+        runtime.SetObservationProfile(GuaObservationProfile.Player);
+        runtime.BeginWorldFrame("count");
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("marker", "item", "Marker", GuaWorldSpace.World2D,
+            new GuaWorldPosition(1, 2), VisibleToPlayer: true, State: new Dictionary<string, object?> { ["id"] = "state-id" }));
+        runtime.EndWorldFrame();
+        Assert.That(runtime.StartInspectorBridge(port), Is.True);
+        try
+        {
+            using var remote = new GuaWebSocketContext($"ws://127.0.0.1:{port}");
+            remote.WaitUntilAvailable(TimeSpan.FromSeconds(2));
+            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
             Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(1));
         }
         finally
@@ -121,6 +146,43 @@ public sealed class SelectorParityTests
         finally
         {
             runtime.StopInspectorBridge();
+        }
+    }
+
+    [Test]
+    public async Task PublishedSnapshotsKeepUiAndWorldTreesInOneEpochDuringReset()
+    {
+        var port = ReservePort();
+        var runtime = Native.gua_runtime_create();
+        Assert.That(runtime, Is.Not.EqualTo(nint.Zero));
+        try
+        {
+            Assert.That(Native.gua_runtime_start_inspector_bridge(runtime, port), Is.EqualTo(1));
+            using var notifications = new ClientWebSocket();
+            using var commands = new ClientWebSocket();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await notifications.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), timeout.Token);
+            await commands.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), timeout.Token);
+            await Task.Delay(20, timeout.Token);
+            ulong epoch = 1;
+            for (var index = 1; index <= 25; index++)
+            {
+                var reset = SendRawCommandAsync(commands,
+                    $$"""{"id":{{index}},"type":"reset_context","expectedSessionEpoch":{{epoch}},"flags":0,"flagsVersion":2,"strict":false}""");
+                await Task.Yield();
+                Native.gua_runtime_publish_inspector_snapshot(runtime);
+                var snapshot = await ReceiveSnapshotAsync(notifications, timeout.Token);
+                var uiEpoch = snapshot.GetProperty("uiTree").GetProperty("sessionEpoch").GetUInt64();
+                var worldEpoch = snapshot.GetProperty("worldObjectTree").GetProperty("sessionEpoch").GetUInt64();
+                Assert.That(worldEpoch, Is.EqualTo(uiEpoch));
+                var resetResponse = await reset;
+                epoch = resetResponse.GetProperty("result").GetProperty("sessionEpoch").GetUInt64();
+            }
+        }
+        finally
+        {
+            Native.gua_runtime_stop_inspector_bridge(runtime);
+            Native.gua_runtime_destroy(runtime);
         }
     }
 
@@ -1408,6 +1470,24 @@ public sealed class SelectorParityTests
         }
     }
 
+    private static async Task<JsonElement> ReceiveSnapshotAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[4096];
+        while (true)
+        {
+            using var response = new MemoryStream();
+            WebSocketReceiveResult received;
+            do
+            {
+                received = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                response.Write(buffer, 0, received.Count);
+            } while (!received.EndOfMessage);
+            using var document = JsonDocument.Parse(response.ToArray());
+            if (document.RootElement.TryGetProperty("type", out var type) && type.GetString() == "snapshot")
+                return document.RootElement.GetProperty("snapshot").Clone();
+        }
+    }
+
     private sealed class AsyncOnlyClockContext : IGuaContext, IGuaAsyncClockContext
     {
         private GuaClockStatus status = new(false, false, 0, 1000.0 / 60.0, 0, 0);
@@ -1475,6 +1555,8 @@ public sealed class SelectorParityTests
         internal static extern int gua_runtime_start_inspector_bridge(nint runtime, int port);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void gua_runtime_stop_inspector_bridge(nint runtime);
+        [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void gua_runtime_publish_inspector_snapshot(nint runtime);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]
         internal static extern void gua_runtime_set_virtual_clock_enabled(nint runtime, int enabled);
         [DllImport("gua_runtime", CallingConvention = CallingConvention.Cdecl)]

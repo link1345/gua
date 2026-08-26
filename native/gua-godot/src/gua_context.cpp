@@ -268,6 +268,8 @@ bool GuaContext::register_world_object(const Dictionary& source)
 {
     const auto reject = [this]() { gua_runtime_abort_world_frame(runtime_); return false; };
     if (!source.has("id") || !source.has("kind") || !source.has("label") || !source.has("position") || !source.has("space")) return reject();
+    if ((source.has("visible_to_player") && static_cast<Variant>(source["visible_to_player"]).get_type() != Variant::BOOL) ||
+        (source.has("active") && static_cast<Variant>(source["active"]).get_type() != Variant::BOOL)) return reject();
     const String id = source["id"], parent = source.get("parent_id", String()), kind = source["kind"], label = source["label"];
     const String description = source.get("description", String()), domain = source.get("domain_id", String()), related = source.get("related_ui_node_id", String());
     const CharString id8 = id.utf8(), parent8 = parent.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), description8 = description.utf8(), domain8 = domain.utf8(), related8 = related.utf8();
@@ -295,7 +297,8 @@ bool GuaContext::register_world_object(const Dictionary& source)
     if ((space != "world2d" && space != "world3d") || (exposure != "auto" && exposure != "private")) return reject();
     const gua_world_object_descriptor_v1_t descriptor { sizeof(gua_world_object_descriptor_v1_t), id8.get_data(), parent.is_empty() ? nullptr : parent8.get_data(), kind8.get_data(), label8.get_data(),
         description.is_empty() ? nullptr : description8.get_data(), space == "world3d" ? GUA_WORLD_SPACE_3D : GUA_WORLD_SPACE_2D,
-        position.x, position.y, position.z, source.get("visible_to_player", false) ? 1 : 0, source.get("active", true) ? 1 : 0,
+        position.x, position.y, position.z, static_cast<bool>(source.get("visible_to_player", false)) ? 1 : 0,
+        static_cast<bool>(source.get("active", true)) ? 1 : 0,
         exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO,
         domain.is_empty() ? nullptr : domain8.get_data(), related.is_empty() ? nullptr : related8.get_data(),
         tag_pointers.data(), static_cast<uint32_t>(tag_pointers.size()), state_values.data(), static_cast<uint32_t>(state_values.size()) };
@@ -482,6 +485,9 @@ Dictionary GuaContext::get_context_status() const
     result["first_pending_node_id"] = String::utf8(status.first_pending_node_id);
     result["first_event_action"] = action_name(status.first_event_action);
     result["first_event_node_id"] = String::utf8(status.first_event_node_id);
+    result["world_frame_sequence"] = status.world_frame_sequence;
+    result["world_revision"] = status.world_revision;
+    result["world_object_count"] = status.world_object_count;
     return result;
 }
 
@@ -513,6 +519,7 @@ Dictionary GuaContext::reset_context(const Dictionary& source)
     result["first_pending_node_id"] = String::utf8(report.first_pending_node_id);
     result["first_event_action"] = action_name(report.first_event_action);
     result["first_event_node_id"] = String::utf8(report.first_event_node_id);
+    result["discarded_world_object_count"] = report.discarded_world_object_count;
     return result;
 }
 

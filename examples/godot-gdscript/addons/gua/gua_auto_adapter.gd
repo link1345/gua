@@ -163,6 +163,12 @@ func _publish_world_frame(scene: String) -> void:
 		else:
 			var position_2d := (node as Node2D).global_position
 			position = Vector3(position_2d.x, position_2d.y, 0.0)
+		var visible_to_player = node.get_meta(&"gua_world_visible_to_player", false)
+		var active = node.get_meta(&"gua_world_active", true)
+		if typeof(visible_to_player) != TYPE_BOOL or typeof(active) != TYPE_BOOL:
+			push_error("Gua world visibility/active metadata must be boolean: %s" % object_id)
+			context.abort_world_frame()
+			return
 		var descriptor := {
 			"id": object_id,
 			"parent_id": parent_id,
@@ -171,8 +177,8 @@ func _publish_world_frame(scene: String) -> void:
 			"description": str(node.get_meta(&"gua_world_description", "")),
 			"space": space,
 			"position": position,
-			"visible_to_player": bool(node.get_meta(&"gua_world_visible_to_player", false)),
-			"active": bool(node.get_meta(&"gua_world_active", true)),
+			"visible_to_player": visible_to_player,
+			"active": active,
 			"agent_exposure": str(node.get_meta(&"gua_world_agent_exposure", "auto")),
 			"tags": node.get_meta(&"gua_world_tags", []),
 			"state": node.get_meta(&"gua_world_state", {}),

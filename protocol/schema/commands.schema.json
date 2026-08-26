@@ -59,6 +59,10 @@
           "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateBool"] }] } },
         { "required": ["stateKey", "stateType", "stateBool"], "properties": { "stateType": { "const": 3 } },
           "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateNumber"] }] } }
+      ],
+      "allOf": [
+        { "if": { "required": ["directChild"], "properties": { "directChild": { "const": 1 } } },
+          "then": { "required": ["parentId"] } }
       ]
     },
     "nodeCommand": {

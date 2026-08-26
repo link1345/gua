@@ -164,6 +164,9 @@ int main()
     gua_world_selector_v1_t invalid_nested { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, &undersized_state };
     gua_query_world_objects_json(atomic_world, &invalid_nested, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
     assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    gua_world_selector_v1_t unscoped_direct_child { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 1, 0, 0, nullptr };
+    gua_query_world_objects_json(atomic_world, &unscoped_direct_child, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
+    assert(std::string(query).find("\"valid\":false") != std::string::npos);
     gua_destroy_context(atomic_world);
 
     // State entry order is not semantic, and retained world objects keep their comparison baseline across reset.

@@ -16,7 +16,9 @@ public enum GuaResetTargets : uint
     LegacySessionDefault = Default | Clock,
     SessionDefault = LegacySessionDefault | WorldObjects,
     All = Default | Logs | Screenshot,
+    /// <summary>Legacy full-reset mask retained for compatibility; does not include World Object Tree state.</summary>
     AllWithClock = All | Clock,
+    /// <summary>Current full-reset mask including clock and World Object Tree state.</summary>
     AllCurrent = AllWithClock | WorldObjects,
 }
 

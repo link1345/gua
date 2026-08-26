@@ -24,6 +24,7 @@ const selectorProperties = {
 const selectorSchema = (properties: Record<string, unknown>) => ({
   type: "object", additionalProperties: false, properties,
   dependentRequired: { stateKey: ["stateValue"], stateValue: ["stateKey"] },
+  allOf: [{ if: { required: ["directChild"], properties: { directChild: { const: true } } }, then: { required: ["parentId"] } }],
 });
 export const worldObservationTools = [
   { name: "get_world_object_tree", description: "Read the host-authorized World Object Tree.", inputSchema: { type: "object", additionalProperties: false, properties: {} } },
@@ -36,6 +37,7 @@ export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSe
   const result: Record<string, unknown> = {};
   for (const key of ["id", "kind", "label", "tag", "parentId"] as const) if (typeof args[key] === "string" && args[key].length > 0) result[key] = args[key];
   for (const key of ["directChild", "visibleToPlayer", "active"] as const) if (typeof args[key] === "boolean") result[key] = args[key];
+  if (result.directChild === true && result.parentId === undefined) throw new TypeError("parentId is required when directChild is true.");
   const hasStateKey = Object.prototype.hasOwnProperty.call(args, "stateKey");
   const hasStateValue = Object.prototype.hasOwnProperty.call(args, "stateValue");
   if (hasStateKey !== hasStateValue) throw new TypeError("stateKey and stateValue must be supplied together.");

@@ -1572,7 +1572,9 @@ extern "C" int gua_copy_world_object_tree_json(gua_context_t* ctx, int observati
 extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size)
 {
     if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_world_selector_v1_t) ||
-        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER))
+        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER) ||
+        (selector->direct_child != 0 && selector->direct_child != 1) ||
+        (selector->direct_child == 1 && (selector->parent_id == nullptr || selector->parent_id[0] == '\0')))
         return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector\",\"matches\":[]}", out_json, out_json_size);
     if (selector->state != nullptr && (selector->state->struct_size < sizeof(gua_world_state_value_v1_t) ||
         selector->state->key == nullptr || selector->state->key[0] == '\0' ||

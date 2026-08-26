@@ -158,6 +158,20 @@ func _run() -> void:
 			or not world_door.get("visibleToPlayer", false) or not world_door.get("state", {}).get("locked", false):
 		_fail("Gua Godot adapter did not publish the shared Door fixture: %s" % world_tree)
 		return
+	var world_status: Dictionary = ui.context.get_context_status()
+	if world_status.get("world_frame_sequence", 0) != 1 or world_status.get("world_revision", 0) != 1 \
+			or world_status.get("world_object_count", 0) != 1:
+		_fail("Gua Godot status omitted World Object Tree metadata: %s" % world_status)
+		return
+	door.set_meta(&"gua_world_visible_to_player", "false")
+	ui._publish_world_frame("title")
+	var rejected_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
+	if _find_world_object(rejected_world_tree, "door-a") == null \
+			or rejected_world_tree.get("frameSequence", 0) != 1:
+		_fail("Gua accepted malformed world visibility metadata or replaced the prior frame: %s" % rejected_world_tree)
+		return
+	door.set_meta(&"gua_world_visible_to_player", true)
+	ui._publish_world_frame("title")
 	await process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
@@ -513,6 +527,10 @@ func _run() -> void:
 	var after_reset := ui.get_context_status()
 	if reset_report.get("result", 0) != 1 or after_reset.get("session_epoch", 0) != before_reset.get("session_epoch", 0) + 1:
 		_fail("Gua reset did not advance the session epoch: %s / %s" % [reset_report, after_reset])
+		return
+	if reset_report.get("discarded_world_object_count", 0) != 1 or after_reset.get("world_object_count", -1) != 0 \
+			or after_reset.get("world_frame_sequence", -1) != 0 or after_reset.get("world_revision", -1) != 0:
+		_fail("Gua Godot reset omitted World Object Tree metadata: %s / %s" % [reset_report, after_reset])
 		return
 	if after_reset.get("frame_sequence", -1) != 0 or after_reset.get("revision", -1) != 0:
 		_fail("Gua reset did not initialize frame/revision metadata: %s" % after_reset)

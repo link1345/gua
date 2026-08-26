@@ -198,16 +198,20 @@ Publishers use `begin_world_frame -> register_world_object -> end_world_frame`, 
 
 `query_world_objects` either omits all state criterion fields or supplies `stateKey`, `stateType`, and exactly the typed value required by that type (`stateString`, `stateNumber`, or `stateBool`; null requires no value field). Incomplete or conflicting criteria are rejected rather than treated as an unfiltered or zero-valued query.
 The MCP and WebMCP tools expose the same criterion as the paired `stateKey` and `stateValue` arguments. Supplying only one is invalid and must fail before a provider query or wait begins.
+`directChild` is meaningful only within a parent scope. A command or tool call that enables it without a non-empty `parentId` is invalid and must be rejected before querying.
 
 World v1 provides no actions, relationship/distance queries, pathfinding, teleportation, or arbitrary host method invocation. Capability `world_object_tree_v1` is advertised only after an adapter installs its world-frame publisher.
 
 ## Inspector Snapshots
 
-The v0.3 Inspector consumes three protocol payloads:
+The Inspector consumes four protocol payloads:
 
 - UI tree: the current semantic UI snapshot, matching `ui-tree.schema.json`
+- World Object Tree: the current host-authorized world snapshot, matching `world-object-tree.schema.json`
 - Screenshot: the latest runtime screenshot, matching `screenshot.schema.json`
 - Logs: ordered runtime log entries, matching `logs.schema.json`
+
+Each pushed Inspector snapshot captures the UI and World Object trees under one runtime context lock, so both trees always report the same `sessionEpoch` even when another client resets the context concurrently.
 
 The screenshot payload stores an already encoded `dataUri` plus `width` and
 `height`. This keeps the C ABI small and avoids forcing the core protocol to own

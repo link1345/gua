@@ -159,6 +159,37 @@ std::string unsupported_world_object_tree_json(gua_runtime_t* runtime)
         ",\"frameSequence\":0,\"revision\":0,\"scene\":\"unsupported\",\"objects\":[]}";
 }
 
+uint32_t count_json_object_array(std::string_view json, std::string_view key)
+{
+    const auto key_position = json.find(key);
+    if (key_position == std::string_view::npos) return 0;
+    const auto array_position = json.find('[', key_position + key.size());
+    if (array_position == std::string_view::npos) return 0;
+    uint32_t count = 0;
+    std::size_t depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (std::size_t i = array_position; i < json.size(); ++i) {
+        const char ch = json[i];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') in_string = false;
+            continue;
+        }
+        if (ch == '"') { in_string = true; continue; }
+        if (ch == '[' || ch == '{') {
+            if (ch == '{' && depth == 1) ++count;
+            ++depth;
+        } else if (ch == ']' || ch == '}') {
+            if (depth == 0) return 0;
+            --depth;
+            if (depth == 0) return count;
+        }
+    }
+    return 0;
+}
+
 std::string copy_logs_json(gua_runtime_t* runtime)
 {
     const std::lock_guard lock(runtime->context_mutex);
@@ -227,9 +258,7 @@ std::string status_json(gua_runtime_t* runtime)
         const auto revision_position = world_json.find(revision_key);
         world_revision = revision_position == std::string::npos ? 0 : std::strtoull(
             world_json.c_str() + revision_position + revision_key.size(), nullptr, 10);
-        world_object_count = 0;
-        for (auto position = world_json.find("{\"id\":"); position != std::string::npos;
-            position = world_json.find("{\"id\":", position + 1)) ++world_object_count;
+        world_object_count = count_json_object_array(world_json, "\"objects\":");
     }
     return "{\"sessionEpoch\":" + std::to_string(status.session_epoch) +
         ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
@@ -285,8 +314,7 @@ std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expecte
         const int size = gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
         std::string world_json(static_cast<std::size_t>(size), '\0');
         gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), size);
-        for (auto position = world_json.find("{\"id\":"); position != std::string::npos;
-            position = world_json.find("{\"id\":", position + 1)) ++projected_world_count;
+        projected_world_count = count_json_object_array(world_json, "\"objects\":");
     }
     const int result = gua_reset_context(runtime->context, &options, &report);
     if (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && report.discarded_world_object_count != 0)
@@ -992,6 +1020,22 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_screenshot_json = [runtime] {
             return copy_screenshot_json(runtime);
+        },
+        .get_snapshot_json = [runtime] {
+            const std::lock_guard lock(runtime->context_mutex);
+            const std::string ui_tree = gua_get_ui_tree_json(runtime->context);
+            std::string world_tree;
+            if (!runtime->world_object_tree_enabled) {
+                world_tree = unsupported_world_object_tree_json(runtime);
+            } else {
+                const int size = gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, nullptr, 0);
+                world_tree.resize(static_cast<std::size_t>(size));
+                gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, world_tree.data(), size);
+                world_tree.resize(static_cast<std::size_t>(size - 1));
+            }
+            return "{\"uiTree\":" + ui_tree + ",\"worldObjectTree\":" + world_tree +
+                ",\"logs\":" + gua_get_logs_json(runtime->context) +
+                ",\"screenshot\":" + gua_get_screenshot_json(runtime->context) + '}';
         },
         .capture_screenshot = [runtime](unsigned long long after_frame_sequence, unsigned int timeout_ms) {
             uint64_t request_id = 0;

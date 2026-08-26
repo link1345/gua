@@ -722,7 +722,8 @@ Command parse_command(std::string_view json)
     command.world_selector.tag = json_string_field(json, "tag").value_or("");
     command.world_selector.tag_match = json_int_field(json, "tagMatch").value_or(0);
     command.world_selector.parent_id = json_string_field(json, "parentId").value_or("");
-    command.world_selector.direct_child = json_int_field(json, "directChild").value_or(0) != 0;
+    const auto world_direct_child = json_int_field(json, "directChild");
+    command.world_selector.direct_child = world_direct_child.value_or(0) == 1;
     command.world_selector.visible_to_player = json_int_field(json, "visibleToPlayer").value_or(0);
     command.world_selector.active = json_int_field(json, "active").value_or(0);
     command.world_selector.state_key = json_string_field(json, "stateKey").value_or("");
@@ -732,7 +733,9 @@ Command parse_command(std::string_view json)
     command.world_selector.state_bool = json_bool_field(json, "stateBool");
     command.world_selector_valid = valid_optional_non_empty_string(json, "worldId") &&
         valid_optional_non_empty_string(json, "kind") && valid_optional_non_empty_string(json, "label") &&
-        valid_optional_non_empty_string(json, "tag") && valid_optional_non_empty_string(json, "parentId");
+        valid_optional_non_empty_string(json, "tag") && valid_optional_non_empty_string(json, "parentId") &&
+        (!json_has_non_null_field(json, "directChild") || (world_direct_child.has_value() && (*world_direct_child == 0 || *world_direct_child == 1))) &&
+        (!command.world_selector.direct_child || !command.world_selector.parent_id.empty());
     const bool state_key_present = json_has_non_null_field(json, "stateKey");
     const bool state_type_present = json_has_non_null_field(json, "stateType");
     const bool state_string_present = json_has_non_null_field(json, "stateString");
@@ -907,15 +910,11 @@ public:
 
         std::string message;
         try {
-            message = "{\"type\":\"snapshot\",\"snapshot\":{\"uiTree\":"
-                + handlers_.get_ui_tree_json()
-                + ",\"worldObjectTree\":"
-                + (handlers_.get_world_object_tree_json ? handlers_.get_world_object_tree_json() : "null")
-                + ",\"logs\":"
-                + handlers_.get_logs_json()
-                + ",\"screenshot\":"
-                + handlers_.get_screenshot_json()
-                + "}}";
+            const std::string snapshot = handlers_.get_snapshot_json ? handlers_.get_snapshot_json() :
+                "{\"uiTree\":" + handlers_.get_ui_tree_json() + ",\"worldObjectTree\":" +
+                (handlers_.get_world_object_tree_json ? handlers_.get_world_object_tree_json() : "null") +
+                ",\"logs\":" + handlers_.get_logs_json() + ",\"screenshot\":" + handlers_.get_screenshot_json() + '}';
+            message = "{\"type\":\"snapshot\",\"snapshot\":" + snapshot + '}';
         } catch (const std::exception& error) {
             std::cerr << "Gua bridge snapshot failed: " << error.what() << std::endl;
             return;

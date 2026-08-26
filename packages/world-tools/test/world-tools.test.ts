@@ -24,4 +24,11 @@ describe("World WebMCP tools", () => {
     expect(() => selectorFromArguments({ stateKey: "locked", stateValue: {} })).toThrow("primitive JSON value");
     expect(selectorFromArguments({ stateKey: "locked", stateValue: false })).toEqual({ state: { key: "locked", value: false } });
   });
+
+  test("requires a parent for direct-child scope", () => {
+    const schemas = worldObservationTools.filter((tool) => tool.name !== "get_world_object_tree").map((tool) => tool.inputSchema);
+    expect(schemas.every((schema) => "allOf" in schema)).toBe(true);
+    expect(() => selectorFromArguments({ directChild: true })).toThrow("parentId is required");
+    expect(selectorFromArguments({ parentId: "room", directChild: true })).toEqual({ parentId: "room", directChild: true });
+  });
 });
