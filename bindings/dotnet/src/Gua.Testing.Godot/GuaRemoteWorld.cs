@@ -29,7 +29,9 @@ public sealed partial class GuaRemoteContext
         var started = System.Diagnostics.Stopwatch.StartNew();
         while (started.Elapsed <= limit) {
             cancellationToken.ThrowIfCancellationRequested();
-            var match = QueryWorldObjects(selector, profile).Matches.FirstOrDefault();
+            var result = QueryWorldObjects(selector, profile);
+            if (!result.Valid) throw new ArgumentException(result.Error ?? "Invalid world selector.", nameof(selector));
+            var match = result.Matches.FirstOrDefault();
             if (match is not null) return match;
             await Task.Delay(50, cancellationToken).ConfigureAwait(false);
         }

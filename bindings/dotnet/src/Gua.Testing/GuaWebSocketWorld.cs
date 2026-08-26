@@ -18,7 +18,7 @@ public sealed partial class GuaWebSocketContext
             directChild = selector.DirectChild ? 1 : 0, visibleToPlayer = Filter(selector.VisibleToPlayer), active = Filter(selector.Active),
             stateKey = selector.State?.Key, stateType = selector.State is null ? null : StateType(selector.State.Value),
             stateString = selector.State?.Value as string,
-            stateNumber = selector.State?.Value is double or float or decimal or int or long ? Convert.ToDouble(selector.State.Value) : (double?)null,
+            stateNumber = selector.State?.Value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal ? Convert.ToDouble(selector.State.Value) : (double?)null,
             stateBool = selector.State?.Value as bool?
         });
 
@@ -29,7 +29,9 @@ public sealed partial class GuaWebSocketContext
         var started = System.Diagnostics.Stopwatch.StartNew();
         while (started.Elapsed <= limit) {
             cancellationToken.ThrowIfCancellationRequested();
-            var match = QueryWorldObjects(selector).Matches.FirstOrDefault();
+            var result = QueryWorldObjects(selector, profile);
+            if (!result.Valid) throw new ArgumentException(result.Error ?? "Invalid world selector.", nameof(selector));
+            var match = result.Matches.FirstOrDefault();
             if (match is not null) return match;
             await Task.Delay(50, cancellationToken).ConfigureAwait(false);
         }

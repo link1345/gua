@@ -42,6 +42,7 @@ int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descript
 int gua_runtime_begin_world_frame(gua_runtime_t* runtime, const char* scene);
 int gua_runtime_register_world_object_v1(gua_runtime_t* runtime, const gua_world_object_descriptor_v1_t* descriptor);
 int gua_runtime_end_world_frame(gua_runtime_t* runtime);
+int gua_runtime_abort_world_frame(gua_runtime_t* runtime);
 int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
 

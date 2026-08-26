@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, validateRecording } from "../src/automation";
-import { MockInspectorClient, createCoalescedAsyncRunner } from "../src/core";
+import { MockInspectorClient, createCoalescedAsyncRunner, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
+  test("computes every level of the world object hierarchy", () => {
+    const object = (id: string, parentId?: string): GuaWorldObject => ({ id, parentId, kind: "object", label: id,
+      space: "world2d", position: { x: 0, y: 0 }, visibleToPlayer: true, active: true,
+      agentExposure: "auto", tags: [], state: {} });
+    const depths = worldObjectDepths([object("root"), object("child", "root"), object("grandchild", "child"), object("leaf", "grandchild")]);
+    expect([...depths.values()]).toEqual([0, 1, 2, 3]);
+  });
+
   test("coalesces snapshot-driven clock refreshes without starving updates", async () => {
     const releases: Array<() => void> = [];
     let calls = 0;

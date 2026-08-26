@@ -497,7 +497,9 @@ struct gua_context_t {
     bool staging_world_valid = true;
     unsigned long long world_frame_sequence = 0;
     unsigned long long world_revision = 0;
+    unsigned long long player_world_revision = 0;
     std::string previous_world_snapshot;
+    std::string previous_player_world_snapshot;
     std::string world_json_cache_debug;
     std::string world_json_cache_player;
     std::deque<HistoryEntry> operation_history;
@@ -1408,8 +1410,12 @@ extern "C" int gua_begin_world_frame(gua_context_t* ctx, const char* scene)
 
 extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor)
 {
-    if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(gua_world_object_descriptor_v1_t)) return 0;
+    if (ctx == nullptr) return 0;
     const std::lock_guard lock(ctx->mutex);
+    if (descriptor == nullptr || descriptor->struct_size < sizeof(gua_world_object_descriptor_v1_t)) {
+        if (ctx->world_frame_in_progress) ctx->staging_world_valid = false;
+        return 0;
+    }
     const auto valid_kind = [](const char* kind) {
         if (kind == nullptr || kind[0] == '\0' || kind[0] < 'a' || kind[0] > 'z') return false;
         for (const char* current = kind + 1; *current != '\0'; ++current) {
@@ -1487,12 +1493,30 @@ extern "C" int gua_end_world_frame(gua_context_t* ctx)
         if (!found_parent || !current.empty()) { ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; return 0; }
     }
     const std::string semantic = build_world_semantic_json(ctx->staging_world_scene, ctx->staging_world_objects);
+    const std::string player_semantic = build_world_semantic_json(ctx->staging_world_scene,
+        project_world_objects(ctx->staging_world_objects, GUA_OBSERVATION_PROFILE_PLAYER));
     ctx->world_scene.swap(ctx->staging_world_scene);
     ctx->world_objects.swap(ctx->staging_world_objects);
     ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false;
     ++ctx->world_frame_sequence;
     if (semantic != ctx->previous_world_snapshot) { ++ctx->world_revision; ctx->previous_world_snapshot = semantic; }
+    if (player_semantic != ctx->previous_player_world_snapshot) {
+        ++ctx->player_world_revision;
+        ctx->previous_player_world_snapshot = player_semantic;
+    }
     ctx->world_json_cache_debug.clear(); ctx->world_json_cache_player.clear();
+    return 1;
+}
+
+extern "C" int gua_abort_world_frame(gua_context_t* ctx)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->world_frame_in_progress) return 0;
+    ctx->staging_world_objects.clear();
+    ctx->staging_world_scene = "unknown";
+    ctx->world_frame_in_progress = false;
+    ctx->staging_world_valid = true;
     return 1;
 }
 
@@ -1501,7 +1525,8 @@ extern "C" int gua_copy_world_object_tree_json(gua_context_t* ctx, int observati
     if (ctx == nullptr || (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER)) return 0;
     const std::lock_guard lock(ctx->mutex);
     return copy_json_string(build_world_tree_json(ctx->world_scene, ctx->world_objects, ctx->session_epoch,
-        ctx->world_frame_sequence, ctx->world_revision, observation_profile), out_json, out_json_size);
+        ctx->world_frame_sequence, observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_world_revision : ctx->world_revision,
+        observation_profile), out_json, out_json_size);
 }
 
 extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size)
@@ -1509,6 +1534,12 @@ extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_
     if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_world_selector_v1_t) ||
         (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER))
         return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector\",\"matches\":[]}", out_json, out_json_size);
+    if (selector->state != nullptr && (selector->state->struct_size < sizeof(gua_world_state_value_v1_t) ||
+        selector->state->key == nullptr || selector->state->key[0] == '\0' ||
+        selector->state->type < GUA_WORLD_VALUE_NULL || selector->state->type > GUA_WORLD_VALUE_BOOLEAN ||
+        (selector->state->type == GUA_WORLD_VALUE_STRING && selector->state->string_value == nullptr) ||
+        (selector->state->type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(selector->state->number_value))))
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector state\",\"matches\":[]}", out_json, out_json_size);
     const std::lock_guard lock(ctx->mutex);
     return copy_json_string(build_world_query_json(ctx->world_objects, *selector, observation_profile), out_json, out_json_size);
 }
@@ -1874,7 +1905,8 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     if ((reset_flags & GUA_RESET_WORLD_OBJECTS) != 0U) {
         ctx->world_scene = "unknown"; ctx->world_objects.clear(); ctx->staging_world_scene = "unknown";
         ctx->staging_world_objects.clear(); ctx->world_frame_in_progress = false; ctx->staging_world_valid = true;
-        ctx->world_frame_sequence = 0; ctx->world_revision = 0; ctx->previous_world_snapshot.clear();
+        ctx->world_frame_sequence = 0; ctx->world_revision = 0; ctx->player_world_revision = 0;
+        ctx->previous_world_snapshot.clear(); ctx->previous_player_world_snapshot.clear();
         ctx->world_json_cache_debug.clear(); ctx->world_json_cache_player.clear();
     }
     ctx->frame_sequence = 0;
@@ -1883,6 +1915,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     ctx->json_cache.clear();
     ctx->world_frame_sequence = 0;
     ctx->world_revision = 0;
+    ctx->player_world_revision = 0;
     ctx->previous_world_snapshot.clear();
     ctx->world_json_cache_debug.clear();
     ctx->world_json_cache_player.clear();

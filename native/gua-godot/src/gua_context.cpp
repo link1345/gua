@@ -266,7 +266,8 @@ bool GuaContext::begin_world_frame(const String& scene)
 
 bool GuaContext::register_world_object(const Dictionary& source)
 {
-    if (!source.has("id") || !source.has("kind") || !source.has("label") || !source.has("position") || !source.has("space")) return false;
+    const auto reject = [this]() { gua_runtime_abort_world_frame(runtime_); return false; };
+    if (!source.has("id") || !source.has("kind") || !source.has("label") || !source.has("position") || !source.has("space")) return reject();
     const String id = source["id"], parent = source.get("parent_id", String()), kind = source["kind"], label = source["label"];
     const String description = source.get("description", String()), domain = source.get("domain_id", String()), related = source.get("related_ui_node_id", String());
     const CharString id8 = id.utf8(), parent8 = parent.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), description8 = description.utf8(), domain8 = domain.utf8(), related8 = related.utf8();
@@ -287,10 +288,11 @@ bool GuaContext::register_world_object(const Dictionary& source)
         else if (value.get_type() == Variant::BOOL) { item.type = GUA_WORLD_VALUE_BOOLEAN; item.bool_value = static_cast<bool>(value) ? 1 : 0; }
         else if (value.get_type() == Variant::INT || value.get_type() == Variant::FLOAT) { item.type = GUA_WORLD_VALUE_NUMBER; item.number_value = static_cast<double>(value); }
         else if (value.get_type() == Variant::STRING || value.get_type() == Variant::STRING_NAME) { state_strings[i] = String(value).utf8(); item.type = GUA_WORLD_VALUE_STRING; item.string_value = state_strings[i].get_data(); }
-        else return false;
+        else return reject();
         state_values.push_back(item);
     }
     const String space = source["space"], exposure = source.get("agent_exposure", String("auto"));
+    if ((space != "world2d" && space != "world3d") || (exposure != "auto" && exposure != "private")) return reject();
     const gua_world_object_descriptor_v1_t descriptor { sizeof(gua_world_object_descriptor_v1_t), id8.get_data(), parent.is_empty() ? nullptr : parent8.get_data(), kind8.get_data(), label8.get_data(),
         description.is_empty() ? nullptr : description8.get_data(), space == "world3d" ? GUA_WORLD_SPACE_3D : GUA_WORLD_SPACE_2D,
         position.x, position.y, position.z, source.get("visible_to_player", false) ? 1 : 0, source.get("active", true) ? 1 : 0,
@@ -301,6 +303,7 @@ bool GuaContext::register_world_object(const Dictionary& source)
 }
 
 bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }
+bool GuaContext::abort_world_frame() { return gua_runtime_abort_world_frame(runtime_) != 0; }
 String GuaContext::get_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_world_object_tree_json); }
 void GuaContext::enable_world_object_tree_adapter() { gua_runtime_set_world_object_tree_enabled(runtime_, 1); }
 
@@ -551,6 +554,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("begin_world_frame", "scene"), &GuaContext::begin_world_frame);
     ClassDB::bind_method(D_METHOD("register_world_object", "descriptor"), &GuaContext::register_world_object);
     ClassDB::bind_method(D_METHOD("end_world_frame"), &GuaContext::end_world_frame);
+    ClassDB::bind_method(D_METHOD("abort_world_frame"), &GuaContext::abort_world_frame);
     ClassDB::bind_method(D_METHOD("get_world_object_tree_json"), &GuaContext::get_world_object_tree_json);
     ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);

@@ -31,6 +31,7 @@ public:
     bool begin_world_frame(const String& scene);
     bool register_world_object(const Dictionary& descriptor);
     bool end_world_frame();
+    bool abort_world_frame();
     String get_world_object_tree_json() const;
     void enable_world_object_tree_adapter();
 

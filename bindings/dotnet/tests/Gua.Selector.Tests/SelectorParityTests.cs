@@ -52,7 +52,7 @@ public sealed class SelectorParityTests
         runtime.BeginWorldFrame("corridor");
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
             new GuaWorldPosition(640, 180), VisibleToPlayer: true,
-            State: new Dictionary<string, object?> { ["locked"] = true }));
+            State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7 }));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
             new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
@@ -70,14 +70,63 @@ public sealed class SelectorParityTests
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "secret")).Matches, Is.Empty);
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(Id: "hidden-child")).Matches, Is.Empty);
             Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))).Matches.Single().Id, Is.EqualTo("door-a"));
+            Assert.That(remote.QueryWorldObjects(new GuaWorldSelector(State: new GuaWorldStateCriterion("priority", (byte)7))).Matches.Single().Id, Is.EqualTo("door-a"));
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
-            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(4));
-            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(4));
+            Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(1));
+            Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1));
+
+            runtime.BeginWorldFrame("corridor");
+            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
+                new GuaWorldPosition(640, 180), VisibleToPlayer: true,
+                State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7 }));
+            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
+                new GuaWorldPosition(99, 99), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
+                new GuaWorldPosition(22, 22), VisibleToPlayer: false));
+            runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
+                new GuaWorldPosition(33, 33), VisibleToPlayer: true, ParentId: "hidden-parent"));
+            runtime.EndWorldFrame();
+            Assert.That(remote.GetContextStatus().WorldRevision, Is.EqualTo(1), "Hidden-only changes must not alter player diagnostics.");
+            Assert.That(remote.GetWorldObjectTree().Revision, Is.EqualTo(1));
+            Assert.That(remote.Reset().DiscardedWorldObjectCount, Is.EqualTo(1));
         }
         finally
         {
             runtime.StopInspectorBridge();
         }
+    }
+
+    [Test]
+    public void DisabledRuntimeReturnsASchemaValidEmptyWorldTree()
+    {
+        using var runtime = new GuaRuntime();
+        var tree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        Assert.Multiple(() => { Assert.That(tree.Scene, Is.EqualTo("unsupported")); Assert.That(tree.Objects, Is.Empty); });
+    }
+
+    [Test]
+    public void InvalidWorldDescriptorCanBeAbortedWithoutReplacingTheSnapshot()
+    {
+        using var context = new GuaContext();
+        context.BeginWorldFrame("stable");
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
+        context.EndWorldFrame();
+        context.BeginWorldFrame("invalid");
+        Assert.Throws<ArgumentException>(() => context.RegisterWorldObject(new GuaWorldObjectDescriptor("bad", "item", "Bad", GuaWorldSpace.World2D,
+            new GuaWorldPosition(0, 0), Tags: ["allocated"], State: new Dictionary<string, object?> { ["first"] = "allocated", ["bad"] = new object() })));
+        context.AbortWorldFrame();
+        Assert.That(context.GetWorldObjectTree().Objects.Single().Id, Is.EqualTo("door"));
+    }
+
+    [Test]
+    public void InvalidWorldSelectorStopsWaitingImmediately()
+    {
+        using var context = new GuaContext();
+        context.BeginWorldFrame("selector");
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
+        context.EndWorldFrame();
+        Assert.ThrowsAsync<ArgumentException>(async () => await context.WaitForWorldObjectAsync(
+            new GuaWorldSelector(Label: "[", LabelMatch: GuaMatchMode.Regex), TimeSpan.FromSeconds(5)));
     }
 
     [Test]

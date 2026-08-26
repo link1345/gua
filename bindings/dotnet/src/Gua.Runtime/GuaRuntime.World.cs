@@ -10,6 +10,7 @@ public sealed partial class GuaRuntime
     public void SetObservationProfile(GuaObservationProfile profile) { ThrowIfDisposed(); if (Native.gua_runtime_set_observation_profile(_handle, (int)profile) == 0) throw new ArgumentOutOfRangeException(nameof(profile)); }
     public void BeginWorldFrame(string scene) { ThrowIfDisposed(); if (Native.gua_runtime_begin_world_frame(_handle, scene) == 0) throw new InvalidOperationException("Failed to begin the Gua world frame."); }
     public void EndWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_end_world_frame(_handle) == 0) throw new InvalidOperationException("The Gua world frame was rejected."); }
+    public void AbortWorldFrame() { ThrowIfDisposed(); if (Native.gua_runtime_abort_world_frame(_handle) == 0) throw new InvalidOperationException("There is no active Gua world frame to abort."); }
 
     public void RegisterWorldObject(GuaWorldObjectDescriptor source)
     {
@@ -46,10 +47,16 @@ public sealed partial class GuaRuntime
     public unsafe string GetWorldObjectTreeJson()
     {
         ThrowIfDisposed();
-        var size = Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
-        if (size <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
-        var bytes = new byte[size];
-        fixed (byte* output = bytes) { Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length); }
-        return Encoding.UTF8.GetString(bytes, 0, size - 1);
+        var required = Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
+        if (required <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
+        while (true) {
+            var bytes = new byte[required];
+            fixed (byte* output = bytes) {
+                var actual = Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length);
+                if (actual <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
+                if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
+                required = actual;
+            }
+        }
     }
 }

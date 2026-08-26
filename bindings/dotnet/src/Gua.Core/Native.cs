@@ -365,6 +365,7 @@ internal static partial class Native
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)] internal static partial int gua_begin_world_frame(nint context, string scene);
     [LibraryImport("gua")] internal static partial int gua_register_world_object_v1(nint context, in GuaNativeWorldObjectDescriptorV1 descriptor);
     [LibraryImport("gua")] internal static partial int gua_end_world_frame(nint context);
+    [LibraryImport("gua")] internal static partial int gua_abort_world_frame(nint context);
     [LibraryImport("gua")] internal static unsafe partial int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
     [LibraryImport("gua")] internal static unsafe partial int gua_query_world_objects_json(nint context, in GuaNativeWorldSelectorV1 selector, int profile, byte* outJson, int outJsonSize);
 

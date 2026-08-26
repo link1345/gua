@@ -65,6 +65,12 @@ public sealed partial class GuaContext : IGuaWorldContext
         if (Native.gua_end_world_frame(_handle) == 0) throw new InvalidOperationException("The Gua world frame was rejected.");
     }
 
+    public void AbortWorldFrame()
+    {
+        ThrowIfDisposed();
+        if (Native.gua_abort_world_frame(_handle) == 0) throw new InvalidOperationException("There is no active Gua world frame to abort.");
+    }
+
     public string GetWorldObjectTreeJson(GuaObservationProfile profile = GuaObservationProfile.Debug) =>
         CopyWorldJson(null, profile);
 
@@ -85,7 +91,9 @@ public sealed partial class GuaContext : IGuaWorldContext
         var started = System.Diagnostics.Stopwatch.StartNew();
         while (started.Elapsed <= limit) {
             cancellationToken.ThrowIfCancellationRequested();
-            var match = QueryWorldObjects(selector, profile).Matches.FirstOrDefault();
+            var result = QueryWorldObjects(selector, profile);
+            if (!result.Valid) throw new ArgumentException(result.Error ?? "Invalid world selector.", nameof(selector));
+            var match = result.Matches.FirstOrDefault();
             if (match is not null) return match;
             await Task.Delay(50, cancellationToken).ConfigureAwait(false);
         }
@@ -124,24 +132,26 @@ internal sealed class NativeWorldDescriptor : IDisposable
     public NativeWorldDescriptor(GuaWorldObjectDescriptor source)
     {
         nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
-        var tags = source.Tags ?? [];
-        var tagPointers = tags.Select(Text).ToArray();
-        nint tagsMemory = 0;
-        if (tagPointers.Length != 0) tagsMemory = (nint)Marshal.AllocCoTaskMem(IntPtr.Size * tagPointers.Length);
-        if (tagsMemory != 0) { allocations.Add(tagsMemory); Marshal.Copy(tagPointers, 0, tagsMemory, tagPointers.Length); }
-        var states = (source.State ?? new Dictionary<string, object?>()).Select(pair => State(pair.Key, pair.Value, Text)).ToArray();
-        var stateSize = Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>();
-        nint statesMemory = 0;
-        if (states.Length != 0) statesMemory = (nint)Marshal.AllocCoTaskMem(stateSize * states.Length);
-        if (statesMemory != 0) { allocations.Add(statesMemory); for (var i = 0; i < states.Length; i++) Marshal.StructureToPtr(states[i], statesMemory + i * stateSize, false); }
-        Value = new Native.GuaNativeWorldObjectDescriptorV1 {
-            StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldObjectDescriptorV1>(), Id = Text(source.Id), ParentId = Text(source.ParentId),
-            Kind = Text(source.Kind), Label = Text(source.Label), Description = Text(source.Description), Space = (int)source.Space,
-            PositionX = source.Position.X, PositionY = source.Position.Y, PositionZ = source.Position.Z,
-            VisibleToPlayer = source.VisibleToPlayer ? 1 : 0, Active = source.Active ? 1 : 0, AgentExposure = (int)source.AgentExposure,
-            DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tagsMemory, TagCount = (uint)tagPointers.Length,
-            StateValues = statesMemory, StateValueCount = (uint)states.Length
-        };
+        try {
+            var tags = source.Tags ?? [];
+            var tagPointers = tags.Select(Text).ToArray();
+            nint tagsMemory = 0;
+            if (tagPointers.Length != 0) tagsMemory = (nint)Marshal.AllocCoTaskMem(IntPtr.Size * tagPointers.Length);
+            if (tagsMemory != 0) { allocations.Add(tagsMemory); Marshal.Copy(tagPointers, 0, tagsMemory, tagPointers.Length); }
+            var states = (source.State ?? new Dictionary<string, object?>()).Select(pair => State(pair.Key, pair.Value, Text)).ToArray();
+            var stateSize = Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>();
+            nint statesMemory = 0;
+            if (states.Length != 0) statesMemory = (nint)Marshal.AllocCoTaskMem(stateSize * states.Length);
+            if (statesMemory != 0) { allocations.Add(statesMemory); for (var i = 0; i < states.Length; i++) Marshal.StructureToPtr(states[i], statesMemory + i * stateSize, false); }
+            Value = new Native.GuaNativeWorldObjectDescriptorV1 {
+                StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldObjectDescriptorV1>(), Id = Text(source.Id), ParentId = Text(source.ParentId),
+                Kind = Text(source.Kind), Label = Text(source.Label), Description = Text(source.Description), Space = (int)source.Space,
+                PositionX = source.Position.X, PositionY = source.Position.Y, PositionZ = source.Position.Z,
+                VisibleToPlayer = source.VisibleToPlayer ? 1 : 0, Active = source.Active ? 1 : 0, AgentExposure = (int)source.AgentExposure,
+                DomainId = Text(source.DomainId), RelatedUiNodeId = Text(source.RelatedUiNodeId), Tags = tagsMemory, TagCount = (uint)tagPointers.Length,
+                StateValues = statesMemory, StateValueCount = (uint)states.Length
+            };
+        } catch { Dispose(); throw; }
     }
 
     internal static Native.GuaNativeWorldStateValueV1 State(string key, object? value, Func<string?, nint> text) => value switch {
@@ -161,13 +171,15 @@ internal sealed class NativeWorldSelector : IDisposable
     public NativeWorldSelector(GuaWorldSelector source)
     {
         nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
-        nint statePointer = 0;
-        if (source.State is { } state) { var native = NativeWorldDescriptor.State(state.Key, state.Value, Text); statePointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>()); allocations.Add(statePointer); Marshal.StructureToPtr(native, statePointer, false); }
-        Value = new Native.GuaNativeWorldSelectorV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV1>(),
-            Id = Text(source.Id), IdMatch = (int)source.IdMatch, Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
-            Label = Text(source.Label), LabelMatch = (int)source.LabelMatch, Tag = Text(source.Tag), TagMatch = (int)source.TagMatch,
-            ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
-            VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer };
+        try {
+            nint statePointer = 0;
+            if (source.State is { } state) { var native = NativeWorldDescriptor.State(state.Key, state.Value, Text); statePointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>()); allocations.Add(statePointer); Marshal.StructureToPtr(native, statePointer, false); }
+            Value = new Native.GuaNativeWorldSelectorV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV1>(),
+                Id = Text(source.Id), IdMatch = (int)source.IdMatch, Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
+                Label = Text(source.Label), LabelMatch = (int)source.LabelMatch, Tag = Text(source.Tag), TagMatch = (int)source.TagMatch,
+                ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
+                VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer };
+        } catch { Dispose(); throw; }
     }
     private static int Filter(bool? value) => value is null ? 0 : value.Value ? 2 : 1;
     public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }

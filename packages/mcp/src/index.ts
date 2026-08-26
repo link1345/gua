@@ -795,7 +795,9 @@ class GuaBridgeClient {
   async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number) {
     const startedAt = Date.now();
     while (Date.now() - startedAt <= timeoutMs) {
-      const match = (await this.findWorldObjects(selector)).matches[0];
+      const result = await this.findWorldObjects(selector);
+      if (!result.valid) throw new Error(result.error ?? "Invalid world selector.");
+      const match = result.matches[0];
       if (match !== undefined) return match;
       await sleep(50);
     }

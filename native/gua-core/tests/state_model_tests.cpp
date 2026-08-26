@@ -142,6 +142,51 @@ int main()
     assert(gua_get_context_status(world, &world_status) == 1 && world_status.world_object_count == 2 && world_status.world_revision == 2);
     gua_destroy_context(world);
 
+    // Malformed descriptors and explicit aborts reject the whole staged frame.
+    gua_context_t* atomic_world = gua_create_context();
+    assert(gua_begin_world_frame(atomic_world, "stable") == 1);
+    assert(gua_register_world_object_v1(atomic_world, &parent) == 1);
+    assert(gua_end_world_frame(atomic_world) == 1);
+    assert(gua_begin_world_frame(atomic_world, "null") == 1);
+    assert(gua_register_world_object_v1(atomic_world, nullptr) == 0);
+    assert(gua_end_world_frame(atomic_world) == 0);
+    auto undersized = parent; undersized.struct_size = sizeof(gua_world_object_descriptor_v1_t) - 1;
+    assert(gua_begin_world_frame(atomic_world, "undersized") == 1);
+    assert(gua_register_world_object_v1(atomic_world, &undersized) == 0);
+    assert(gua_end_world_frame(atomic_world) == 0);
+    assert(gua_begin_world_frame(atomic_world, "abort") == 1);
+    assert(gua_abort_world_frame(atomic_world) == 1);
+    assert(gua_end_world_frame(atomic_world) == 0);
+    gua_context_status_t atomic_status { sizeof(gua_context_status_t) };
+    assert(gua_get_context_status(atomic_world, &atomic_status) == 1 && atomic_status.world_object_count == 1 && atomic_status.world_revision == 1);
+
+    gua_world_state_value_v1_t undersized_state { sizeof(gua_world_state_value_v1_t) - 1, "open", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 };
+    gua_world_selector_v1_t invalid_nested { sizeof(gua_world_selector_v1_t), nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, &undersized_state };
+    gua_query_world_objects_json(atomic_world, &invalid_nested, GUA_OBSERVATION_PROFILE_DEBUG, query, sizeof(query));
+    assert(std::string(query).find("\"valid\":false") != std::string::npos);
+    gua_destroy_context(atomic_world);
+
+    // Hidden-only changes do not advance the player projection revision.
+    gua_context_t* projected_world = gua_create_context();
+    assert(gua_begin_world_frame(projected_world, "privacy") == 1);
+    assert(gua_register_world_object_v1(projected_world, &door) == 1);
+    assert(gua_register_world_object_v1(projected_world, &private_object) == 1);
+    assert(gua_end_world_frame(projected_world) == 1);
+    int player_size = gua_copy_world_object_tree_json(projected_world, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> player_json(static_cast<std::size_t>(player_size));
+    gua_copy_world_object_tree_json(projected_world, GUA_OBSERVATION_PROFILE_PLAYER, player_json.data(), player_size);
+    assert(std::string(player_json.data()).find("\"revision\":1") != std::string::npos);
+    auto moved_private = private_object; moved_private.position_x = 99;
+    assert(gua_begin_world_frame(projected_world, "privacy") == 1);
+    assert(gua_register_world_object_v1(projected_world, &door) == 1);
+    assert(gua_register_world_object_v1(projected_world, &moved_private) == 1);
+    assert(gua_end_world_frame(projected_world) == 1);
+    player_size = gua_copy_world_object_tree_json(projected_world, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    player_json.resize(static_cast<std::size_t>(player_size));
+    gua_copy_world_object_tree_json(projected_world, GUA_OBSERVATION_PROFILE_PLAYER, player_json.data(), player_size);
+    assert(std::string(player_json.data()).find("\"revision\":1") != std::string::npos);
+    gua_destroy_context(projected_world);
+
     gua_context_t* detailed_context = gua_create_context();
     gua_begin_frame(detailed_context, "details");
     const gua_node_descriptor_v3_t detailed {

@@ -87,7 +87,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             CollectUGui();
             PruneClickObservers();
             runtime.EndFrame();
-            CollectWorldObjects();
+            try { CollectWorldObjects(); }
+            catch (Exception error) { Debug.LogError("Gua Unity world publication failed: " + error); }
             DispatchActions();
             ScheduleScreenshot();
         }
@@ -145,7 +146,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         finally
         {
-            if (!published) try { runtime.EndWorldFrame(); } catch { /* End clears a rejected staging frame. */ }
+            if (!published) try { runtime.AbortWorldFrame(); } catch { /* A prior native rejection may already have cleared staging. */ }
         }
     }
 

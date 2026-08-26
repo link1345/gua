@@ -460,6 +460,7 @@ int gua_query_nodes_json(gua_context_t* ctx, const gua_selector_v1_t* selector, 
 int gua_begin_world_frame(gua_context_t* ctx, const char* scene);
 int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor);
 int gua_end_world_frame(gua_context_t* ctx);
+int gua_abort_world_frame(gua_context_t* ctx);
 int gua_copy_world_object_tree_json(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
 int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size);
 int gua_enqueue_click(gua_context_t* ctx, const char* node_id);

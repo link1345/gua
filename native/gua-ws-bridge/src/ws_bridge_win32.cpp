@@ -54,6 +54,7 @@ struct Command {
     bool duration_ms_valid = false;
     double step_ms = 0;
     bool step_ms_present = false;
+    bool world_selector_valid = true;
 };
 
 struct ClientConnection {
@@ -665,10 +666,25 @@ bool json_has_field(std::string_view json, std::string_view field)
     return json_top_level_field_start(json, field).has_value();
 }
 
+bool json_has_non_null_field(std::string_view json, std::string_view field)
+{
+    const auto start = json_top_level_field_start(json, field);
+    return start.has_value() && json.substr(*start, 4) != "null";
+}
+
 bool json_bool_field(std::string_view json, std::string_view field, bool fallback = false)
 {
     const auto start = json_top_level_field_start(json, field);
     return start.has_value() ? json.substr(*start, 4) == "true" : fallback;
+}
+
+std::optional<bool> json_bool_field_optional(std::string_view json, std::string_view field)
+{
+    const auto start = json_top_level_field_start(json, field);
+    if (!start.has_value()) return std::nullopt;
+    if (json.substr(*start, 4) == "true") return true;
+    if (json.substr(*start, 5) == "false") return false;
+    return std::nullopt;
 }
 
 Command parse_command(std::string_view json)
@@ -707,6 +723,19 @@ Command parse_command(std::string_view json)
     command.world_selector.state_string = json_string_field(json, "stateString").value_or("");
     command.world_selector.state_number = json_number_field(json, "stateNumber").value_or(0);
     command.world_selector.state_bool = json_bool_field(json, "stateBool");
+    const bool state_key_present = json_has_non_null_field(json, "stateKey");
+    const bool state_type_present = json_has_non_null_field(json, "stateType");
+    const bool state_string_present = json_has_non_null_field(json, "stateString");
+    const bool state_number_present = json_has_non_null_field(json, "stateNumber");
+    const bool state_bool_present = json_has_non_null_field(json, "stateBool");
+    const bool any_state = state_key_present || state_type_present || state_string_present || state_number_present || state_bool_present;
+    command.world_selector_valid = !any_state ||
+        (state_key_present && !command.world_selector.state_key.empty() && state_type_present &&
+            command.world_selector.state_type >= 0 && command.world_selector.state_type <= 3 &&
+            ((command.world_selector.state_type == 0 && !state_string_present && !state_number_present && !state_bool_present) ||
+             (command.world_selector.state_type == 1 && state_string_present && json_string_field(json, "stateString").has_value() && !state_number_present && !state_bool_present) ||
+             (command.world_selector.state_type == 2 && state_number_present && json_number_field(json, "stateNumber").has_value() && !state_string_present && !state_bool_present) ||
+             (command.world_selector.state_type == 3 && state_bool_present && json_bool_field_optional(json, "stateBool").has_value() && !state_string_present && !state_number_present)));
     command.value = json_string_field(json, "value").value_or("");
     command.delta_x = static_cast<float>(json_number_field(json, "deltaX").value_or(0));
     command.delta_y = static_cast<float>(json_number_field(json, "deltaY").value_or(0));
@@ -1078,6 +1107,7 @@ private:
                 return ok_response(command.id, handlers_.query_nodes_json(command.selector));
             }
             if (command.type == "query_world_objects") {
+                if (!command.world_selector_valid) return error_response(command.id, "invalid world state criterion");
                 return handlers_.query_world_objects_json
                     ? ok_response(command.id, handlers_.query_world_objects_json(command.world_selector))
                     : error_response(command.id, "unsupported");

@@ -43,6 +43,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"begin_world_frame",
 	"register_world_object",
 	"end_world_frame",
+	"abort_world_frame",
 	"get_world_object_tree_json",
 	"enable_world_object_tree_adapter",
 	"start_inspector_bridge",
@@ -180,7 +181,10 @@ func _publish_world_frame(scene: String) -> void:
 		}
 		if not context.register_world_object(descriptor):
 			push_error("Failed to register Gua world object: %s" % object_id)
-	context.end_world_frame()
+			context.abort_world_frame()
+			return
+	if not context.end_world_frame():
+		push_error("Gua world frame was rejected")
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:

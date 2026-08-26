@@ -206,6 +206,23 @@ std::string status_json(gua_runtime_t* runtime)
     gua_context_status_t status { sizeof(gua_context_status_t) };
     const std::lock_guard lock(runtime->context_mutex);
     if (gua_get_context_status(runtime->context, &status) == 0) return "null";
+    auto world_revision = status.world_revision;
+    auto world_object_count = status.world_object_count;
+    if (!runtime->world_object_tree_enabled) {
+        world_revision = 0;
+        world_object_count = 0;
+    } else if (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER) {
+        const int size = gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        std::string world_json(static_cast<std::size_t>(size), '\0');
+        gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), size);
+        constexpr std::string_view revision_key = "\"revision\":";
+        const auto revision_position = world_json.find(revision_key);
+        world_revision = revision_position == std::string::npos ? 0 : std::strtoull(
+            world_json.c_str() + revision_position + revision_key.size(), nullptr, 10);
+        world_object_count = 0;
+        for (auto position = world_json.find("{\"id\":"); position != std::string::npos;
+            position = world_json.find("{\"id\":", position + 1)) ++world_object_count;
+    }
     return "{\"sessionEpoch\":" + std::to_string(status.session_epoch) +
         ",\"frameSequence\":" + std::to_string(status.frame_sequence) +
         ",\"revision\":" + std::to_string(status.revision) +
@@ -220,8 +237,8 @@ std::string status_json(gua_runtime_t* runtime)
         ",\"firstEventAction\":" + std::to_string(status.first_event_action) +
         ",\"firstEventNodeId\":\"" + escape_json(status.first_event_node_id) + "\"" +
         ",\"worldFrameSequence\":" + std::to_string(status.world_frame_sequence) +
-        ",\"worldRevision\":" + std::to_string(status.world_revision) +
-        ",\"worldObjectCount\":" + std::to_string(status.world_object_count) + "}";
+        ",\"worldRevision\":" + std::to_string(world_revision) +
+        ",\"worldObjectCount\":" + std::to_string(world_object_count) + "}";
 }
 
 std::string stale_screenshot_json(uint64_t request_id, const gua_context_status_t& status)
@@ -255,7 +272,17 @@ std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expecte
     gua_reset_options_t options { sizeof(gua_reset_options_t), flags, strict ? 1 : 0, expected_epoch, flags_version };
     gua_reset_report_t report { sizeof(gua_reset_report_t) };
     const std::lock_guard lock(runtime->context_mutex);
+    uint32_t projected_world_count = 0;
+    if (runtime->world_object_tree_enabled && runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER) {
+        const int size = gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        std::string world_json(static_cast<std::size_t>(size), '\0');
+        gua_copy_world_object_tree_json(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), size);
+        for (auto position = world_json.find("{\"id\":"); position != std::string::npos;
+            position = world_json.find("{\"id\":", position + 1)) ++projected_world_count;
+    }
     const int result = gua_reset_context(runtime->context, &options, &report);
+    if (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && report.discarded_world_object_count != 0)
+        report.discarded_world_object_count = projected_world_count;
     if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
     return "{\"result\":" + std::to_string(result) +
         ",\"previousSessionEpoch\":" + std::to_string(report.previous_session_epoch) +
@@ -391,9 +418,18 @@ extern "C" int gua_runtime_end_world_frame(gua_runtime_t* runtime)
     return result;
 }
 
+extern "C" int gua_runtime_abort_world_frame(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_abort_world_frame(runtime->context);
+}
+
 extern "C" int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
 {
-    if (!valid_runtime(runtime) || !runtime->world_object_tree_enabled) return copy_json_string("{}", out_json, out_json_size);
+    if (!valid_runtime(runtime)) return 0;
+    if (!runtime->world_object_tree_enabled)
+        return copy_json_string("{\"schemaVersion\":1,\"sessionEpoch\":1,\"frameSequence\":0,\"revision\":0,\"scene\":\"unsupported\",\"objects\":[]}", out_json, out_json_size);
     return copy_json_string(copy_world_object_tree_json(runtime), out_json, out_json_size);
 }
 
@@ -933,7 +969,8 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_world_object_tree_json = [runtime] {
             const std::lock_guard lock(runtime->context_mutex);
-            if (!runtime->world_object_tree_enabled) return std::string("{}");
+            if (!runtime->world_object_tree_enabled)
+                return std::string("{\"schemaVersion\":1,\"sessionEpoch\":1,\"frameSequence\":0,\"revision\":0,\"scene\":\"unsupported\",\"objects\":[]}");
             const int size = gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, nullptr, 0);
             std::string json(static_cast<std::size_t>(size), '\0');
             gua_copy_world_object_tree_json(runtime->context, runtime->observation_profile, json.data(), size);

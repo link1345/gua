@@ -194,6 +194,23 @@ export function getSelectedNode(state: InspectorState): GuaNode | null {
   return state.uiTree.nodes.find((node) => node.id === state.selectedNodeId) ?? null;
 }
 
+export function worldObjectDepths(objects: GuaWorldObject[]): Map<string, number> {
+  const byId = new Map(objects.map((object) => [object.id, object]));
+  const depths = new Map<string, number>();
+  const depthOf = (object: GuaWorldObject, visiting = new Set<string>()): number => {
+    const cached = depths.get(object.id);
+    if (cached !== undefined) return cached;
+    if (object.parentId === undefined || !byId.has(object.parentId) || visiting.has(object.id)) return 0;
+    visiting.add(object.id);
+    const depth = depthOf(byId.get(object.parentId)!, visiting) + 1;
+    visiting.delete(object.id);
+    depths.set(object.id, depth);
+    return depth;
+  };
+  for (const object of objects) depths.set(object.id, depthOf(object));
+  return depths;
+}
+
 export async function readSnapshot(client: GuaInspectorClient): Promise<InspectorSnapshot> {
   const [uiTree, worldObjectTree, logs, screenshot] = await Promise.all([
     client.getUiTree(),

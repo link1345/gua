@@ -45,7 +45,21 @@
         "visibleToPlayer": { "type": "integer", "minimum": 0, "maximum": 2 }, "active": { "type": "integer", "minimum": 0, "maximum": 2 },
         "stateKey": { "type": "string", "minLength": 1 }, "stateType": { "type": "integer", "minimum": 0, "maximum": 3 },
         "stateString": { "type": "string" }, "stateNumber": { "type": "number" }, "stateBool": { "type": "boolean" }
-      }
+      },
+      "oneOf": [
+        { "not": { "anyOf": [
+          { "required": ["stateKey"] }, { "required": ["stateType"] }, { "required": ["stateString"] },
+          { "required": ["stateNumber"] }, { "required": ["stateBool"] }
+        ] } },
+        { "required": ["stateKey", "stateType"], "properties": { "stateType": { "const": 0 } },
+          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateNumber"] }, { "required": ["stateBool"] }] } },
+        { "required": ["stateKey", "stateType", "stateString"], "properties": { "stateType": { "const": 1 } },
+          "not": { "anyOf": [{ "required": ["stateNumber"] }, { "required": ["stateBool"] }] } },
+        { "required": ["stateKey", "stateType", "stateNumber"], "properties": { "stateType": { "const": 2 } },
+          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateBool"] }] } },
+        { "required": ["stateKey", "stateType", "stateBool"], "properties": { "stateType": { "const": 3 } },
+          "not": { "anyOf": [{ "required": ["stateString"] }, { "required": ["stateNumber"] }] } }
+      ]
     },
     "nodeCommand": {
       "type": "object",

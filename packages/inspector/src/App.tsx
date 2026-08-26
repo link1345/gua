@@ -15,6 +15,7 @@ import {
   readSnapshot,
   selectNode,
   updateInspectorState,
+  worldObjectDepths,
 } from "./core";
 import {
   InspectorRecorder,
@@ -372,14 +373,15 @@ function TreePanel({ nodes, selectedNodeId, onSelect }: TreePanelProps) {
 }
 
 function WorldTreePanel({ objects, scene }: { objects: GuaWorldObject[]; scene: string }) {
+  const depths = worldObjectDepths(objects);
   return (
     <section className="gua-panel gua-tree-panel">
       <PanelHeader title="World Object Tree" detail={`${objects.length} objects · ${scene}`} />
       <ol className="gua-tree">
-        {objects.map((object) => <li key={object.id}><div className="gua-tree__node" data-depth={object.parentId === undefined ? 0 : 1}>
+        {objects.map((object) => { const depth = depths.get(object.id) ?? 0; return <li key={object.id}><div className="gua-tree__node" data-depth={depth} style={{ marginInlineStart: depth * 14 }}>
           <span className="gua-role">{object.kind}</span><span className="gua-tree__label"><span>{object.label}</span><small>#{object.id} · {object.space} ({object.position.x}, {object.position.y}{object.position.z === undefined ? "" : `, ${object.position.z}`})</small></span>
           <span>{object.visibleToPlayer ? "visible" : "hidden"}{object.active ? "" : " · inactive"}</span>
-        </div></li>)}
+        </div></li>; })}
       </ol>
     </section>
   );
