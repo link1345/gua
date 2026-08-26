@@ -85,8 +85,8 @@ public sealed class UnityIntegrationTests
             "Sensitive Unity controls must omit their plaintext from semantic snapshots.");
 
         const string detachedSensitiveValue = "unity-detached-secret";
-        Assert.That(initialTree.Nodes.Any(node => node.Id.EndsWith("/detached-sensitive-input", StringComparison.Ordinal)), Is.True);
-        var detachedSensitiveId = initialTree.Nodes.Single(node => node.Id.EndsWith("/detached-sensitive-input", StringComparison.Ordinal)).Id;
+        Assert.That(WaitForNode(host, "textbox", "detached-sensitive-input", out var detachedSensitiveId), Is.True,
+            "The UI Toolkit fixture did not publish its detachable sensitive control.");
         var detachedSensitiveError = host.Context.EnqueueAction(
             new GuaActionRequest(GuaActionType.SetValue, detachedSensitiveId, detachedSensitiveValue, Sensitive: true),
             out var detachedSensitiveRequestId);
@@ -173,6 +173,8 @@ public sealed class UnityIntegrationTests
         Assert.That(WaitForActionEvent(host, throwingRequestId, out var throwingResult), Is.True);
         Assert.That(throwingResult.Succeeded, Is.False);
         Assert.That(throwingResult.Error, Is.EqualTo(GuaActionError.InvalidValue));
+        Assert.That(WaitForRedactedNode(host, "throwing-input", exceptionSecret), Is.True,
+            "A sensitive value applied before a Unity setter exception must remain redacted from later frames.");
         var sensitiveDiagnostics = host.RemoteContext.GetDiagnosticsJson();
         Assert.That(sensitiveDiagnostics, Does.Not.Contain(exceptionSecret));
         Assert.That(sensitiveDiagnostics, Does.Contain("[redacted]"));
@@ -274,6 +276,24 @@ public sealed class UnityIntegrationTests
             if (labels.All(label => items.Contains(label))) return true;
             Thread.Sleep(20);
         }
+        return false;
+    }
+
+    private static bool WaitForNode(UnitySceneTestHost host, string role, string label, out string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var match = host.RemoteContext.GetRemoteTree().Nodes
+                .FirstOrDefault(node => node.Role == role && node.Label == label);
+            if (match != null)
+            {
+                id = match.Id;
+                return true;
+            }
+            Thread.Sleep(20);
+        }
+        id = string.Empty;
         return false;
     }
 

@@ -27,6 +27,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
     private readonly Dictionary<object, string> clickTargetIds = new();
     private readonly ConditionalWeakTable<object, SensitiveTarget> sensitiveTargets = new();
+    private readonly HashSet<string> sensitiveTargetIds = new(StringComparer.Ordinal);
     private readonly Dictionary<Button, UnityEngine.Events.UnityAction> uGuiClickHandlers = new();
     private readonly Dictionary<UnityEngine.UIElements.Button, Action> visualClickHandlers = new();
     private readonly HashSet<object> suppressedClicks = new();
@@ -394,7 +395,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             : $"{id}/{EscapeId(explicitId)}");
         var role = VisualRole(element);
         var label = VisualLabel(element);
-        var sensitive = sensitiveTargets.TryGetValue(element, out _);
+        var sensitive = sensitiveTargets.TryGetValue(element, out _) || sensitiveTargetIds.Contains(resolved);
         if (sensitive) label = string.IsNullOrWhiteSpace(element.name) ? resolved : element.name;
         var range = VisualRange(element);
         if (sensitive) range.value = null;
@@ -461,7 +462,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (GuaUnityAdapterRegistry.TryDescribe(transform, out var tmpTarget, out var tmpRole, out var tmpLabel, out var tmpValue))
         { actionTarget = tmpTarget; role = tmpRole; label = tmpLabel; value = tmpValue; }
         var selectableContentLabel = label;
-        var sensitive = sensitiveTargets.TryGetValue(actionTarget, out _);
+        var sensitive = sensitiveTargets.TryGetValue(actionTarget, out _) || sensitiveTargetIds.Contains(id);
         if (sensitive) label = transform.name;
         (double? value, double? min, double? max) range = selectable is UnityEngine.UI.Slider slider
             ? (slider.value, slider.minValue, slider.maxValue) : default;
@@ -513,11 +514,13 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             {
                 var success = Apply(pair.Value.Value, request, out var resultValue, out var failure);
                 if (success && request.Action == GuaActionType.SetValue && request.Sensitive)
-                    sensitiveTargets.GetValue(pair.Value.Value, static _ => new SensitiveTarget());
+                    MarkSensitive(pair.Key, pair.Value.Value);
                 runtime.EmitActionResult(request, success, success ? GuaActionError.None : failure, resultValue);
             }
             catch (Exception error)
             {
+                if (request.Action == GuaActionType.SetValue && request.Sensitive)
+                    MarkSensitive(pair.Key, pair.Value.Value);
                 var detail = request.Sensitive ? "[redacted]" : error.Message;
                 var message = $"Unity action {request.RequestId} ({request.Action}, node='{request.NodeId ?? "<null>"}') failed: {detail}";
                 runtime.AddLog(3, message);
@@ -556,6 +559,12 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             visualClickHandlers.Add(visualButton, handler);
             visualButton.clicked += handler;
         }
+    }
+
+    private void MarkSensitive(string id, object target)
+    {
+        sensitiveTargetIds.Add(id);
+        sensitiveTargets.GetValue(target, static _ => new SensitiveTarget());
     }
 
     private void EmitObservedClick(object target)

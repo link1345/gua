@@ -260,19 +260,29 @@ public static class GuaUnityFixture
     }
 }
 
-public sealed class GuaUnityThrowingControl : MonoBehaviour { }
+public sealed class GuaUnityThrowingControl : MonoBehaviour
+{
+    public string Value { get; set; } = "unchanged";
+}
 
 public sealed class GuaUnityThrowingAdapter : IGuaUnityControlAdapter
 {
+    private sealed class Target
+    {
+        public Target(GuaUnityThrowingControl control) => Control = control;
+
+        public GuaUnityThrowingControl Control { get; }
+    }
+
     public bool TryDescribe(Transform transform, out object target, out string role, out string label, out string value)
     {
         var control = transform.GetComponent<GuaUnityThrowingControl>();
         if (control != null)
         {
-            target = control;
+            target = new Target(control);
             role = "textbox";
             label = "throwing-input";
-            value = "unchanged";
+            value = control.Value;
             return true;
         }
         target = null;
@@ -285,7 +295,8 @@ public sealed class GuaUnityThrowingAdapter : IGuaUnityControlAdapter
     public bool TryApply(object target, GuaActionRequest request, out string value)
     {
         value = null;
-        if (target is not GuaUnityThrowingControl || request.Action != GuaActionType.SetValue) return false;
+        if (target is not Target wrapper || request.Action != GuaActionType.SetValue) return false;
+        wrapper.Control.Value = request.Value ?? string.Empty;
         throw new InvalidOperationException("Rejected sensitive value: " + request.Value);
     }
 }
