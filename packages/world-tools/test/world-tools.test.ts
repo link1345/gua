@@ -31,4 +31,14 @@ describe("World WebMCP tools", () => {
     expect(() => selectorFromArguments({ directChild: true })).toThrow("parentId is required");
     expect(selectorFromArguments({ parentId: "room", directChild: true })).toEqual({ parentId: "room", directChild: true });
   });
+
+  test("rejects supplied invalid string criteria instead of dropping them", () => {
+    for (const key of ["id", "kind", "label", "tag", "parentId"] as const) {
+      expect(() => selectorFromArguments({ [key]: "" })).toThrow(`${key} must be a non-empty string`);
+      expect(() => selectorFromArguments({ [key]: 42 })).toThrow(`${key} must be a non-empty string`);
+    }
+    for (const key of ["directChild", "visibleToPlayer", "active"] as const)
+      expect(() => selectorFromArguments({ [key]: "true" })).toThrow(`${key} must be a boolean`);
+    expect(selectorFromArguments({ id: "door" })).toEqual({ id: "door" });
+  });
 });

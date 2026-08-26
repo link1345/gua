@@ -170,6 +170,11 @@ internal sealed class NativeWorldSelector : IDisposable
     public Native.GuaNativeWorldSelectorV1 Value { get; }
     public NativeWorldSelector(GuaWorldSelector source)
     {
+        foreach (var (name, value) in new[] {
+            (nameof(source.Id), source.Id), (nameof(source.Kind), source.Kind), (nameof(source.Label), source.Label),
+            (nameof(source.Tag), source.Tag), (nameof(source.ParentId), source.ParentId) })
+            if (value is not null && value.Length == 0)
+                throw new ArgumentException($"World selector criterion '{name}' must be a non-empty string.", nameof(source));
         nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
         try {
             nint statePointer = 0;

@@ -130,7 +130,11 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 .Where(item => item.gameObject.scene.IsValid() && item.gameObject.scene.isLoaded)
                 .OrderBy(item => HierarchyPath(item.transform), StringComparer.Ordinal))
             {
-                if (string.IsNullOrWhiteSpace(source.Id)) { runtime.AddLog(3, $"Unity GuaWorldObject on '{source.name}' requires a stable Id."); continue; }
+                if (string.IsNullOrWhiteSpace(source.Id))
+                {
+                    runtime.AddLog(3, $"Unity GuaWorldObject on '{source.name}' requires a stable Id and rejected the world frame.");
+                    throw new InvalidOperationException($"GuaWorldObject on '{source.name}' requires a stable Id.");
+                }
                 if (!frameIds.Add(source.Id)) { runtime.AddLog(3, $"Duplicate Unity GuaWorldObject Id '{source.Id}' rejected the world frame."); throw new InvalidOperationException($"Duplicate world object Id '{source.Id}'."); }
                 var parentId = NearestWorldParentId(source.transform.parent);
                 var position = source.transform.position;

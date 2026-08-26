@@ -214,7 +214,7 @@ export function worldObjectDepths(objects: GuaWorldObject[]): Map<string, number
 export async function readSnapshot(client: GuaInspectorClient): Promise<InspectorSnapshot> {
   const [uiTree, worldObjectTree, logs, screenshot] = await Promise.all([
     client.getUiTree(),
-    client.getWorldObjectTree().catch(() => ({ schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 0, revision: 0, scene: "unsupported", objects: [] })),
+    client.getWorldObjectTree(),
     client.getLogs(),
     client.getScreenshot(),
   ]);

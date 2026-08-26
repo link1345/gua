@@ -320,7 +320,7 @@ function ClockPanel({ clock, onInstall, onPause, onRunFor, onResume, onError }: 
   const [step, setStep] = useState("");
   const parsedStep = step === "" ? undefined : Number(step);
   const run = (action: () => Promise<void>) => void action().catch((caught) => onError((caught as Error).message));
-  return <section className="gua-panel">
+  return <section className="gua-panel gua-clock-panel">
     <PanelHeader title="Virtual Clock" detail={clock === null ? "unsupported" : `${clock.state} · ${clock.nowMs.toFixed(2)} ms`} />
     <div className="gua-clock-controls">
       <input aria-label="Clock duration milliseconds" type="number" min="0" value={duration} onChange={(e) => setDuration(e.currentTarget.value)} />
@@ -375,7 +375,7 @@ function TreePanel({ nodes, selectedNodeId, onSelect }: TreePanelProps) {
 function WorldTreePanel({ objects, scene }: { objects: GuaWorldObject[]; scene: string }) {
   const depths = worldObjectDepths(objects);
   return (
-    <section className="gua-panel gua-tree-panel">
+    <section className="gua-panel gua-tree-panel gua-world-panel">
       <PanelHeader title="World Object Tree" detail={`${objects.length} objects · ${scene}`} />
       <ol className="gua-tree">
         {objects.map((object) => { const depth = depths.get(object.id) ?? 0; return <li key={object.id}><div className="gua-tree__node" data-depth={depth} style={{ marginInlineStart: depth * 14 }}>
@@ -401,7 +401,7 @@ function NodeDetailPanel({ node, onClick, onFocus, onAction }: NodeDetailPanelPr
   const [secretKey, setSecretKey] = useState("");
   if (node === null) {
     return (
-      <section className="gua-panel">
+      <section className="gua-panel gua-detail-panel">
         <PanelHeader title="Node Detail" />
         <p className="gua-muted">No node selected.</p>
       </section>
@@ -409,7 +409,7 @@ function NodeDetailPanel({ node, onClick, onFocus, onAction }: NodeDetailPanelPr
   }
 
   return (
-    <section className="gua-panel">
+    <section className="gua-panel gua-detail-panel">
       <PanelHeader title="Node Detail" detail={node.id} />
       <div className="gua-command-row">
         <button type="button" onClick={onClick} disabled={!node.actions.includes("click")}>

@@ -35,8 +35,16 @@ export type WorldObservationToolName = (typeof worldObservationTools)[number]["n
 
 export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSelector {
   const result: Record<string, unknown> = {};
-  for (const key of ["id", "kind", "label", "tag", "parentId"] as const) if (typeof args[key] === "string" && args[key].length > 0) result[key] = args[key];
-  for (const key of ["directChild", "visibleToPlayer", "active"] as const) if (typeof args[key] === "boolean") result[key] = args[key];
+  for (const key of ["id", "kind", "label", "tag", "parentId"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(args, key)) continue;
+    if (typeof args[key] !== "string" || args[key].length === 0) throw new TypeError(`${key} must be a non-empty string.`);
+    result[key] = args[key];
+  }
+  for (const key of ["directChild", "visibleToPlayer", "active"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(args, key)) continue;
+    if (typeof args[key] !== "boolean") throw new TypeError(`${key} must be a boolean.`);
+    result[key] = args[key];
+  }
   if (result.directChild === true && result.parentId === undefined) throw new TypeError("parentId is required when directChild is true.");
   const hasStateKey = Object.prototype.hasOwnProperty.call(args, "stateKey");
   const hasStateValue = Object.prototype.hasOwnProperty.call(args, "stateValue");

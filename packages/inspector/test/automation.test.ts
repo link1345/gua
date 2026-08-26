@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, validateRecording } from "../src/automation";
-import { MockInspectorClient, createCoalescedAsyncRunner, worldObjectDepths, type GuaWorldObject } from "../src/core";
+import { MockInspectorClient, createCoalescedAsyncRunner, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
   test("computes every level of the world object hierarchy", () => {
@@ -10,6 +10,12 @@ describe("InspectorRecorder", () => {
       agentExposure: "auto", tags: [], state: {} });
     const depths = worldObjectDepths([object("root"), object("child", "root"), object("grandchild", "child"), object("leaf", "grandchild")]);
     expect([...depths.values()]).toEqual([0, 1, 2, 3]);
+  });
+
+  test("surfaces world tree fetch failures instead of replacing displayed state", async () => {
+    const client = new MockInspectorClient();
+    client.getWorldObjectTree = async () => { throw new Error("temporary world failure"); };
+    await expect(readSnapshot(client)).rejects.toThrow("temporary world failure");
   });
 
   test("coalesces snapshot-driven clock refreshes without starving updates", async () => {

@@ -212,6 +212,20 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void LocalWorldSelectorsRejectEmptyStringCriteria()
+    {
+        using var context = new GuaContext();
+        context.BeginWorldFrame("selector");
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("door", "door", "Door", GuaWorldSpace.World2D, new GuaWorldPosition(1, 2)));
+        context.EndWorldFrame();
+
+        foreach (var invalid in new[] {
+            new GuaWorldSelector(Id: ""), new GuaWorldSelector(Kind: ""), new GuaWorldSelector(Label: ""),
+            new GuaWorldSelector(Tag: ""), new GuaWorldSelector(ParentId: "") })
+            Assert.Throws<ArgumentException>(() => context.QueryWorldObjects(invalid));
+    }
+
+    [Test]
     public void LocalClockControlsDrainTheContextsOwnedClock()
     {
         using var context = new GuaContext();
