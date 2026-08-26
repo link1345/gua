@@ -83,6 +83,10 @@ int main()
     assert(gua_register_node_v4(projected_ui, &projected_node) == 1);
     assert(gua_register_node_v4(projected_ui, &private_node) == 1);
     gua_end_frame(projected_ui);
+    int debug_ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    std::vector<char> debug_ui_json(static_cast<std::size_t>(debug_ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_DEBUG, debug_ui_json.data(), debug_ui_size);
+    assert(std::string(debug_ui_json.data()).find("\"click\"") != std::string::npos);
     int ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
     std::vector<char> ui_json(static_cast<std::size_t>(ui_size));
     gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
@@ -101,7 +105,27 @@ int main()
     assert(projected_state.selected == 0);
     assert(projected_state.text[0] == '\0');
     const gua_action_request_descriptor_t projected_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "public" };
+    uint64_t debug_click_id = 0;
+    assert(gua_enqueue_action(projected_ui, &projected_click, &debug_click_id) == GUA_ACTION_ACCEPTED);
+    gua_action_request_t debug_click { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(projected_ui, GUA_ACTION_CLICK, "public", &debug_click) == 1);
+    const gua_action_result_t debug_click_result { sizeof(gua_action_result_t), debug_click_id, GUA_ACTION_CLICK,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, "public", nullptr, 0 };
+    assert(gua_emit_action_result(projected_ui, &debug_click_result) == 1);
+    gua_event_v2_t debug_click_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request(projected_ui, debug_click_id, &debug_click_event) == 1);
     assert(gua_enqueue_action_for_profile(projected_ui, &projected_click, GUA_OBSERVATION_PROFILE_PLAYER, nullptr) == GUA_ACTION_ERROR_UNSUPPORTED);
+
+    const gua_agent_field_rule_v1_t overflowing_rule { sizeof(gua_agent_field_rule_v1_t), "bounds.x",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, 1e308, 0, 0 };
+    const gua_agent_policy_v1_t overflowing_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, &overflowing_rule, 1 };
+    const gua_node_descriptor_v4_t overflowing_node { sizeof(gua_node_descriptor_v4_t), projected_detail, overflowing_policy };
+    gua_begin_frame(projected_ui, "overflowing-policy");
+    assert(gua_register_node_v4(projected_ui, &overflowing_node) == 0);
+    gua_end_frame(projected_ui);
+    assert(std::string(gua_get_ui_tree_json(projected_ui)).find("\"screen\":\"policy\"") != std::string::npos);
+
     auto focus_request = projected_click; focus_request.action = GUA_ACTION_FOCUS;
     uint64_t focus_id = 0;
     assert(gua_enqueue_action_for_profile(projected_ui, &focus_request, GUA_OBSERVATION_PROFILE_PLAYER, &focus_id) == GUA_ACTION_ACCEPTED);
@@ -175,8 +199,9 @@ int main()
         { sizeof(gua_agent_field_rule_v1_t), "description", GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
         { sizeof(gua_agent_field_rule_v1_t), "tags", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
         { sizeof(gua_agent_field_rule_v1_t), "state.locked", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.missing", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 10 },
     };
-    const gua_agent_policy_v1_t world_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0, 0, world_rules, 5 };
+    const gua_agent_policy_v1_t world_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0, 0, world_rules, 6 };
     const gua_world_object_descriptor_v2_t projected_door { sizeof(gua_world_object_descriptor_v2_t), door, world_policy };
     assert(gua_register_world_object_v2(world, &projected_door) == 1);
     const gua_world_object_descriptor_v1_t private_object { sizeof(gua_world_object_descriptor_v1_t), "secret", "door-a", "item", "Secret", nullptr,
@@ -199,6 +224,7 @@ int main()
     assert(std::string(world_json.data()).find("[redacted]") != std::string::npos);
     assert(std::string(world_json.data()).find("\"tags\":[]") != std::string::npos);
     assert(std::string(world_json.data()).find("\"locked\":null") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"missing\"") == std::string::npos);
     const gua_world_selector_v1_t private_query { sizeof(gua_world_selector_v1_t), "secret", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, nullptr };
     char query[512] {};
     gua_query_world_objects_json(world, &private_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
@@ -211,6 +237,10 @@ int main()
     auto projected_locked_query = locked_query; projected_locked_query.state = &projected_locked;
     gua_query_world_objects_json(world, &projected_locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
     assert(std::string(query).find("\"door-a\"") != std::string::npos);
+    const gua_world_state_value_v1_t projected_missing { sizeof(gua_world_state_value_v1_t), "missing", GUA_WORLD_VALUE_NULL };
+    auto projected_missing_query = locked_query; projected_missing_query.state = &projected_missing;
+    gua_query_world_objects_json(world, &projected_missing_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"matches\":[]") != std::string::npos);
 
     // Player projection must be independent of registration order while still requiring every ancestor to be public.
     assert(gua_begin_world_frame(world, "reverse-order") == 1);
@@ -312,6 +342,76 @@ int main()
         assert(std::string(query).find("\"valid\":false") != std::string::npos);
     }
     gua_destroy_context(atomic_world);
+
+    // Versioned descriptors must attach each policy to the node/object registered by the same call.
+    gua_context_t* concurrent_policy = gua_create_context();
+    constexpr int concurrent_policy_count = 64;
+    std::vector<int> registration_results(concurrent_policy_count);
+    std::atomic<int> registration_ready { 0 };
+    std::atomic<bool> registration_start { false };
+    std::vector<std::thread> registration_threads;
+    gua_begin_frame(concurrent_policy, "concurrent-policy");
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        registration_threads.emplace_back([&, index] {
+            const std::string id = "ui-policy-" + std::to_string(index);
+            const gua_node_descriptor_v2_t base { sizeof(gua_node_descriptor_v2_t), 0, id.c_str(), nullptr,
+                "button", id.c_str(), nullptr, nullptr, { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+            const gua_node_descriptor_v3_t detail { sizeof(gua_node_descriptor_v3_t), base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+            const gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t),
+                index % 2 == 0 ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO, 0, 0, nullptr, 0 };
+            const gua_node_descriptor_v4_t descriptor { sizeof(gua_node_descriptor_v4_t), detail, policy };
+            ++registration_ready;
+            while (!registration_start.load()) std::this_thread::yield();
+            registration_results[index] = gua_register_node_v4(concurrent_policy, &descriptor);
+        });
+    }
+    while (registration_ready.load() != concurrent_policy_count) std::this_thread::yield();
+    registration_start = true;
+    for (auto& thread : registration_threads) thread.join();
+    for (const int result : registration_results) assert(result == 1);
+    gua_end_frame(concurrent_policy);
+    int concurrent_size = gua_copy_ui_tree_json_for_profile(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> concurrent_json(static_cast<std::size_t>(concurrent_size));
+    gua_copy_ui_tree_json_for_profile(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, concurrent_json.data(), concurrent_size);
+    const std::string concurrent_ui_json = concurrent_json.data();
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        const std::string id = "\"id\":\"ui-policy-" + std::to_string(index) + "\"";
+        assert((concurrent_ui_json.find(id) != std::string::npos) == (index % 2 != 0));
+    }
+
+    registration_results.assign(concurrent_policy_count, 0);
+    registration_ready = 0;
+    registration_start = false;
+    registration_threads.clear();
+    assert(gua_begin_world_frame(concurrent_policy, "concurrent-policy") == 1);
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        registration_threads.emplace_back([&, index] {
+            const std::string id = "world-policy-" + std::to_string(index);
+            const gua_world_object_descriptor_v1_t base { sizeof(gua_world_object_descriptor_v1_t), id.c_str(), nullptr,
+                "item", id.c_str(), nullptr, GUA_WORLD_SPACE_2D, static_cast<double>(index), 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO,
+                nullptr, nullptr, nullptr, 0, nullptr, 0 };
+            const gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t),
+                index % 2 == 0 ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO, 0, 0, nullptr, 0 };
+            const gua_world_object_descriptor_v2_t descriptor { sizeof(gua_world_object_descriptor_v2_t), base, policy };
+            ++registration_ready;
+            while (!registration_start.load()) std::this_thread::yield();
+            registration_results[index] = gua_register_world_object_v2(concurrent_policy, &descriptor);
+        });
+    }
+    while (registration_ready.load() != concurrent_policy_count) std::this_thread::yield();
+    registration_start = true;
+    for (auto& thread : registration_threads) thread.join();
+    for (const int result : registration_results) assert(result == 1);
+    assert(gua_end_world_frame(concurrent_policy) == 1);
+    concurrent_size = gua_copy_world_object_tree_json(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    concurrent_json.resize(static_cast<std::size_t>(concurrent_size));
+    gua_copy_world_object_tree_json(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, concurrent_json.data(), concurrent_size);
+    const std::string concurrent_world_json = concurrent_json.data();
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        const std::string id = "\"id\":\"world-policy-" + std::to_string(index) + "\"";
+        assert((concurrent_world_json.find(id) != std::string::npos) == (index % 2 != 0));
+    }
+    gua_destroy_context(concurrent_policy);
 
     // Deep parent chains validate in one graph traversal rather than repeatedly scanning every ancestor.
     gua_context_t* deep_world = gua_create_context();

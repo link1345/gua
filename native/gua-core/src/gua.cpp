@@ -370,6 +370,21 @@ bool valid_rule_mode(std::string_view path, int mode, int replacement_type, bool
     return replacement_type == (numeric ? GUA_WORLD_VALUE_NUMBER : GUA_WORLD_VALUE_STRING);
 }
 
+bool replacement_number_fits(std::string_view path, double value, bool world)
+{
+    if (world || (!path.starts_with("bounds.") && !path.starts_with("state."))) return true;
+    if (path.starts_with("bounds.")) {
+        return value >= -static_cast<double>(std::numeric_limits<float>::max()) &&
+            value <= static_cast<double>(std::numeric_limits<float>::max());
+    }
+    const auto key = path.substr(6);
+    if (key == "caretPosition" || key == "selectionStart" || key == "selectionEnd" || key == "selectedIndex") {
+        return value >= static_cast<double>(std::numeric_limits<long long>::lowest()) &&
+            value < static_cast<double>(std::numeric_limits<long long>::max());
+    }
+    return true;
+}
+
 bool copy_agent_policy(const gua_agent_policy_v1_t& source, AgentPolicy& target, bool world)
 {
     if (source.struct_size < sizeof(gua_agent_policy_v1_t) ||
@@ -387,6 +402,8 @@ bool copy_agent_policy(const gua_agent_policy_v1_t& source, AgentPolicy& target,
             rule.mode < GUA_AGENT_FIELD_KEEP || rule.mode > GUA_AGENT_FIELD_QUANTIZE || !valid_rule_mode(rule.path, rule.mode, rule.replacement_type, world) ||
             (rule.mode == GUA_AGENT_FIELD_REPLACE && rule.replacement_type == GUA_WORLD_VALUE_STRING && rule.string_value == nullptr) ||
             (rule.mode == GUA_AGENT_FIELD_REPLACE && rule.replacement_type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(rule.number_value)) ||
+            (rule.mode == GUA_AGENT_FIELD_REPLACE && rule.replacement_type == GUA_WORLD_VALUE_NUMBER &&
+                !replacement_number_fits(rule.path, rule.number_value, world)) ||
             (rule.mode == GUA_AGENT_FIELD_QUANTIZE && (!std::isfinite(rule.quantum) || rule.quantum <= 0.0))) return false;
         target.field_rules.push_back(AgentFieldRule { rule.path, rule.mode, rule.replacement_type,
             rule.string_value == nullptr ? "" : rule.string_value, rule.number_value,
@@ -672,6 +689,7 @@ std::vector<WorldObject> project_world_objects(const std::vector<WorldObject>& o
                     if (value != projected.state.end()) projected.state.erase(value);
                     continue;
                 }
+                if (value == projected.state.end() && rule.mode == GUA_AGENT_FIELD_QUANTIZE) continue;
                 if (value == projected.state.end()) { projected.state.push_back(WorldStateValue { key }); value = std::prev(projected.state.end()); }
                 if (rule.mode == GUA_AGENT_FIELD_REDACT) { value->type = GUA_WORLD_VALUE_STRING; value->string_value = "[redacted]"; }
                 else if (rule.mode == GUA_AGENT_FIELD_REPLACE) {
@@ -887,7 +905,7 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
     return required_size;
 }
 
-std::string build_semantic_snapshot_json(const std::string& screen, const std::vector<Node>& nodes)
+std::string build_semantic_snapshot_json(const std::string& screen, const std::vector<Node>& nodes, bool apply_action_policy)
 {
     std::string json = "{\"screen\":\"" + escape_json(screen) + "\",\"nodes\":[";
 
@@ -966,7 +984,7 @@ std::string build_semantic_snapshot_json(const std::string& screen, const std::v
         json += ",\"actions\":[";
         bool wrote_action = false;
         for (int action = GUA_ACTION_CLICK; action <= GUA_ACTION_PRESS_KEY; ++action) {
-            if (!node.enabled || !supports_action(node, action) || !policy_allows_action(node, action)) continue;
+            if (!node.enabled || !supports_action(node, action) || (apply_action_policy && !policy_allows_action(node, action))) continue;
             if (wrote_action) json += ",";
             json += "\"" + std::string(action_name(action)) + "\"";
             wrote_action = true;
@@ -980,7 +998,7 @@ std::string build_semantic_snapshot_json(const std::string& screen, const std::v
 
 std::string build_semantic_snapshot_json(const gua_context_t& ctx)
 {
-    return build_semantic_snapshot_json(ctx.screen, ctx.nodes);
+    return build_semantic_snapshot_json(ctx.screen, ctx.nodes, false);
 }
 
 std::string build_ui_tree_json(const gua_context_t& ctx)
@@ -995,7 +1013,7 @@ std::string build_ui_tree_json(const gua_context_t& ctx)
 std::string build_ui_tree_json(const gua_context_t& ctx, int profile)
 {
     const auto nodes = project_nodes(ctx.nodes, profile);
-    std::string semantic = build_semantic_snapshot_json(ctx.screen, nodes);
+    std::string semantic = build_semantic_snapshot_json(ctx.screen, nodes, profile == GUA_OBSERVATION_PROFILE_PLAYER);
     semantic.erase(semantic.begin());
     return "{\"schemaVersion\":2,\"sessionEpoch\":" + std::to_string(ctx.session_epoch) +
         ",\"frameSequence\":" + std::to_string(ctx.frame_sequence) +
@@ -1205,9 +1223,9 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
         ctx->frame_in_progress = false;
         return;
     }
-    const std::string semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, ctx->staging_nodes);
+    const std::string semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, ctx->staging_nodes, false);
     const std::string player_semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen,
-        project_nodes(ctx->staging_nodes, GUA_OBSERVATION_PROFILE_PLAYER));
+        project_nodes(ctx->staging_nodes, GUA_OBSERVATION_PROFILE_PLAYER), true);
     ctx->screen.swap(ctx->staging_screen);
     ctx->nodes.swap(ctx->staging_nodes);
     ctx->staging_nodes.clear();
@@ -1289,19 +1307,18 @@ extern "C" int gua_register_node_v2(gua_context_t* ctx, const gua_node_descripto
     return 1;
 }
 
-extern "C" int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor)
-{
-    if (ctx == nullptr) return 0;
+namespace {
 
-    const std::lock_guard lock(ctx->mutex);
-    if (!ctx->frame_in_progress || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v3_t) ||
+int register_node_v3_locked(gua_context_t& ctx, const gua_node_descriptor_v3_t* descriptor)
+{
+    if (!ctx.frame_in_progress || descriptor == nullptr || descriptor->struct_size < sizeof(gua_node_descriptor_v3_t) ||
         descriptor->base.struct_size < sizeof(gua_node_descriptor_v2_t) || descriptor->base.id == nullptr ||
         descriptor->base.role == nullptr) {
-        ctx->staging_valid = false;
+        ctx.staging_valid = false;
         return 0;
     }
     const auto& base = descriptor->base;
-    ctx->staging_nodes.push_back(Node {
+    ctx.staging_nodes.push_back(Node {
         base.id,
         base.role,
         base.label != nullptr ? base.label : "",
@@ -1318,12 +1335,21 @@ extern "C" int gua_register_node_v3(gua_context_t* ctx, const gua_node_descripto
         base.checked != 0,
         base.selected != 0,
     });
-    Node& node = ctx->staging_nodes.back();
+    Node& node = ctx.staging_nodes.back();
     node.caret_position = descriptor->caret_position; node.selection_start = descriptor->selection_start; node.selection_end = descriptor->selection_end;
     node.scroll_x = descriptor->scroll_x; node.scroll_y = descriptor->scroll_y; node.scroll_max_x = descriptor->scroll_max_x; node.scroll_max_y = descriptor->scroll_max_y;
     node.range_value = descriptor->range_value; node.range_min = descriptor->range_min; node.range_max = descriptor->range_max;
     node.selected_index = descriptor->selected_index;
     return 1;
+}
+
+} // namespace
+
+extern "C" int gua_register_node_v3(gua_context_t* ctx, const gua_node_descriptor_v3_t* descriptor)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    return register_node_v3_locked(*ctx, descriptor);
 }
 
 extern "C" int gua_register_node_v4(gua_context_t* ctx, const gua_node_descriptor_v4_t* descriptor)
@@ -1335,9 +1361,8 @@ extern "C" int gua_register_node_v4(gua_context_t* ctx, const gua_node_descripto
         if (ctx->frame_in_progress) ctx->staging_valid = false;
         return 0;
     }
-    if (gua_register_node_v3(ctx, &descriptor->base) == 0) return 0;
     const std::lock_guard lock(ctx->mutex);
-    if (ctx->staging_nodes.empty()) { ctx->staging_valid = false; return 0; }
+    if (register_node_v3_locked(*ctx, &descriptor->base) == 0) return 0;
     ctx->staging_nodes.back().agent_policy = std::move(policy);
     return 1;
 }
@@ -1831,12 +1856,12 @@ extern "C" int gua_begin_world_frame(gua_context_t* ctx, const char* scene)
     return 1;
 }
 
-extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor)
+namespace {
+
+int register_world_object_v1_locked(gua_context_t& ctx, const gua_world_object_descriptor_v1_t* descriptor)
 {
-    if (ctx == nullptr) return 0;
-    const std::lock_guard lock(ctx->mutex);
     if (descriptor == nullptr || descriptor->struct_size < sizeof(gua_world_object_descriptor_v1_t)) {
-        if (ctx->world_frame_in_progress) ctx->staging_world_valid = false;
+        if (ctx.world_frame_in_progress) ctx.staging_world_valid = false;
         return 0;
     }
     const auto valid_kind = [](const char* kind) {
@@ -1846,7 +1871,7 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
         }
         return true;
     };
-    if (!ctx->world_frame_in_progress || !ctx->staging_world_valid || descriptor->id == nullptr || descriptor->id[0] == '\0' ||
+    if (!ctx.world_frame_in_progress || !ctx.staging_world_valid || descriptor->id == nullptr || descriptor->id[0] == '\0' ||
         (descriptor->parent_id != nullptr && descriptor->parent_id[0] == '\0') ||
         (descriptor->domain_id != nullptr && descriptor->domain_id[0] == '\0') ||
         (descriptor->related_ui_node_id != nullptr && descriptor->related_ui_node_id[0] == '\0') ||
@@ -1856,11 +1881,11 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
         (descriptor->agent_exposure != GUA_AGENT_EXPOSURE_AUTO && descriptor->agent_exposure != GUA_AGENT_EXPOSURE_PRIVATE) ||
         (descriptor->tag_count != 0 && descriptor->tags == nullptr) ||
         (descriptor->state_value_count != 0 && descriptor->state_values == nullptr)) {
-        ctx->staging_world_valid = false;
+        ctx.staging_world_valid = false;
         return 0;
     }
-    if (std::any_of(ctx->staging_world_objects.begin(), ctx->staging_world_objects.end(), [&](const auto& object) { return object.id == descriptor->id; })) {
-        ctx->staging_world_valid = false;
+    if (std::any_of(ctx.staging_world_objects.begin(), ctx.staging_world_objects.end(), [&](const auto& object) { return object.id == descriptor->id; })) {
+        ctx.staging_world_valid = false;
         return 0;
     }
     WorldObject object;
@@ -1878,7 +1903,7 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
     object.related_ui_node_id = descriptor->related_ui_node_id == nullptr ? "" : descriptor->related_ui_node_id;
     std::unordered_set<std::string> unique;
     for (uint32_t i = 0; i < descriptor->tag_count; ++i) {
-        if (descriptor->tags[i] == nullptr || descriptor->tags[i][0] == '\0' || !unique.insert(descriptor->tags[i]).second) { ctx->staging_world_valid = false; return 0; }
+        if (descriptor->tags[i] == nullptr || descriptor->tags[i][0] == '\0' || !unique.insert(descriptor->tags[i]).second) { ctx.staging_world_valid = false; return 0; }
         object.tags.emplace_back(descriptor->tags[i]);
     }
     unique.clear();
@@ -1888,7 +1913,7 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
             value.type < GUA_WORLD_VALUE_NULL || value.type > GUA_WORLD_VALUE_BOOLEAN ||
             (value.type == GUA_WORLD_VALUE_STRING && value.string_value == nullptr) ||
             (value.type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(value.number_value)) || !unique.insert(value.key).second) {
-            ctx->staging_world_valid = false; return 0;
+            ctx.staging_world_valid = false; return 0;
         }
         object.state.push_back(WorldStateValue { value.key, value.type, value.string_value == nullptr ? "" : value.string_value,
             value.number_value, value.bool_value != 0 });
@@ -1896,8 +1921,17 @@ extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_
     std::sort(object.state.begin(), object.state.end(), [](const auto& left, const auto& right) {
         return left.key < right.key;
     });
-    ctx->staging_world_objects.push_back(std::move(object));
+    ctx.staging_world_objects.push_back(std::move(object));
     return 1;
+}
+
+} // namespace
+
+extern "C" int gua_register_world_object_v1(gua_context_t* ctx, const gua_world_object_descriptor_v1_t* descriptor)
+{
+    if (ctx == nullptr) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    return register_world_object_v1_locked(*ctx, descriptor);
 }
 
 extern "C" int gua_register_world_object_v2(gua_context_t* ctx, const gua_world_object_descriptor_v2_t* descriptor)
@@ -1911,9 +1945,8 @@ extern "C" int gua_register_world_object_v2(gua_context_t* ctx, const gua_world_
     }
     auto base = descriptor->base;
     base.agent_exposure = policy.exposure;
-    if (gua_register_world_object_v1(ctx, &base) == 0) return 0;
     const std::lock_guard lock(ctx->mutex);
-    if (ctx->staging_world_objects.empty()) { ctx->staging_world_valid = false; return 0; }
+    if (register_world_object_v1_locked(*ctx, &base) == 0) return 0;
     ctx->staging_world_objects.back().agent_policy = std::move(policy);
     ctx->staging_world_objects.back().agent_exposure = ctx->staging_world_objects.back().agent_policy.exposure;
     return 1;
@@ -2109,7 +2142,10 @@ extern "C" int gua_enqueue_action_for_profile(gua_context_t* ctx, const gua_acti
 		}
         if (!node->visible) return GUA_ACTION_ERROR_HIDDEN;
         if (!node->enabled) return GUA_ACTION_ERROR_DISABLED;
-        if (!supports_action(*node, descriptor->action) || !policy_allows_action(*node, descriptor->action)) return GUA_ACTION_ERROR_UNSUPPORTED;
+        if (!supports_action(*node, descriptor->action) ||
+            (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && !policy_allows_action(*node, descriptor->action))) {
+            return GUA_ACTION_ERROR_UNSUPPORTED;
+        }
     }
 
     const unsigned long long request_id = ctx->next_request_id++;
@@ -2146,7 +2182,8 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
         const int error_code = node == authorized.end() ? GUA_ACTION_ERROR_NODE_NOT_FOUND
             : !node->visible ? GUA_ACTION_ERROR_HIDDEN
             : !node->enabled ? GUA_ACTION_ERROR_DISABLED
-            : !supports_action(*node, value.action) || !policy_allows_action(*node, value.action) ? GUA_ACTION_ERROR_UNSUPPORTED
+            : !supports_action(*node, value.action) ||
+                (value.observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && !policy_allows_action(*node, value.action)) ? GUA_ACTION_ERROR_UNSUPPORTED
             : GUA_ACTION_ACCEPTED;
         if (error_code != GUA_ACTION_ACCEPTED) {
             ctx->action_requests.erase(request);
