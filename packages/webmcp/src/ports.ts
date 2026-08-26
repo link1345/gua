@@ -57,7 +57,9 @@ async function invoke(port: GuaInPagePort, command: GuaInPageCommand, options?: 
 function parseTree(value: unknown): GuaUiTree {
   const parsed = parseJson(value);
   const record = asRecord(parsed);
-  if (!record || typeof record.screen !== "string" || !Array.isArray(record.nodes)) {
+  if (!record || !hasOnlyProperties(record, treeProperties) ||
+      typeof record.screen !== "string" || record.screen.length === 0 ||
+      !Array.isArray(record.nodes) || !record.nodes.every(isProtocolNode)) {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
   }
   const hasMetadata = record.schemaVersion !== undefined || record.sessionEpoch !== undefined ||
@@ -73,6 +75,89 @@ function parseTree(value: unknown): GuaUiTree {
     throw new GuaWebError("invalid_request", "The engine returned an invalid protocol UI tree.");
   }
   return parsed as GuaUiTree;
+}
+
+const treeProperties = new Set(["schemaVersion", "sessionEpoch", "frameSequence", "revision", "screen", "nodes"]);
+const nodeProperties = new Set([
+  "id", "parentId", "role", "label", "text", "value", "visible", "enabled", "bounds", "state", "actions",
+]);
+const boundProperties = new Set(["x", "y", "w", "h"]);
+const stateProperties = new Set([
+  "focused", "hovered", "pressed", "checked", "selected", "caretPosition", "selectionStart", "selectionEnd",
+  "scrollX", "scrollY", "scrollMaxX", "scrollMaxY", "rangeValue", "rangeMin", "rangeMax", "selectedIndex", "value",
+]);
+const nodeRoles = new Set([
+  "button", "text", "image", "checkbox", "radio", "slider", "textbox", "list", "listitem", "panel", "screen",
+  "dialog", "menu", "menuitem", "combobox", "tablist", "tab", "scrollarea",
+]);
+const nodeActions = new Set(["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"]);
+
+function isProtocolNode(value: unknown): boolean {
+  const node = asRecord(value);
+  const bounds = asRecord(node?.bounds);
+  if (!node || !hasOnlyProperties(node, nodeProperties) ||
+      !isNonEmptyString(node.id) || !isOptionalNonEmptyString(node.parentId) ||
+      typeof node.role !== "string" || !nodeRoles.has(node.role) ||
+      !isOptionalString(node.label) || !isOptionalString(node.text) || !isOptionalProtocolValue(node.value) ||
+      typeof node.visible !== "boolean" || typeof node.enabled !== "boolean" ||
+      !bounds || !hasOnlyProperties(bounds, boundProperties) ||
+      !isFiniteNumber(bounds.x) || !isFiniteNumber(bounds.y) ||
+      !isNonNegativeNumber(bounds.w) || !isNonNegativeNumber(bounds.h) ||
+      !isProtocolState(node.state) || !Array.isArray(node.actions) ||
+      !node.actions.every(action => typeof action === "string" && nodeActions.has(action)) ||
+      new Set(node.actions).size !== node.actions.length) {
+    return false;
+  }
+  return true;
+}
+
+function isProtocolState(value: unknown): boolean {
+  if (value === undefined) return true;
+  const state = asRecord(value);
+  if (!state || !hasOnlyProperties(state, stateProperties)) return false;
+  for (const key of ["focused", "hovered", "pressed", "checked", "selected"]) {
+    if (state[key] !== undefined && typeof state[key] !== "boolean") return false;
+  }
+  for (const key of ["caretPosition", "selectionStart", "selectionEnd"]) {
+    if (state[key] !== undefined && (!Number.isInteger(state[key]) || (state[key] as number) < 0)) return false;
+  }
+  for (const key of ["scrollX", "scrollY", "rangeValue", "rangeMin", "rangeMax"]) {
+    if (state[key] !== undefined && !isFiniteNumber(state[key])) return false;
+  }
+  for (const key of ["scrollMaxX", "scrollMaxY"]) {
+    if (state[key] !== undefined && !isNonNegativeNumber(state[key])) return false;
+  }
+  if (state.selectedIndex !== undefined &&
+      (!Number.isInteger(state.selectedIndex) || (state.selectedIndex as number) < -1)) return false;
+  return isOptionalProtocolValue(state.value);
+}
+
+function hasOnlyProperties(record: Record<string, unknown>, allowed: Set<string>): boolean {
+  return Object.keys(record).every(key => allowed.has(key));
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isOptionalNonEmptyString(value: unknown): boolean {
+  return value === undefined || isNonEmptyString(value);
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonNegativeNumber(value: unknown): boolean {
+  return isFiniteNumber(value) && value >= 0;
+}
+
+function isOptionalProtocolValue(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string" || typeof value === "boolean" || isFiniteNumber(value);
 }
 
 function parseCompletion(value: unknown): GuaWebActionCompletion {
@@ -100,7 +185,7 @@ function parseJson(value: unknown): unknown {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" ? value as Record<string, unknown> : undefined;
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function isErrorCode(value: string): value is GuaWebError["code"] {

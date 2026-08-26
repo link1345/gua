@@ -383,7 +383,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             }
             catch (Exception error)
             {
-                var message = $"Unity action {request.RequestId} ({request.Action}, node='{request.NodeId ?? "<null>"}') failed: {error.Message}";
+                var detail = request.Sensitive ? "[redacted]" : error.Message;
+                var message = $"Unity action {request.RequestId} ({request.Action}, node='{request.NodeId ?? "<null>"}') failed: {detail}";
                 runtime.AddLog(3, message);
                 Debug.LogError(message);
                 runtime.EmitActionResult(request, false, GuaActionError.InvalidValue);

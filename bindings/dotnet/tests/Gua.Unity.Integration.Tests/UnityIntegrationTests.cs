@@ -165,6 +165,18 @@ public sealed class UnityIntegrationTests
         Assert.That(invalidResult.Succeeded, Is.False);
         Assert.That(invalidResult.Error, Is.EqualTo(GuaActionError.InvalidValue));
 
+        const string exceptionSecret = "unity-exception-secret";
+        var throwingError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "throwing-input", exceptionSecret, Sensitive: true),
+            out var throwingRequestId);
+        Assert.That(throwingError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, throwingRequestId, out var throwingResult), Is.True);
+        Assert.That(throwingResult.Succeeded, Is.False);
+        Assert.That(throwingResult.Error, Is.EqualTo(GuaActionError.InvalidValue));
+        var sensitiveDiagnostics = host.RemoteContext.GetDiagnosticsJson();
+        Assert.That(sensitiveDiagnostics, Does.Not.Contain(exceptionSecret));
+        Assert.That(sensitiveDiagnostics, Does.Contain("[redacted]"));
+
         var keyError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.PressKey, "sample-input", Key: "A", Modifiers: 1), out var keyRequestId);
         Assert.That(keyError, Is.EqualTo(GuaActionError.None));
         Assert.That(WaitForActionEvent(host, keyRequestId, out var keyResult), Is.True);

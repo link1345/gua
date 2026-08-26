@@ -406,6 +406,25 @@ describe("Gua same-page engine port", () => {
     }
   });
 
+  test("rejects malformed nodes before exposing a protocol tree", async () => {
+    const valid = button();
+    for (const invalidNode of [
+      { ...valid, actions: null },
+      { id: "start", visible: true, enabled: true, actions: [] },
+      { ...valid, bounds: { x: 0, y: 0, w: -1, h: 10 } },
+      { ...valid, actions: ["click", "click"] },
+      { ...valid, state: { selectedIndex: -2 } },
+      { ...valid, state: [] },
+      { ...valid, unexpected: true },
+    ]) {
+      const bridge = createGuaInPageBridge({ invoke: async () => ({ ...tree(), nodes: [invalidNode] }) });
+      await expect(bridge.getUiTree()).rejects.toMatchObject({ code: "invalid_request" });
+    }
+
+    const legacyBridge = createGuaInPageBridge({ invoke: async () => ({ screen: "legacy", nodes: [{ ...valid, actions: null }] }) });
+    await expect(legacyBridge.getUiTree()).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   test("resolves replacement Godot and Unity global ports for every call", async () => {
     for (const [portName, createBridge] of [
       ["__guaTestGodotPort", createGodotWebBridge],

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Gua.Core;
 using Gua.Unity;
 using TMPro;
 using UnityEngine;
@@ -19,6 +20,7 @@ public static class GuaUnityFixture
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Build()
     {
+        GuaUnityAdapterRegistry.Register(new GuaUnityThrowingAdapter());
         Application.runInBackground = true;
         Application.targetFrameRate = 60;
         Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
@@ -112,6 +114,10 @@ public static class GuaUnityFixture
         sensitiveInput.textComponent = sensitiveInputText;
         sensitiveInput.text = "private";
         sensitiveInput.caretPosition = sensitiveInput.text.Length;
+
+        var throwingInputObject = new GameObject("ThrowingInput", typeof(RectTransform), typeof(GuaId), typeof(GuaUnityThrowingControl));
+        throwingInputObject.transform.SetParent(coverage.transform, false);
+        throwingInputObject.GetComponent<GuaId>().Value = "throwing-input";
 
         var sliderRect = Rect("SampleSlider", coverage.transform, new Vector2(-420, 200), new Vector2(220, 32));
         sliderRect.gameObject.AddComponent<GuaId>().Value = "sample-slider";
@@ -251,6 +257,36 @@ public static class GuaUnityFixture
         rect.anchorMax = Vector2.one;
         rect.offsetMin = Vector2.zero;
         rect.offsetMax = Vector2.zero;
+    }
+}
+
+public sealed class GuaUnityThrowingControl : MonoBehaviour { }
+
+public sealed class GuaUnityThrowingAdapter : IGuaUnityControlAdapter
+{
+    public bool TryDescribe(Transform transform, out object target, out string role, out string label, out string value)
+    {
+        var control = transform.GetComponent<GuaUnityThrowingControl>();
+        if (control != null)
+        {
+            target = control;
+            role = "textbox";
+            label = "throwing-input";
+            value = "unchanged";
+            return true;
+        }
+        target = null;
+        role = null;
+        label = null;
+        value = null;
+        return false;
+    }
+
+    public bool TryApply(object target, GuaActionRequest request, out string value)
+    {
+        value = null;
+        if (target is not GuaUnityThrowingControl || request.Action != GuaActionType.SetValue) return false;
+        throw new InvalidOperationException("Rejected sensitive value: " + request.Value);
     }
 }
 
