@@ -131,7 +131,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         if (envelope.command.type == "get_world_object_tree")
         {
-            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetWorldObjectTreeJson(), 0);
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetPlayerWorldObjectTreeJson(), 0);
             return;
         }
         if (envelope.command.type == "query_world_objects")
@@ -141,7 +141,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 ResolveWebError(envelope.callId, "invalid_request", error);
                 return;
             }
-            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.QueryWorldObjectsJson(selector), 0);
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.QueryPlayerWorldObjectsJson(selector), 0);
             return;
         }
         if (envelope.command.type != "perform_action" || envelope.command.request == null)
@@ -498,14 +498,15 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         foreach (var action in SupportedActions(pair.Value.Role))
         while (runtime!.TryConsumeAction(action, pair.Key, out var request))
         {
+            var resultRequest = ProtectSensitiveResult(request, pair.Key, pair.Value.Value);
             if (!pair.Value.Visible)
             {
-                runtime.EmitActionResult(request, false, GuaActionError.Hidden);
+                runtime.EmitActionResult(resultRequest, false, GuaActionError.Hidden);
                 continue;
             }
             if (!pair.Value.Enabled)
             {
-                runtime.EmitActionResult(request, false, GuaActionError.Disabled);
+                runtime.EmitActionResult(resultRequest, false, GuaActionError.Disabled);
                 continue;
             }
             var suppressObservedClick = request.Action == GuaActionType.Click && clickTargetIds.ContainsKey(pair.Value.Value);
@@ -515,17 +516,19 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 var success = Apply(pair.Value.Value, request, out var resultValue, out var failure);
                 if (success && request.Action == GuaActionType.SetValue && request.Sensitive)
                     MarkSensitive(pair.Key, pair.Value.Value);
-                runtime.EmitActionResult(request, success, success ? GuaActionError.None : failure, resultValue);
+                resultRequest = ProtectSensitiveResult(request, pair.Key, pair.Value.Value);
+                runtime.EmitActionResult(resultRequest, success, success ? GuaActionError.None : failure, resultValue);
             }
             catch (Exception error)
             {
                 if (request.Action == GuaActionType.SetValue && request.Sensitive)
                     MarkSensitive(pair.Key, pair.Value.Value);
-                var detail = request.Sensitive ? "[redacted]" : error.Message;
+                resultRequest = ProtectSensitiveResult(request, pair.Key, pair.Value.Value);
+                var detail = resultRequest.Sensitive ? "[redacted]" : error.Message;
                 var message = $"Unity action {request.RequestId} ({request.Action}, node='{request.NodeId ?? "<null>"}') failed: {detail}";
                 runtime.AddLog(3, message);
                 Debug.LogError(message);
-                runtime.EmitActionResult(request, false, GuaActionError.InvalidValue);
+                runtime.EmitActionResult(resultRequest, false, GuaActionError.InvalidValue);
             }
             finally
             {
@@ -534,13 +537,15 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         while (runtime!.TryConsumeAction(GuaActionType.PressKey, null, out var global))
         {
-            var focused = targets.Values.FirstOrDefault(target => IsFrameFocused(target.Value));
+            var focused = targets.FirstOrDefault(pair => IsFrameFocused(pair.Value.Value));
+            var focusedTarget = focused.Value;
             string? value = null;
             var failure = GuaActionError.Unsupported;
-            if (focused != null && !focused.Visible) failure = GuaActionError.Hidden;
-            else if (focused != null && !focused.Enabled) failure = GuaActionError.Disabled;
-            var ok = focused != null && focused.Visible && focused.Enabled && Apply(focused.Value, global, out value, out failure);
-            runtime.EmitActionResult(global, ok, ok ? GuaActionError.None : failure, value);
+            if (focusedTarget != null && !focusedTarget.Visible) failure = GuaActionError.Hidden;
+            else if (focusedTarget != null && !focusedTarget.Enabled) failure = GuaActionError.Disabled;
+            var ok = focusedTarget != null && focusedTarget.Visible && focusedTarget.Enabled && Apply(focusedTarget.Value, global, out value, out failure);
+            var resultRequest = focusedTarget == null ? global : ProtectSensitiveResult(global, focused.Key, focusedTarget.Value);
+            runtime.EmitActionResult(resultRequest, ok, ok ? GuaActionError.None : failure, value);
         }
     }
 
@@ -566,6 +571,11 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         sensitiveTargetIds.Add(id);
         sensitiveTargets.GetValue(target, static _ => new SensitiveTarget());
     }
+
+    private GuaActionRequest ProtectSensitiveResult(GuaActionRequest request, string id, object target) =>
+        request.Sensitive || sensitiveTargetIds.Contains(id) || sensitiveTargets.TryGetValue(target, out _)
+            ? request with { Sensitive = true }
+            : request;
 
     private void EmitObservedClick(object target)
     {

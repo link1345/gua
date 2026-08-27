@@ -331,7 +331,10 @@ bool GuaContext::register_world_object(const Dictionary& source)
 bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }
 bool GuaContext::abort_world_frame() { return gua_runtime_abort_world_frame(runtime_) != 0; }
 String GuaContext::get_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_world_object_tree_json); }
-String GuaContext::query_world_objects_json(const Dictionary& source) const
+String GuaContext::get_player_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_player_world_object_tree_json); }
+String GuaContext::query_world_objects_json(const Dictionary& source) const { return query_world_objects_json_with_projection(source, false); }
+String GuaContext::query_player_world_objects_json(const Dictionary& source) const { return query_world_objects_json_with_projection(source, true); }
+String GuaContext::query_world_objects_json_with_projection(const Dictionary& source, bool player_projection) const
 {
     const String id = source.get("id", String()), kind = source.get("kind", String()), label = source.get("label", String());
     const String tag = source.get("tag", String()), parent = source.get("parent_id", String()), state_key = source.get("state_key", String());
@@ -365,10 +368,11 @@ String GuaContext::query_world_objects_json(const Dictionary& source) const
         tag.is_empty() ? nullptr : tag8.get_data(), GUA_MATCH_EXACT,
         parent.is_empty() ? nullptr : parent8.get_data(), direct_child != 0 ? 1 : 0, visible, active, state_pointer,
     };
-    int required = gua_runtime_query_world_objects_json(runtime_, &selector, nullptr, 0);
+    const auto query = player_projection ? gua_runtime_query_player_world_objects_json : gua_runtime_query_world_objects_json;
+    int required = query(runtime_, &selector, nullptr, 0);
     if (required <= 0) return "{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}";
     std::vector<char> json(static_cast<std::size_t>(required));
-    required = gua_runtime_query_world_objects_json(runtime_, &selector, json.data(), static_cast<int>(json.size()));
+    required = query(runtime_, &selector, json.data(), static_cast<int>(json.size()));
     return required > 0 ? String::utf8(json.data()) : String("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}");
 }
 void GuaContext::enable_world_object_tree_adapter() { gua_runtime_set_world_object_tree_enabled(runtime_, 1); }
@@ -652,6 +656,8 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("abort_world_frame"), &GuaContext::abort_world_frame);
     ClassDB::bind_method(D_METHOD("get_world_object_tree_json"), &GuaContext::get_world_object_tree_json);
     ClassDB::bind_method(D_METHOD("query_world_objects_json", "selector"), &GuaContext::query_world_objects_json);
+    ClassDB::bind_method(D_METHOD("get_player_world_object_tree_json"), &GuaContext::get_player_world_object_tree_json);
+    ClassDB::bind_method(D_METHOD("query_player_world_objects_json", "selector"), &GuaContext::query_player_world_objects_json);
     ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);

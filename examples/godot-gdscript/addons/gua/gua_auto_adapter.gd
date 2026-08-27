@@ -48,6 +48,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"abort_world_frame",
 	"get_world_object_tree_json",
 	"query_world_objects_json",
+	"get_player_world_object_tree_json",
+	"query_player_world_objects_json",
 	"enable_world_object_tree_adapter",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
@@ -324,6 +326,18 @@ func query_world_objects_json(selector: Dictionary) -> String:
 	if not _ensure_context():
 		return ""
 	return context.query_world_objects_json(selector)
+
+
+func get_player_world_object_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+	return context.get_player_world_object_tree_json()
+
+
+func query_player_world_objects_json(selector: Dictionary) -> String:
+	if not _ensure_context():
+		return ""
+	return context.query_player_world_objects_json(selector)
 
 
 func enqueue_click(id: String) -> bool:

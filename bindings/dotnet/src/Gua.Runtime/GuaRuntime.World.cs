@@ -71,15 +71,22 @@ public sealed partial class GuaRuntime
         return number;
     }
 
-    public unsafe string GetWorldObjectTreeJson()
+    public string GetWorldObjectTreeJson() => GetWorldObjectTreeJson(playerProjection: false);
+    public string GetPlayerWorldObjectTreeJson() => GetWorldObjectTreeJson(playerProjection: true);
+
+    private unsafe string GetWorldObjectTreeJson(bool playerProjection)
     {
         ThrowIfDisposed();
-        var required = Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
+        var required = playerProjection
+            ? Native.gua_runtime_copy_player_world_object_tree_json(_handle, null, 0)
+            : Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
         if (required <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
         while (true) {
             var bytes = new byte[required];
             fixed (byte* output = bytes) {
-                var actual = Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length);
+                var actual = playerProjection
+                    ? Native.gua_runtime_copy_player_world_object_tree_json(_handle, output, bytes.Length)
+                    : Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length);
                 if (actual <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
                 if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
                 required = actual;
@@ -87,18 +94,25 @@ public sealed partial class GuaRuntime
         }
     }
 
-    public unsafe string QueryWorldObjectsJson(GuaWorldSelector selector)
+    public string QueryWorldObjectsJson(GuaWorldSelector selector) => QueryWorldObjectsJson(selector, playerProjection: false);
+    public string QueryPlayerWorldObjectsJson(GuaWorldSelector selector) => QueryWorldObjectsJson(selector, playerProjection: true);
+
+    private unsafe string QueryWorldObjectsJson(GuaWorldSelector selector, bool playerProjection)
     {
         ThrowIfDisposed();
         if (selector is null) throw new ArgumentNullException(nameof(selector));
         using var native = new RuntimeWorldSelector(selector);
         var value = native.Value;
-        var required = Native.gua_runtime_query_world_objects_json(_handle, in value, null, 0);
+        var required = playerProjection
+            ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, null, 0)
+            : Native.gua_runtime_query_world_objects_json(_handle, in value, null, 0);
         if (required <= 0) throw new InvalidOperationException("World object query is unavailable.");
         while (true) {
             var bytes = new byte[required];
             fixed (byte* output = bytes) {
-                var actual = Native.gua_runtime_query_world_objects_json(_handle, in value, output, bytes.Length);
+                var actual = playerProjection
+                    ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, output, bytes.Length)
+                    : Native.gua_runtime_query_world_objects_json(_handle, in value, output, bytes.Length);
                 if (actual <= 0) throw new InvalidOperationException("World object query is unavailable.");
                 if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
                 required = actual;

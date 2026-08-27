@@ -84,6 +84,32 @@ public sealed class UnityIntegrationTests
         Assert.That(WaitForRedactedNode(host, "sensitive-input", sensitiveValue), Is.True,
             "Sensitive Unity controls must omit their plaintext from semantic snapshots.");
 
+        var sensitiveKeyError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.PressKey, "sensitive-input", Key: "A"),
+            out var sensitiveKeyRequestId);
+        Assert.That(sensitiveKeyError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveKeyRequestId, out var sensitiveKeyResult), Is.True);
+        Assert.That(sensitiveKeyResult.Succeeded, Is.True, $"Sensitive uGUI press_key failed: {sensitiveKeyResult.Error}");
+        Assert.That(sensitiveKeyResult.Sensitive, Is.True);
+        Assert.That(sensitiveKeyResult.Value, Is.Empty,
+            "Actions on a previously classified sensitive target must not return its plaintext.");
+
+        var sensitiveFocusError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.Focus, "sensitive-input"),
+            out var sensitiveFocusRequestId);
+        Assert.That(sensitiveFocusError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveFocusRequestId, out var sensitiveFocusResult), Is.True);
+        Assert.That(sensitiveFocusResult.Sensitive, Is.True);
+        var focusedSensitiveKeyError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.PressKey, Key: "B"),
+            out var focusedSensitiveKeyRequestId);
+        Assert.That(focusedSensitiveKeyError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, focusedSensitiveKeyRequestId, out var focusedSensitiveKeyResult), Is.True);
+        Assert.That(focusedSensitiveKeyResult.Succeeded, Is.True, $"Focused sensitive uGUI press_key failed: {focusedSensitiveKeyResult.Error}");
+        Assert.That(focusedSensitiveKeyResult.Sensitive, Is.True);
+        Assert.That(focusedSensitiveKeyResult.Value, Is.Empty,
+            "Focused actions on a sensitive target must not return its plaintext.");
+
         const string detachedSensitiveValue = "unity-detached-secret";
         Assert.That(WaitForNode(host, "textbox", "detached-sensitive-input", out var detachedSensitiveId), Is.True,
             "The UI Toolkit fixture did not publish its detachable sensitive control.");

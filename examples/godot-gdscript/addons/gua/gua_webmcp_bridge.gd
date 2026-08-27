@@ -197,7 +197,7 @@ func _get_world_tree(_arguments: Array) -> String:
 	var adapter := _adapter()
 	if adapter == null:
 		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	return adapter.get_world_object_tree_json()
+	return adapter.get_player_world_object_tree_json()
 
 
 func _query_world(arguments: Array) -> String:
@@ -208,7 +208,7 @@ func _query_world(arguments: Array) -> String:
 	if not source is Dictionary:
 		return JSON.stringify({"code": "invalid_request", "message": "World query must be an object."})
 	var command: Dictionary = source
-	return adapter.query_world_objects_json({
+	return adapter.query_player_world_objects_json({
 		"id": command.get("worldId", ""),
 		"kind": command.get("kind", ""),
 		"label": command.get("label", ""),

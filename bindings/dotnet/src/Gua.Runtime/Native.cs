@@ -60,6 +60,8 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_abort_world_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_world_object_tree_json(nint runtime, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_world_objects_json(nint runtime, in WorldSelector selector, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_player_world_object_tree_json(nint runtime, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_player_world_objects_json(nint runtime, in WorldSelector selector, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_action_request(nint runtime, int action, [MarshalAs(UnmanagedType.LPUTF8Str)] string? nodeId, ref ActionRequest request);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_action(nint runtime, in ActionDescriptor descriptor, out ulong requestId);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_cancel_action_request(nint runtime, ulong requestId);

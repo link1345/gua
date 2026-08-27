@@ -34,6 +34,8 @@ public:
     bool abort_world_frame();
     String get_world_object_tree_json() const;
     String query_world_objects_json(const Dictionary& selector) const;
+    String get_player_world_object_tree_json() const;
+    String query_player_world_objects_json(const Dictionary& selector) const;
     void enable_world_object_tree_adapter();
 
     String get_ui_tree_json() const;
@@ -73,6 +75,7 @@ protected:
     static void _bind_methods();
 
 private:
+    String query_world_objects_json_with_projection(const Dictionary& selector, bool player_projection) const;
     gua_runtime_t* runtime_ = nullptr;
 };
 

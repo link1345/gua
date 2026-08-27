@@ -58,6 +58,37 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void RuntimePlayerWorldReadsCannotExposeDebugOnlyObjects()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.EnableWorldObjectTreeAdapter();
+        runtime.BeginWorldFrame("corridor");
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
+            new GuaWorldPosition(640, 180), VisibleToPlayer: true));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
+            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden", "item", "Hidden", GuaWorldSpace.World2D,
+            new GuaWorldPosition(2, 2), VisibleToPlayer: false));
+        runtime.EndWorldFrame();
+
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var debugTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), options)!;
+        var playerTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetPlayerWorldObjectTreeJson(), options)!;
+        var debugSecret = JsonSerializer.Deserialize<GuaWorldQueryResult>(
+            runtime.QueryWorldObjectsJson(new GuaWorldSelector(Id: "secret")), options)!;
+        var playerSecret = JsonSerializer.Deserialize<GuaWorldQueryResult>(
+            runtime.QueryPlayerWorldObjectsJson(new GuaWorldSelector(Id: "secret")), options)!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(debugTree.Objects.Select(item => item.Id), Is.EquivalentTo(new[] { "door-a", "secret", "hidden" }));
+            Assert.That(playerTree.Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
+            Assert.That(debugSecret.Matches, Has.Count.EqualTo(1));
+            Assert.That(playerSecret.Matches, Is.Empty);
+        });
+    }
+
+    [Test]
     public async Task RemoteWorldObjectTreeKeepsTheHostPlayerProfileAndStateSelector()
     {
         var port = ReservePort();
