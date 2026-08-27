@@ -208,8 +208,12 @@ int main()
         gua_end_frame(projected_ui);
     };
     expect_rejected_state_replacement("state.caretPosition", -1);
+    expect_rejected_state_replacement("state.caretPosition", 1.5);
+    expect_rejected_state_replacement("state.selectionStart", 2.25);
+    expect_rejected_state_replacement("state.selectionEnd", 3.75);
     expect_rejected_state_replacement("state.scrollMaxX", -1);
     expect_rejected_state_replacement("state.selectedIndex", -2);
+    expect_rejected_state_replacement("state.selectedIndex", 4.5);
 
     const gua_agent_field_rule_v1_t unknown_state_rules[] {
         { sizeof(gua_agent_field_rule_v1_t), "state.checked", GUA_AGENT_FIELD_REPLACE,
@@ -382,6 +386,63 @@ int main()
     assert(player_history_json.find("player-request") == std::string::npos);
     assert(player_history_json.find("player-result") == std::string::npos);
     gua_destroy_context(player_history);
+
+    struct SliderHistoryCase { int mode; double replacement; double quantum; const char* expected; };
+    const SliderHistoryCase slider_history_cases[] {
+        { GUA_AGENT_FIELD_OMIT, 0, 0, "" },
+        { GUA_AGENT_FIELD_REDACT, 0, 0, "" },
+        { GUA_AGENT_FIELD_REPLACE, 42.5, 0, "42.5" },
+        { GUA_AGENT_FIELD_QUANTIZE, 0, 100, "987600" },
+    };
+    for (const auto& history_case : slider_history_cases) {
+        gua_context_t* slider_history = gua_create_context();
+        assert(gua_set_diagnostics_history_limit(slider_history, 8) == 1);
+        const gua_agent_field_rule_v1_t range_rule { sizeof(gua_agent_field_rule_v1_t), "state.rangeValue",
+            history_case.mode, GUA_WORLD_VALUE_NUMBER, nullptr, history_case.replacement, 0, history_case.quantum };
+        const gua_agent_policy_v1_t range_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+            0, 0, &range_rule, 1 };
+        auto range_detail = projected_detail;
+        range_detail.base.id = "projected-slider";
+        range_detail.base.role = "slider";
+        range_detail.base.known_mask = GUA_NODE_KNOWN_RANGE_VALUE;
+        range_detail.range_value = 17;
+        const gua_node_descriptor_v4_t range_node {
+            sizeof(gua_node_descriptor_v4_t), range_detail, range_policy };
+        gua_begin_frame(slider_history, "slider-history");
+        assert(gua_register_node_v4(slider_history, &range_node) == 1);
+        gua_end_frame(slider_history);
+        const gua_action_request_descriptor_t set_range { sizeof(gua_action_request_descriptor_t),
+            GUA_ACTION_SET_VALUE, "projected-slider", "987654" };
+        uint64_t range_request_id = 0;
+        assert(gua_enqueue_action_for_profile(slider_history, &set_range,
+            GUA_OBSERVATION_PROFILE_PLAYER, &range_request_id) == GUA_ACTION_ACCEPTED);
+        int range_diagnostics_size = gua_copy_diagnostics_json_for_profile(
+            slider_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        std::vector<char> range_diagnostics_buffer(static_cast<std::size_t>(range_diagnostics_size));
+        gua_copy_diagnostics_json_for_profile(slider_history, GUA_OBSERVATION_PROFILE_PLAYER,
+            range_diagnostics_buffer.data(), range_diagnostics_size);
+        std::string range_diagnostics = range_diagnostics_buffer.data();
+        assert(range_diagnostics.find("987654") == std::string::npos);
+        assert(range_diagnostics.find("\"value\":\"" + std::string(history_case.expected) + "\"") != std::string::npos);
+        gua_action_request_t range_request { sizeof(gua_action_request_t) };
+        assert(gua_consume_action_request(slider_history, GUA_ACTION_SET_VALUE,
+            "projected-slider", &range_request) == 1);
+        const gua_action_result_t range_result { sizeof(gua_action_result_t), range_request_id,
+            GUA_ACTION_SET_VALUE, GUA_ACTION_STATUS_SUCCEEDED, 0, "projected-slider", "987654", 0 };
+        assert(gua_emit_action_result(slider_history, &range_result) == 1);
+        gua_event_v2_t range_event { sizeof(gua_event_v2_t) };
+        assert(gua_poll_event_v2_for_request_and_profile(slider_history, range_request_id,
+            GUA_OBSERVATION_PROFILE_PLAYER, &range_event) == 1);
+        assert(std::string(range_event.value) == history_case.expected);
+        range_diagnostics_size = gua_copy_diagnostics_json_for_profile(
+            slider_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        range_diagnostics_buffer.resize(static_cast<std::size_t>(range_diagnostics_size));
+        gua_copy_diagnostics_json_for_profile(slider_history, GUA_OBSERVATION_PROFILE_PLAYER,
+            range_diagnostics_buffer.data(), range_diagnostics_size);
+        range_diagnostics = range_diagnostics_buffer.data();
+        assert(range_diagnostics.find("987654") == std::string::npos);
+        gua_destroy_context(slider_history);
+    }
 
     gua_context_t* focused_keys = gua_create_context();
     const gua_node_descriptor_v2_t focused_key_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_FOCUSED,

@@ -700,6 +700,10 @@ func _collect_item_list_items(item_list: ItemList, parent_id: String) -> void:
 			"visible": item_list.is_visible_in_tree(),
 			"enabled": not item_list.is_item_disabled(index),
 			"selected": item_list.is_selected(index),
+			"agent_exposure": str(item_list.get_meta(&"gua_agent_exposure", "auto")),
+			"agent_field_rules": item_list.get_meta(&"gua_agent_field_rules", []),
+			"agent_allowed_actions": item_list.get_meta(&"gua_agent_allowed_actions", []),
+			"agent_allowed_actions_set": item_list.has_meta(&"gua_agent_allowed_actions"),
 		})
 
 
@@ -718,6 +722,10 @@ func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
 			"visible": tab_container.is_visible_in_tree(),
 			"enabled": not tab_container.is_tab_disabled(index),
 			"selected": tab_container.current_tab == index,
+			"agent_exposure": str(tab_container.get_meta(&"gua_agent_exposure", "auto")),
+			"agent_field_rules": tab_container.get_meta(&"gua_agent_field_rules", []),
+			"agent_allowed_actions": tab_container.get_meta(&"gua_agent_allowed_actions", []),
+			"agent_allowed_actions_set": tab_container.has_meta(&"gua_agent_allowed_actions"),
 		})
 
 

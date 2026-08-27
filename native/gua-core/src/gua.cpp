@@ -24,6 +24,8 @@
 namespace {
 
 std::string escape_json(const std::string& value);
+std::string json_number(double value);
+double quantize(double value, double quantum);
 constexpr double default_clock_step_ms = 1000.0 / 60.0;
 constexpr int event_observation_profile_neutral = -1;
 
@@ -138,6 +140,7 @@ struct ActionRequest {
     int scroll_unit;
     int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG;
     AgentPolicy agent_policy;
+    std::string role;
 };
 
 struct LogEntry {
@@ -179,13 +182,16 @@ struct HistoryPayload {
 };
 
 HistoryPayload project_history_payload(
-    int action, const std::string& value, int bool_value, int observation_profile, const AgentPolicy* policy)
+    int action, const std::string& value, int bool_value, int observation_profile,
+    const AgentPolicy* policy, std::string_view role)
 {
     HistoryPayload result { value, bool_value };
     if (observation_profile != GUA_OBSERVATION_PROFILE_PLAYER || policy == nullptr) return result;
     const std::string_view path = action == GUA_ACTION_SET_CHECKED
         ? "state.checked"
-        : (action == GUA_ACTION_SET_VALUE || action == GUA_ACTION_SELECT ? "value" : "");
+        : (action == GUA_ACTION_SET_VALUE && role == "slider"
+            ? "state.rangeValue"
+            : (action == GUA_ACTION_SET_VALUE || action == GUA_ACTION_SELECT ? "value" : ""));
     if (path.empty()) return result;
     const auto rule = std::find_if(policy->field_rules.begin(), policy->field_rules.end(),
         [&](const AgentFieldRule& candidate) { return candidate.path == path; });
@@ -197,8 +203,20 @@ HistoryPayload project_history_payload(
         if (action == GUA_ACTION_SET_CHECKED) {
             result.bool_value = rule->bool_value ? 1 : 0;
             result.value = rule->bool_value ? "true" : "false";
+        } else if (path == "state.rangeValue") {
+            result.value = json_number(rule->number_value);
         } else {
             result.value = rule->string_value;
+        }
+    } else if (rule->mode == GUA_AGENT_FIELD_QUANTIZE && path == "state.rangeValue") {
+        std::istringstream stream(value);
+        stream.imbue(std::locale::classic());
+        double number = 0;
+        if (!(stream >> number) || !std::isfinite(number)) {
+            result.value.clear();
+        } else {
+            stream >> std::ws;
+            result.value = stream.eof() ? json_number(quantize(number, rule->quantum)) : "";
         }
     }
     return result;
@@ -417,10 +435,10 @@ bool replacement_number_fits(std::string_view path, double value, bool world)
     }
     const auto key = path.substr(6);
     if (key == "caretPosition" || key == "selectionStart" || key == "selectionEnd") {
-        return value >= 0.0 &&
+        return std::trunc(value) == value && value >= 0.0 &&
             value < static_cast<double>(std::numeric_limits<long long>::max());
     }
-    if (key == "selectedIndex") return value >= -1.0 &&
+    if (key == "selectedIndex") return std::trunc(value) == value && value >= -1.0 &&
         value < static_cast<double>(std::numeric_limits<long long>::max());
     if (key == "scrollMaxX" || key == "scrollMaxY") return value >= 0.0;
     return true;
@@ -1238,10 +1256,11 @@ void append_history(gua_context_t& ctx, std::deque<HistoryEntry>& history, std::
     unsigned long long request_id, int action, const std::string& node_id, int status,
     int error_code, const std::string& value, bool sensitive, float delta_x = 0, float delta_y = 0,
     int bool_value = 0, const std::string& key = {}, unsigned int modifiers = 0, int scroll_unit = 0,
-    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG, const AgentPolicy* policy = nullptr)
+    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG, const AgentPolicy* policy = nullptr,
+    std::string_view role = {})
 {
     if (ctx.diagnostics_history_limit == 0) return;
-    const auto payload = project_history_payload(action, value, bool_value, observation_profile, policy);
+    const auto payload = project_history_payload(action, value, bool_value, observation_profile, policy, role);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - ctx.diagnostics_history_started_at).count();
     history.push_back(HistoryEntry { ctx.next_history_sequence++, static_cast<unsigned long long>(elapsed),
@@ -1256,7 +1275,7 @@ void append_history(gua_context_t& ctx, std::deque<HistoryEntry>& history, std::
 std::string build_request_json(const ActionRequest& request)
 {
     const auto payload = project_history_payload(request.action, request.value, request.bool_value,
-        request.observation_profile, &request.agent_policy);
+        request.observation_profile, &request.agent_policy, request.role);
     return "{\"requestId\":" + std::to_string(request.request_id) +
         ",\"action\":\"" + action_name(request.action) + "\",\"nodeId\":\"" + escape_json(request.node_id) +
         "\",\"value\":\"" + escape_json(request.sensitive ? "" : payload.value) +
@@ -2327,20 +2346,24 @@ extern "C" int gua_enqueue_action_for_profile(gua_context_t* ctx, const gua_acti
 
     const unsigned long long request_id = ctx->next_request_id++;
     AgentPolicy request_policy;
+    std::string request_role;
     if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && !node_id.empty()) {
         const auto source = std::find_if(ctx->nodes.begin(), ctx->nodes.end(),
             [&](const Node& node) { return node.id == node_id; });
-        if (source != ctx->nodes.end()) request_policy = source->agent_policy;
+        if (source != ctx->nodes.end()) {
+            request_policy = source->agent_policy;
+            request_role = source->role;
+        }
     }
     ctx->action_requests.push_back(ActionRequest {
         request_id, descriptor->action, node_id, value, descriptor->delta_x, descriptor->delta_y,
         descriptor->bool_value, key, descriptor->modifiers, descriptor->sensitive != 0, descriptor->scroll_unit,
-        observation_profile, request_policy
+        observation_profile, request_policy, request_role
     });
     append_history(*ctx, ctx->operation_history, "enqueued", request_id, descriptor->action, node_id,
         GUA_ACTION_ACCEPTED, 0, value, descriptor->sensitive != 0, descriptor->delta_x, descriptor->delta_y,
         descriptor->bool_value, key, descriptor->modifiers, descriptor->scroll_unit, observation_profile,
-        &request_policy);
+        &request_policy, request_role);
     if (out_request_id != nullptr) *out_request_id = request_id;
     return GUA_ACTION_ACCEPTED;
 }
@@ -2399,7 +2422,7 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
             append_history(*ctx, ctx->event_history, "observed", value.request_id, value.action,
                 value.node_id, GUA_ACTION_STATUS_FAILED, error_code, "", value.sensitive,
                 value.delta_x, value.delta_y, value.bool_value, value.key, value.modifiers,
-                value.scroll_unit, value.observation_profile, &value.agent_policy);
+                value.scroll_unit, value.observation_profile, &value.agent_policy, value.role);
             return 0;
         }
     }
@@ -2408,7 +2431,7 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
     append_history(*ctx, ctx->operation_history, "consumed", value.request_id, value.action, value.node_id,
         GUA_ACTION_ACCEPTED, 0, value.value, value.sensitive, value.delta_x, value.delta_y,
         value.bool_value, value.key, value.modifiers, value.scroll_unit, value.observation_profile,
-        &value.agent_policy);
+        &value.agent_policy, value.role);
     out_request->request_id = value.request_id;
     out_request->action = value.action;
     std::snprintf(out_request->node_id, sizeof(out_request->node_id), "%s", value.node_id.c_str());
@@ -2444,8 +2467,11 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
     const AgentPolicy* event_policy = consumed != ctx->consumed_requests.end()
         ? &consumed->agent_policy
         : nullptr;
+    const std::string_view event_role = consumed != ctx->consumed_requests.end()
+        ? std::string_view(consumed->role)
+        : std::string_view {};
     const auto event_payload = project_history_payload(result->action,
-        result->value != nullptr ? result->value : "", 0, event_profile, event_policy);
+        result->value != nullptr ? result->value : "", 0, event_profile, event_policy, event_role);
     Event event {
         result->action,
         result->node_id != nullptr ? result->node_id : "",
@@ -2465,8 +2491,8 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
     ctx->events.push_back(std::move(event));
     append_history(*ctx, ctx->event_history, "observed", result->request_id, result->action,
         result->node_id != nullptr ? result->node_id : "", result->status, result->error_code,
-        event_payload.value, event_sensitive,
-        0, 0, event_payload.bool_value, {}, 0, 0, event_profile, event_policy);
+        result->value != nullptr ? result->value : "", event_sensitive,
+        0, 0, 0, {}, 0, 0, event_profile, event_policy, event_role);
     if (consumed != ctx->consumed_requests.end()) ctx->consumed_requests.erase(consumed);
     return 1;
 }

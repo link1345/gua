@@ -96,6 +96,7 @@ func _run() -> void:
 	for index in range(20):
 		item_list.add_item("Server %d" % index)
 	item_list.select(0)
+	item_list.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(item_list)
 
 	var tabs := TabContainer.new()
@@ -107,6 +108,7 @@ func _run() -> void:
 	audio_tab.name = "Audio"
 	tabs.add_child(audio_tab)
 	tabs.current_tab = 1
+	tabs.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.name = "scroll"
@@ -245,6 +247,20 @@ func _run() -> void:
 		return
 	if not tree_json.contains("servers$item:0") or not tree_json.contains("tabs$tab:1"):
 		_fail("Gua smoke did not publish stable ItemList/TabContainer semantic children: %s" % tree_json)
+		return
+	var player_tree = JSON.parse_string(ui.get_player_ui_tree_json())
+	var player_list_item = _find_node(player_tree, "servers$item:1")
+	var player_tab_item = _find_node(player_tree, "tabs$tab:0")
+	if player_list_item == null or player_list_item.get("actions", []).has("select") \
+			or player_tab_item == null or player_tab_item.get("actions", []).has("select"):
+		_fail("Gua smoke did not propagate parent action policy to derived items: %s" % player_tree)
+		return
+	var rejected_player_list_select := ui.enqueue_player_action({"action": "select", "node_id": "servers$item:1"})
+	var rejected_player_tab_select := ui.enqueue_player_action({"action": "select", "node_id": "tabs$tab:0"})
+	if rejected_player_list_select.get("error_code", 0) != -5 \
+			or rejected_player_tab_select.get("error_code", 0) != -5 \
+			or not item_list.is_selected(0) or tabs.current_tab != 1:
+		_fail("Gua smoke accepted a derived Player select excluded by the parent allowlist: %s / %s" % [rejected_player_list_select, rejected_player_tab_select])
 		return
 	var locked_spin_node = _find_node(tree, "locked_count")
 	if locked_spin_node == null or locked_spin_node.get("enabled", true):

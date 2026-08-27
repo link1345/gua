@@ -71,7 +71,24 @@
         {
           "type": "object",
           "required": ["path", "mode", "replacement"],
-          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "number", "minimum": -1 } },
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "integer", "minimum": -1 } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["path", "mode", "quantum"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "quantize" }, "quantum": { "type": "number", "exclusiveMinimum": 0 } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "nonNegativeIntegerRule": {
+      "oneOf": [
+        { "$ref": "#/$defs/passRule" },
+        {
+          "type": "object",
+          "required": ["path", "mode", "replacement"],
+          "properties": { "path": { "type": "string" }, "mode": { "const": "replace" }, "replacement": { "type": "integer", "minimum": 0 } },
           "additionalProperties": false
         },
         {
@@ -114,7 +131,8 @@
       "oneOf": [
         { "allOf": [{ "$ref": "#/$defs/stringRule" }, { "properties": { "path": { "enum": ["label", "text", "value"] } } }] },
         { "allOf": [{ "$ref": "#/$defs/numberRule" }, { "properties": { "path": { "enum": ["bounds.x", "bounds.y", "state.scrollX", "state.scrollY", "state.rangeValue", "state.rangeMin", "state.rangeMax"] } } }] },
-        { "allOf": [{ "$ref": "#/$defs/nonNegativeNumberRule" }, { "properties": { "path": { "enum": ["bounds.w", "bounds.h", "state.caretPosition", "state.selectionStart", "state.selectionEnd", "state.scrollMaxX", "state.scrollMaxY"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/nonNegativeNumberRule" }, { "properties": { "path": { "enum": ["bounds.w", "bounds.h", "state.scrollMaxX", "state.scrollMaxY"] } } }] },
+        { "allOf": [{ "$ref": "#/$defs/nonNegativeIntegerRule" }, { "properties": { "path": { "enum": ["state.caretPosition", "state.selectionStart", "state.selectionEnd"] } } }] },
         { "allOf": [{ "$ref": "#/$defs/selectedIndexNumberRule" }, { "properties": { "path": { "const": "state.selectedIndex" } } }] },
         { "allOf": [{ "$ref": "#/$defs/booleanRule" }, { "properties": { "path": { "enum": ["state.focused", "state.hovered", "state.pressed", "state.checked", "state.selected"] } } }] }
       ]
