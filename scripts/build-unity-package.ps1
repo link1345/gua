@@ -1,10 +1,20 @@
 param(
     [string]$UnityExecutable = $env:UNITY_EXECUTABLE,
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [TimeSpan]$UnityTimeout = [TimeSpan]::FromMinutes(10)
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($UnityExecutable)) { $UnityExecutable = "C:\Program Files\Unity\Hub\Editor\6000.5.3f1\Editor\Unity.exe" }
+if ($UnityTimeout -le [TimeSpan]::Zero) { throw "UnityTimeout must be greater than zero." }
+
+function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
+    if ($env:OS -eq "Windows_NT") {
+        & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $Process.Id /T /F | Out-Null
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    try { $Process.Kill($true) } catch { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue }
+}
 $managedVersion = ([xml](Get-Content -LiteralPath (Join-Path $root "Directory.Build.props") -Raw)).Project.PropertyGroup.GuaPackageVersion
 $unityVersion = (Get-Content -LiteralPath (Join-Path $root "bindings\unity\package.json") -Raw | ConvertFrom-Json).version
 if ($managedVersion -ne $unityVersion) { throw "Unity package version '$unityVersion' does not match Gua package version '$managedVersion'." }
@@ -32,7 +42,18 @@ $log = Join-Path $root "artifacts\unity-compile.log"
 New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
 $tmpSettings = Join-Path $project "Assets\TextMesh Pro\Resources\TMP Settings.asset"
 if (-not (Test-Path -LiteralPath $tmpSettings)) { & (Join-Path $PSScriptRoot "import-unity-tmp-resources.ps1") -UnityProjectPath $project }
-$unityProcess = Start-Process -FilePath $UnityExecutable -ArgumentList @("-batchmode", "-quit", "-projectPath", $project, "-logFile", $log) -WindowStyle Hidden -PassThru -Wait
+$unityProcess = Start-Process -FilePath $UnityExecutable -ArgumentList @(
+    "-batchmode", "-nographics", "-quit",
+    "-projectPath", "`"$project`"",
+    "-logFile", "`"$log`""
+) -WindowStyle Hidden -PassThru
+if (-not $unityProcess.WaitForExit([int][Math]::Min([int]::MaxValue, $UnityTimeout.TotalMilliseconds))) {
+    Stop-ProcessTree $unityProcess
+    $licenseHint = if ((Test-Path -LiteralPath $log) -and (Get-Content -LiteralPath $log -Raw) -match "Licensing") {
+        " Unity was still processing its Licensing Client; verify the Unity Hub sign-in/license and retry."
+    } else { "" }
+    throw "Unity package compilation timed out after $UnityTimeout.$licenseHint Log: $log"
+}
 if ($unityProcess.ExitCode -ne 0) { throw "Unity package compilation failed with exit code $($unityProcess.ExitCode). See $log" }
 
 $artifact = Join-Path $root "artifacts\unity\com.link1345.gua"

@@ -116,5 +116,10 @@ the same runtime observe the new `sessionEpoch`.
 For a headless smoke check of the load-order-safe path:
 
 ```powershell
-C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+scripts/run-godot-smoke.ps1
 ```
+
+The wrapper writes Godot's log inside the repository instead of the default
+`user://logs` location, disables the crash handler for deterministic headless
+failures, and terminates a stalled smoke process after two minutes. Override the
+executable with `GODOT_EXECUTABLE` or `-GodotExecutable` when needed.

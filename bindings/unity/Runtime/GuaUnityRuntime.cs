@@ -574,7 +574,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     private GuaActionRequest ProtectSensitiveResult(GuaActionRequest request, string id, object target) =>
         request.Sensitive || sensitiveTargetIds.Contains(id) || sensitiveTargets.TryGetValue(target, out _)
-            ? request with { Sensitive = true }
+            ? new GuaActionRequest(request.Action, request.NodeId, request.Value, request.DeltaX, request.DeltaY,
+                request.BoolValue, request.Key, request.Modifiers, true, request.ScrollUnit, request.RequestId)
             : request;
 
     private void EmitObservedClick(object target)
