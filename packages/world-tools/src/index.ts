@@ -3,7 +3,7 @@ export interface GuaWorldObject {
   id: string; parentId?: string; kind: string; label: string; description?: string;
   space: "world2d" | "world3d"; position: { x: number; y: number; z?: number };
   visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private";
-  domainId?: string; relatedUiNodeId?: string; tags: string[]; state: Record<string, WorldPrimitive>;
+  domainId?: string; relatedUiNodeId?: string; tags?: string[]; state: Record<string, WorldPrimitive>;
 }
 export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
 export interface GuaWorldSelector { id?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: boolean; visibleToPlayer?: boolean; active?: boolean; state?: { key: string; value: WorldPrimitive } }

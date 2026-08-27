@@ -412,6 +412,11 @@ String GuaContext::get_version_json() const
     return String::utf8(json);
 }
 
+int GuaContext::get_observation_profile() const
+{
+    return gua_runtime_get_observation_profile(runtime_);
+}
+
 bool GuaContext::enqueue_click(const String& node_id)
 {
     const CharString node_id_utf8 = node_id.utf8();
@@ -656,6 +661,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
+    ClassDB::bind_method(D_METHOD("get_observation_profile"), &GuaContext::get_observation_profile);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
     ClassDB::bind_method(D_METHOD("get_screenshot_json"), &GuaContext::get_screenshot_json);
     ClassDB::bind_method(D_METHOD("consume_screenshot_request"), &GuaContext::consume_screenshot_request);

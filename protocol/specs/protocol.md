@@ -209,6 +209,7 @@ Capability `agent_projection_v1` applies the host-owned `debug` or `player` obse
 Debug returns the complete registered UI and World snapshots. Player UI `auto` nodes require effective visibility through every ancestor. Player World `auto` objects require host-defined semantic visibility and active state through every ancestor; render visibility is not a substitute. A `private` ancestor removes its complete subtree, and projection never reparents descendants.
 
 `agent-policy.schema.json` defines field rules `keep`, `omit`, `redact`, typed replacement, and numeric `quantize`; UI policies validate against `$defs/uiPolicy` and World policies against `$defs/worldPolicy`. Quantization is `floor(value / quantum) * quantum`. Identity and hierarchy fields (`id`, `parentId`, `role`, and `kind`) cannot be transformed. UI action allowlists are intersected with role support and current enabled state. World actions remain outside World v1, but future world and raw-input capabilities must use the same host authorization boundary.
+`omit` removes the targeted JSON member rather than publishing an empty substitute; accordingly, projected World objects may omit `tags` even though Debug publishers continue to emit it.
 
 Snapshot, query, wait, revision/count metadata, diagnostics, and action authorization use the projected view. Player actions are revalidated both when queued and when consumed; a private and an unknown ID produce the same not-found result. Player diagnostics omit debug environment metadata and unprojected history. Logs are empty. Screenshots are denied by default because rendered pixels cannot be projected semantically; a host may explicitly allow them only before starting the bridge, and transports cannot change that setting.
 
@@ -400,6 +401,9 @@ Language bindings should poll events instead of passing callbacks across ABI
 boundaries. External commands such as `click_node` are requests first; adapters
 consume them and emit events only after the corresponding host UI action has
 been applied.
+Requestless host-observed events remain available to Debug consumers. Player
+consumers receive them only when the target belongs to the Player projection at
+both emission and polling time.
 
 Testing clients may combine enqueue and request-id-specific polling in one
 convenience operation. Such helpers must not consume unrelated results or

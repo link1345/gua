@@ -25,7 +25,7 @@
     },
     "object": {
       "type": "object",
-      "required": ["id", "kind", "space", "position", "visibleToPlayer", "active", "agentExposure", "tags", "state"],
+      "required": ["id", "kind", "space", "position", "visibleToPlayer", "active", "agentExposure", "state"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },

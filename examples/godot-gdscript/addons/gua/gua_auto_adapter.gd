@@ -17,6 +17,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"register_node_v2",
 	"end_frame",
 	"get_ui_tree_json",
+	"get_version_json",
+	"get_observation_profile",
 	"set_screenshot",
 	"get_screenshot_json",
 	"consume_screenshot_request",
@@ -510,6 +512,14 @@ func _ensure_context() -> bool:
 		)
 		return false
 
+	var version: Variant = JSON.parse_string(context.get_version_json())
+	if not version is Dictionary or not (version as Dictionary).get("capabilities", []).has("agent_projection_v1"):
+		_mark_unavailable(
+			"%s does not advertise agent_projection_v1. The vendored gua_godot Windows debug DLL is stale. Rebuild it with: %s"
+			% [CONTEXT_CLASS, REBUILD_COMMAND]
+		)
+		return false
+
 	context.enable_virtual_clock_adapter()
 	context.enable_world_object_tree_adapter()
 
@@ -718,6 +728,8 @@ func _dispatch_action_requests() -> void:
 
 
 func _agent_action_allowed(target: Node, action: String) -> bool:
+	if context.get_observation_profile() != 1:
+		return true
 	var current: Node = target
 	var target_node := true
 	while current != null:

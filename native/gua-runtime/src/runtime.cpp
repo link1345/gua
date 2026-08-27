@@ -892,6 +892,13 @@ extern "C" int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int p
     return 1;
 }
 
+extern "C" int gua_runtime_get_observation_profile(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return -1;
+    const std::lock_guard lock(runtime->context_mutex);
+    return runtime->observation_profile;
+}
+
 extern "C" int gua_runtime_set_player_screenshot_enabled(gua_runtime_t* runtime, int enabled)
 {
     if (!valid_runtime(runtime)) return 0;
@@ -904,7 +911,7 @@ extern "C" int gua_runtime_set_player_screenshot_enabled(gua_runtime_t* runtime,
 
 extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state)
 {
-    if (!valid_runtime(runtime)) {
+    if (!valid_runtime(runtime) || out_state == nullptr) {
         return 0;
     }
 
@@ -917,7 +924,7 @@ extern "C" int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* no
 
 extern "C" int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, gua_node_state_v2_t* out_state)
 {
-    if (!valid_runtime(runtime)) {
+    if (!valid_runtime(runtime) || out_state == nullptr) {
         return 0;
     }
 

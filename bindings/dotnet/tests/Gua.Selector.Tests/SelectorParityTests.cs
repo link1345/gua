@@ -77,13 +77,15 @@ public sealed class SelectorParityTests
             AgentPolicy: new GuaAgentPolicy(FieldRules: [new("label", GuaAgentFieldMode.Redact)])));
         context.RegisterWorldObject(new GuaWorldObjectDescriptor("explicit-public", "item", "Explicit Public", GuaWorldSpace.World2D,
             new GuaWorldPosition(3, 4), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
-            AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Auto, [new("label", GuaAgentFieldMode.Redact)])));
+            Tags: ["private-tag"], AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Auto,
+                [new("label", GuaAgentFieldMode.Redact), new("tags", GuaAgentFieldMode.Omit)])));
         context.EndWorldFrame();
 
         Assert.Multiple(() =>
         {
             Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(4));
             Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a", "explicit-public" }));
+            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Single(item => item.Id == "explicit-public").Tags, Is.Null);
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Id: "secret"), GuaObservationProfile.Player).Matches, Is.Empty);
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Kind: "door")).Matches.Single().State["locked"].GetBoolean(), Is.True);
             Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(4));
@@ -101,6 +103,7 @@ public sealed class SelectorParityTests
         using var runtime = new GuaRuntime();
         runtime.EnableWorldObjectTreeAdapter();
         runtime.SetObservationProfile(GuaObservationProfile.Player);
+        Assert.That(runtime.ObservationProfile, Is.EqualTo(GuaObservationProfile.Player));
         runtime.BeginWorldFrame("corridor");
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
             new GuaWorldPosition(640, 180), VisibleToPlayer: true,

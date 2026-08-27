@@ -222,7 +222,7 @@ int main()
     assert(std::string(world_json.data()).find("\"hp\":\"injured\"") != std::string::npos);
     assert(std::string(world_json.data()).find("Secret description") == std::string::npos);
     assert(std::string(world_json.data()).find("[redacted]") != std::string::npos);
-    assert(std::string(world_json.data()).find("\"tags\":[]") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"tags\"") == std::string::npos);
     assert(std::string(world_json.data()).find("\"locked\":null") != std::string::npos);
     assert(std::string(world_json.data()).find("\"missing\"") == std::string::npos);
     const gua_world_selector_v1_t private_query { sizeof(gua_world_selector_v1_t), "secret", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, nullptr };
@@ -1003,6 +1003,47 @@ int main()
     assert(preserved_event.action == GUA_ACTION_FOCUS);
 
     gua_destroy_context(other);
+
+    // Requestless host events are neutral: Debug sees all of them, while Player requires
+    // the target to be observable both when the event is emitted and when it is polled.
+    gua_context_t* observed_events = gua_create_context();
+    const gua_node_descriptor_v2_t private_event_base { sizeof(gua_node_descriptor_v2_t), 0,
+        "private-event", nullptr, "button", "Private", nullptr, nullptr, { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t private_event_detail { sizeof(gua_node_descriptor_v3_t), private_event_base };
+    const gua_agent_policy_v1_t private_event_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE };
+    const gua_node_descriptor_v4_t private_event_node { sizeof(gua_node_descriptor_v4_t), private_event_detail, private_event_policy };
+    gua_begin_frame(observed_events, "events");
+    gua_register_node(observed_events, "visible-event", "button", "Visible", { 0, 0, 1, 1 }, 1, 1);
+    assert(gua_register_node_v4(observed_events, &private_event_node) == 1);
+    gua_end_frame(observed_events);
+    assert(gua_emit_click(observed_events, "visible-event") == 1);
+    gua_event_v3_t observed_event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 1);
+    assert(observed_event.base.node_id != nullptr && std::strcmp(observed_event.base.node_id, "visible-event") == 0);
+    assert(observed_event.revision > 0);
+    assert(gua_emit_click(observed_events, "private-event") == 1);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+    assert(observed_event.base.node_id != nullptr && std::strcmp(observed_event.base.node_id, "private-event") == 0);
+
+    assert(gua_emit_click(observed_events, "private-event") == 1);
+    gua_begin_frame(observed_events, "events");
+    gua_register_node(observed_events, "private-event", "button", "Now public", { 0, 0, 1, 1 }, 1, 1);
+    gua_register_node(observed_events, "visible-event", "button", "Visible", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(observed_events);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+
+    const gua_action_result_t targetless_observed { sizeof(gua_action_result_t), 0, GUA_ACTION_PRESS_KEY,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, nullptr, "unscoped", 0 };
+    assert(gua_emit_action_result(observed_events, &targetless_observed) == 1);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+    assert(std::strcmp(observed_event.base.value, "unscoped") == 0);
+    gua_destroy_context(observed_events);
 
     // Readers may observe the old or new complete frame, never a partial node count.
     gua_context_t* concurrent = gua_create_context();

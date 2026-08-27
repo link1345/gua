@@ -8,6 +8,15 @@ namespace Gua.Runtime;
 
 public sealed partial class GuaRuntime
 {
+    public GuaObservationProfile ObservationProfile
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return (GuaObservationProfile)Native.gua_runtime_get_observation_profile(_handle);
+        }
+    }
+
     public void EnableWorldObjectTreeAdapter() { ThrowIfDisposed(); Native.gua_runtime_set_world_object_tree_enabled(_handle, 1); }
     public void SetObservationProfile(GuaObservationProfile profile)
     {

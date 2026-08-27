@@ -122,12 +122,16 @@ func _run() -> void:
 			or bare_context.get_version_json().contains("world_object_tree_v1"):
 		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
 		return
+	if not bare_context.has_method("get_observation_profile") or bare_context.get_observation_profile() != 0 \
+			or not bare_context.get_version_json().contains("agent_projection_v1"):
+		_fail("GuaContext did not expose the agent projection ABI required by the adapter.")
+		return
 	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
 	adapter = ui
 	var missing_methods := ui._missing_context_methods(RefCounted.new())
-	if not missing_methods.has("consume_click_request"):
+	if not missing_methods.has("consume_click_request") or not missing_methods.has("get_observation_profile"):
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
 		return
 

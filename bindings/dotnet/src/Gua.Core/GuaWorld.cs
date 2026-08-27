@@ -29,7 +29,7 @@ public sealed record GuaWorldSelector(
 public sealed record GuaWorldObject(
     string Id, string Kind, string Label, string Space, JsonElement Position, bool VisibleToPlayer,
     bool Active, string AgentExposure, string? ParentId, string? Description,
-    IReadOnlyList<string> Tags, IReadOnlyDictionary<string, JsonElement> State,
+    IReadOnlyList<string>? Tags, IReadOnlyDictionary<string, JsonElement> State,
     string? DomainId, string? RelatedUiNodeId);
 public sealed record GuaWorldTree(int SchemaVersion, ulong SessionEpoch, ulong FrameSequence, ulong Revision, string Scene, IReadOnlyList<GuaWorldObject> Objects);
 public sealed record GuaWorldQueryResult(bool Valid, IReadOnlyList<GuaWorldObject> Matches, string? Error = null);

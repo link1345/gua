@@ -85,6 +85,7 @@ void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, int enabled);
 void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled);
 /* Host-owned ceiling; transports cannot override this profile per request. */
 int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int profile);
+int gua_runtime_get_observation_profile(gua_runtime_t* runtime);
 /* Player screenshots are denied unless the host opts in before the bridge starts. */
 int gua_runtime_set_player_screenshot_enabled(gua_runtime_t* runtime, int enabled);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);

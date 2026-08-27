@@ -281,7 +281,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         runtime!.RegisterNode(new GuaNodeDescriptor(id, role, label, bounds, visible, enabled, parentId, text, value,
             Focused: focused, Checked: checkedValue, Selected: selectedValue,
             RangeValue: range.value, RangeMin: range.min, RangeMax: range.max,
-            AgentPolicy: GuaUnityAdapterRegistry.PolicyFor(target.Value)));
+            AgentPolicy: GuaUnityAdapterRegistry.PolicyFor(AgentPolicyTarget(target.Value))));
         targets[id] = new Target(target.Value, target.Role, visible, enabled);
         return true;
     }
@@ -302,7 +302,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 runtime.EmitActionResult(request, false, GuaActionError.Disabled);
                 continue;
             }
-            if (!IsAgentAuthorizedNow(pair.Value.Value, request.Action))
+            if (runtime.ObservationProfile == GuaObservationProfile.Player && !IsAgentAuthorizedNow(pair.Value.Value, request.Action))
             {
                 runtime.EmitActionResult(request, false, GuaActionError.NodeNotFound);
                 continue;
@@ -333,7 +333,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             var failure = GuaActionError.Unsupported;
             if (focused != null && (!focused.Visible || !IsCurrentlyVisible(focused.Value))) failure = GuaActionError.Hidden;
             else if (focused != null && (!focused.Enabled || !IsCurrentlyEnabled(focused.Value))) failure = GuaActionError.Disabled;
-            else if (focused != null && !IsAgentAuthorizedNow(focused.Value, global.Action)) failure = GuaActionError.NodeNotFound;
+            else if (focused != null && runtime.ObservationProfile == GuaObservationProfile.Player && !IsAgentAuthorizedNow(focused.Value, global.Action)) failure = GuaActionError.NodeNotFound;
             var ok = focused != null && failure == GuaActionError.Unsupported && Apply(focused.Value, global, out value, out failure);
             runtime.EmitActionResult(global, ok, ok ? GuaActionError.None : failure, value);
         }
@@ -613,6 +613,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     };
     private static bool IsAgentAuthorizedNow(object target, GuaActionType action)
     {
+        target = AgentPolicyTarget(target);
         var policy = GuaUnityAdapterRegistry.PolicyFor(target);
         if (policy?.Exposure == GuaAgentExposure.Private ||
             (policy?.AllowedActions != null && !policy.AllowedActions.Contains(action))) return false;
@@ -624,6 +625,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 if (GuaUnityAdapterRegistry.PolicyFor(parent)?.Exposure == GuaAgentExposure.Private) return false;
         return true;
     }
+    private static object AgentPolicyTarget(object target) => target is ListItemTarget item ? item.List : target;
     private sealed class ListItemTarget
     {
         internal ListItemTarget(ListView list, int index) { List = list; Index = index; }

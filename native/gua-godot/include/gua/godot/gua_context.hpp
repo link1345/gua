@@ -37,6 +37,7 @@ public:
 
     String get_ui_tree_json() const;
     String get_version_json() const;
+    int get_observation_profile() const;
     void set_screenshot(const String& data_uri, int width, int height);
     String get_screenshot_json() const;
     Dictionary consume_screenshot_request();

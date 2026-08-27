@@ -33,7 +33,7 @@ export interface GuaUiTree {
   screen: string;
   nodes: GuaNode[];
 }
-export interface GuaWorldObject { id: string; parentId?: string; kind: string; label: string; space: "world2d" | "world3d"; position: { x: number; y: number; z?: number }; visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private"; tags: string[]; state: Record<string, string | number | boolean | null> }
+export interface GuaWorldObject { id: string; parentId?: string; kind: string; label: string; space: "world2d" | "world3d"; position: { x: number; y: number; z?: number }; visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private"; tags?: string[]; state: Record<string, string | number | boolean | null> }
 export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
 
 export interface GuaLogEntry {
