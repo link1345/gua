@@ -1,0 +1,34 @@
+{
+  "name": "gua-webmcp",
+  "version": "0.19.2",
+  "description": "Browser-native WebMCP adapter for Gua game UI automation.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/link1345/gua.git",
+    "directory": "packages/webmcp"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./src/index.ts",
+  "files": ["dist", "src", "README.md", "package.json"],
+  "scripts": {
+    "check": "tsc --noEmit && tsc -p tsconfig.type-tests.json --noEmit",
+    "test": "bun test test",
+    "build": "bun build src/index.ts --target browser --format esm --outfile dist/index.js && tsc --emitDeclarationOnly",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "gua-world-tools": "^0.19.2"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.0",
+    "typescript": "^5.5.0"
+  }
+}

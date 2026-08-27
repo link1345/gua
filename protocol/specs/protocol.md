@@ -306,13 +306,19 @@ Initial command types:
 
 ### Semantic action lifecycle (v1)
 
-Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId`, and the adapter must copy that ID into its success or failure event after attempting the host operation.
+Semantic actions follow `enqueue -> consume -> host action -> observed event`. Enqueue acceptance only records a request; it is never completion. Each accepted request receives a monotonically increasing `requestId` that is not reused across session resets during the context's lifetime, and the adapter must copy that ID into its success or failure event after attempting the host operation.
 
 The core captures `sessionEpoch`, `frameSequence`, and `revision` when the adapter emits completion; additive v3 event APIs and remote responses preserve that metadata even when polled later. Callers must still wait for the expected semantic state: action completion proves host processing, while `WaitForStateAsync` repeatedly obtains fresh snapshots until its predicate succeeds.
 
 The v1 action names map directly to the additive C ABI action enum: `click`, `focus`, `set_value`, `set_checked`, `select`, `scroll`, and `press_key`. Enqueue validation distinguishes `node_not_found`, `hidden`, `disabled`, `unsupported`, and `invalid_value`. Existing click functions remain compatibility wrappers over the generic queue.
 
-`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
+A caller that abandons an accepted action may cancel it by request ID while it
+is still queued. Cancellation returns `cancelled`, `not_found`, or `in_flight`;
+an in-flight request has already been handed to the host and must finish through
+the ordinary correlated result path. A successfully cancelled request is never
+later consumed if a node with the same ID reappears.
+
+`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. After applying a sensitive value, adapters must also omit that control's plaintext `text` and `value` from subsequent semantic snapshots (and must not copy the plaintext into another semantic field such as `state.rangeValue`). `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
 Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Control is `4`, and Meta/Command is `8`. Adapters must route both key-down and key-up through the host input pipeline and report success only after accepting the complete key gesture.
 - `text_input`
 - `move_gamepad`
@@ -382,6 +388,37 @@ The MCP server uses stdio JSON-RPC for MCP clients and the existing Gua
 request/response WebSocket payloads for the runtime side. It may keep recording
 and artifact metadata for its own client session, but does not own or duplicate
 the game runtime's semantic state.
+
+## Browser-native WebMCP
+
+Web exports may expose semantic tools directly from the game page through the
+experimental `document.modelContext.registerTool()` API. This is an additional
+transport consumer, not a replacement for `gui-mcp` or the Inspector bridge. One
+page calls one engine-owned in-page bridge; it does not open a WebSocket, select
+a remote endpoint, or introduce a Gua session ID. Browser tabs remain isolated
+by their ordinary JavaScript and engine instances.
+
+The browser-safe surface shares the base tool names and semantics for
+`get_ui_tree`, v1 semantic actions, `wait_for_node`, and optional
+`get_screenshot` with `gui-mcp`. Transport-specific definitions may add
+requirements that do not cross the browser boundary; for example, `gui-mcp`
+requires `secretKey` for every sensitive `set_value` so recordings can retain a
+stable secret reference. The
+in-page engine contract reads the current protocol UI tree, performs an action
+and resolves only with its request-ID-correlated host completion, and may expose
+the latest published screenshot. JavaScript validates live visibility, enabled
+state, and the advertised action but never owns or recreates the semantic tree.
+
+Feature detection is required. Missing WebMCP, a missing engine bridge, invalid
+input, unsupported action, host failure, timeout, and cancellation are structured
+errors. Browser action timeouts and caller aborts propagate to the engine-owned
+in-page bridge, which cancels the correlated native request when it is still
+queued before returning the structured error. If cancellation loses the race to
+host consumption, the caller still receives its timeout or cancellation error
+immediately, while the bridge continues request-specific polling until it drains
+the correlated completion. `get_screenshot` is registered only after the engine supplies a drawable
+frame readback path. Sensitive values may reach the host action consumer but are
+blank in completion results and absent from logs and error details.
 
 ## Events
 

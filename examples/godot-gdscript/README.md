@@ -2,6 +2,10 @@
 
 This sample uses the Gua Godot GDExtension from GDScript.
 
+The packaged Godot Web GDExtension currently supports debug Web exports only.
+Release Web export support is tracked in
+[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).
+
 ## Opt-in visual capture
 
 `GuaAutoAdapter.capture_viewport_screenshot()` reads the current viewport after a
@@ -112,5 +116,10 @@ the same runtime observe the new `sessionEpoch`.
 For a headless smoke check of the load-order-safe path:
 
 ```powershell
-C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+scripts/run-godot-smoke.ps1
 ```
+
+The wrapper writes Godot's log inside the repository instead of the default
+`user://logs` location, disables the crash handler for deterministic headless
+failures, and terminates a stalled smoke process after two minutes. Override the
+executable with `GODOT_EXECUTABLE` or `-GodotExecutable` when needed.

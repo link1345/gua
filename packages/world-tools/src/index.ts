@@ -13,6 +13,75 @@ export interface GuaWorldProvider {
   findWorldObjects(selector: GuaWorldSelector, profile?: "player"): Promise<GuaWorldQueryResult>;
   waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number, profile?: "player"): Promise<GuaWorldObject>;
 }
+
+export function parseWorldObjectTree(value: unknown): GuaWorldObjectTree {
+  const parsed = parseJson(value);
+  const tree = record(parsed);
+  if (!tree || !only(tree, treeKeys) || tree.schemaVersion !== 1 || !positiveInteger(tree.sessionEpoch) ||
+      !nonNegativeInteger(tree.frameSequence) || !nonNegativeInteger(tree.revision) ||
+      !nonEmptyString(tree.scene) || !Array.isArray(tree.objects) || !tree.objects.every(worldObject)) {
+    throw new TypeError("The engine returned an invalid protocol World Object Tree.");
+  }
+  return parsed as GuaWorldObjectTree;
+}
+
+export function parseWorldQueryResult(value: unknown): GuaWorldQueryResult {
+  const parsed = parseJson(value);
+  const result = record(parsed);
+  if (!result || !only(result, queryKeys) || typeof result.valid !== "boolean" ||
+      !Array.isArray(result.matches) || !result.matches.every(worldObject) ||
+      (result.error !== undefined && typeof result.error !== "string")) {
+    throw new TypeError("The engine returned an invalid world query result.");
+  }
+  return parsed as GuaWorldQueryResult;
+}
+
+const treeKeys = new Set(["schemaVersion", "sessionEpoch", "frameSequence", "revision", "scene", "objects"]);
+const queryKeys = new Set(["valid", "matches", "error"]);
+const objectKeys = new Set([
+  "id", "parentId", "kind", "label", "description", "space", "position", "visibleToPlayer", "active",
+  "agentExposure", "domainId", "relatedUiNodeId", "tags", "state",
+]);
+const position2dKeys = new Set(["x", "y"]);
+const position3dKeys = new Set(["x", "y", "z"]);
+const kindPattern = /^[a-z][a-z0-9_.-]*$/;
+
+function worldObject(value: unknown): value is GuaWorldObject {
+  const object = record(value);
+  const position = record(object?.position);
+  const state = record(object?.state);
+  if (!object || !only(object, objectKeys) || !nonEmptyString(object.id) || !optionalNonEmptyString(object.parentId) ||
+      typeof object.kind !== "string" || !kindPattern.test(object.kind) || typeof object.label !== "string" ||
+      (object.description !== undefined && typeof object.description !== "string") ||
+      (object.space !== "world2d" && object.space !== "world3d") || !position ||
+      !only(position, object.space === "world2d" ? position2dKeys : position3dKeys) ||
+      !finiteNumber(position.x) || !finiteNumber(position.y) ||
+      (object.space === "world3d" && !finiteNumber(position.z)) ||
+      typeof object.visibleToPlayer !== "boolean" || typeof object.active !== "boolean" ||
+      (object.agentExposure !== "auto" && object.agentExposure !== "private") ||
+      !optionalNonEmptyString(object.domainId) || !optionalNonEmptyString(object.relatedUiNodeId) ||
+      !Array.isArray(object.tags) || !object.tags.every(nonEmptyString) || new Set(object.tags).size !== object.tags.length ||
+      !state || Object.keys(state).some((key) => key.length === 0) || !Object.values(state).every(worldPrimitive)) return false;
+  return true;
+}
+
+function parseJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); }
+  catch { throw new TypeError("The engine returned malformed world JSON."); }
+}
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+function only(value: Record<string, unknown>, keys: Set<string>): boolean { return Object.keys(value).every((key) => keys.has(key)); }
+function nonEmptyString(value: unknown): value is string { return typeof value === "string" && value.length > 0; }
+function optionalNonEmptyString(value: unknown): boolean { return value === undefined || nonEmptyString(value); }
+function finiteNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function positiveInteger(value: unknown): boolean { return Number.isInteger(value) && (value as number) >= 1; }
+function nonNegativeInteger(value: unknown): boolean { return Number.isInteger(value) && (value as number) >= 0; }
+function worldPrimitive(value: unknown): value is WorldPrimitive {
+  return value === null || typeof value === "string" || typeof value === "boolean" || finiteNumber(value);
+}
 const string = (description: string) => ({ type: "string", minLength: 1, description });
 const selectorProperties = {
   id: string("Exact stable object id."), kind: string("Exact semantic object kind."), label: string("Exact object label."),

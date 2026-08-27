@@ -22,6 +22,13 @@ public enum GuaActionError
     InvalidValue = -6,
 }
 
+public enum GuaActionCancelResult
+{
+    InFlight = -1,
+    NotFound = 0,
+    Cancelled = 1,
+}
+
 public readonly record struct GuaActionRequest(
     GuaActionType Action,
     string? NodeId = null,

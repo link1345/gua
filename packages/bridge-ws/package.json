@@ -9,7 +9,7 @@
     "test": "bun test test"
   },
   "dependencies": {
-    "@gua/inspector": "workspace:*"
+    "@gua/inspector": "0.0.0"
   },
   "devDependencies": {
     "bun-types": "^1.3.0",

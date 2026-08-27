@@ -73,6 +73,57 @@ public sealed class UnityIntegrationTests
         Assert.That(initialTree.Nodes.Single(node => node.Id == "disabled-canvas-button").Visible, Is.False,
             "Children of a disabled uGUI Canvas must remain in the tree as hidden nodes.");
 
+        const string sensitiveValue = "unity-web-secret";
+        var sensitiveError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "sensitive-input", sensitiveValue, Sensitive: true),
+            out var sensitiveRequestId);
+        Assert.That(sensitiveError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveRequestId, out var sensitiveResult), Is.True);
+        Assert.That(sensitiveResult.Succeeded, Is.True, $"Sensitive uGUI set_value failed: {sensitiveResult.Error}");
+        Assert.That(sensitiveResult.Value, Is.Empty);
+        Assert.That(WaitForRedactedNode(host, "sensitive-input", sensitiveValue), Is.True,
+            "Sensitive Unity controls must omit their plaintext from semantic snapshots.");
+
+        var sensitiveKeyError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.PressKey, "sensitive-input", Key: "A"),
+            out var sensitiveKeyRequestId);
+        Assert.That(sensitiveKeyError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveKeyRequestId, out var sensitiveKeyResult), Is.True);
+        Assert.That(sensitiveKeyResult.Succeeded, Is.True, $"Sensitive uGUI press_key failed: {sensitiveKeyResult.Error}");
+        Assert.That(sensitiveKeyResult.Sensitive, Is.True);
+        Assert.That(sensitiveKeyResult.Value, Is.Empty,
+            "Actions on a previously classified sensitive target must not return its plaintext.");
+
+        var sensitiveFocusError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.Focus, "sensitive-input"),
+            out var sensitiveFocusRequestId);
+        Assert.That(sensitiveFocusError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveFocusRequestId, out var sensitiveFocusResult), Is.True);
+        Assert.That(sensitiveFocusResult.Sensitive, Is.True);
+        var focusedSensitiveKeyError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.PressKey, Key: "B"),
+            out var focusedSensitiveKeyRequestId);
+        Assert.That(focusedSensitiveKeyError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, focusedSensitiveKeyRequestId, out var focusedSensitiveKeyResult), Is.True);
+        Assert.That(focusedSensitiveKeyResult.Succeeded, Is.True, $"Focused sensitive uGUI press_key failed: {focusedSensitiveKeyResult.Error}");
+        Assert.That(focusedSensitiveKeyResult.Sensitive, Is.True);
+        Assert.That(focusedSensitiveKeyResult.Value, Is.Empty,
+            "Focused actions on a sensitive target must not return its plaintext.");
+
+        const string detachedSensitiveValue = "unity-detached-secret";
+        Assert.That(WaitForNode(host, "textbox", "detached-sensitive-input", out var detachedSensitiveId), Is.True,
+            "The UI Toolkit fixture did not publish its detachable sensitive control.");
+        var detachedSensitiveError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, detachedSensitiveId, detachedSensitiveValue, Sensitive: true),
+            out var detachedSensitiveRequestId);
+        Assert.That(detachedSensitiveError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, detachedSensitiveRequestId, out var detachedSensitiveResult), Is.True);
+        Assert.That(detachedSensitiveResult.Succeeded, Is.True);
+        Assert.That(WaitForNodeAbsent(host, detachedSensitiveId), Is.True,
+            "The UI Toolkit fixture did not temporarily detach the sensitive control.");
+        Assert.That(WaitForRedactedNode(host, detachedSensitiveId, detachedSensitiveValue), Is.True,
+            "A reattached UI Toolkit control must retain its sensitive classification.");
+
         var integerSlider = initialTree.Nodes.Single(node => node.Role == "slider" && node.Label == "integer-slider");
         var integerSliderError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "7"), out var integerSliderRequestId);
         Assert.That(integerSliderError, Is.EqualTo(GuaActionError.None));
@@ -80,6 +131,24 @@ public sealed class UnityIntegrationTests
         Assert.That(integerSliderResult.Succeeded, Is.True, $"UI Toolkit SliderInt set_value failed: {integerSliderResult.Error}");
         Assert.That(integerSliderResult.Value, Is.EqualTo("7"));
         Assert.That(WaitForValue(host, integerSlider.Id, value => value == "7"), Is.True);
+
+        var sensitiveToolkitSliderError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, integerSlider.Id, "8", Sensitive: true),
+            out var sensitiveToolkitSliderRequestId);
+        Assert.That(sensitiveToolkitSliderError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveToolkitSliderRequestId, out var sensitiveToolkitSliderResult), Is.True);
+        Assert.That(sensitiveToolkitSliderResult.Succeeded, Is.True);
+        Assert.That(WaitForRedactedRangeNode(host, integerSlider.Id), Is.True,
+            "Sensitive UI Toolkit sliders must omit both value and state.rangeValue.");
+
+        var sensitiveUGuiSliderError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "sample-slider", "0.75", Sensitive: true),
+            out var sensitiveUGuiSliderRequestId);
+        Assert.That(sensitiveUGuiSliderError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, sensitiveUGuiSliderRequestId, out var sensitiveUGuiSliderResult), Is.True);
+        Assert.That(sensitiveUGuiSliderResult.Succeeded, Is.True);
+        Assert.That(WaitForRedactedRangeNode(host, "sample-slider"), Is.True,
+            "Sensitive uGUI sliders must omit both value and state.rangeValue.");
 
         var uGuiFocusError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, "sample-input"), out var uGuiFocusRequestId);
         Assert.That(uGuiFocusError, Is.EqualTo(GuaActionError.None));
@@ -121,6 +190,20 @@ public sealed class UnityIntegrationTests
         Assert.That(WaitForActionEvent(host, invalidRequestId, out var invalidResult), Is.True);
         Assert.That(invalidResult.Succeeded, Is.False);
         Assert.That(invalidResult.Error, Is.EqualTo(GuaActionError.InvalidValue));
+
+        const string exceptionSecret = "unity-exception-secret";
+        var throwingError = host.Context.EnqueueAction(
+            new GuaActionRequest(GuaActionType.SetValue, "throwing-input", exceptionSecret, Sensitive: true),
+            out var throwingRequestId);
+        Assert.That(throwingError, Is.EqualTo(GuaActionError.None));
+        Assert.That(WaitForActionEvent(host, throwingRequestId, out var throwingResult), Is.True);
+        Assert.That(throwingResult.Succeeded, Is.False);
+        Assert.That(throwingResult.Error, Is.EqualTo(GuaActionError.InvalidValue));
+        Assert.That(WaitForRedactedNode(host, "throwing-input", exceptionSecret), Is.True,
+            "A sensitive value applied before a Unity setter exception must remain redacted from later frames.");
+        var sensitiveDiagnostics = host.RemoteContext.GetDiagnosticsJson();
+        Assert.That(sensitiveDiagnostics, Does.Not.Contain(exceptionSecret));
+        Assert.That(sensitiveDiagnostics, Does.Contain("[redacted]"));
 
         var keyError = host.Context.EnqueueAction(new GuaActionRequest(GuaActionType.PressKey, "sample-input", Key: "A", Modifiers: 1), out var keyRequestId);
         Assert.That(keyError, Is.EqualTo(GuaActionError.None));
@@ -222,6 +305,24 @@ public sealed class UnityIntegrationTests
         return false;
     }
 
+    private static bool WaitForNode(UnitySceneTestHost host, string role, string label, out string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var match = host.RemoteContext.GetRemoteTree().Nodes
+                .FirstOrDefault(node => node.Role == role && node.Label == label);
+            if (match != null)
+            {
+                id = match.Id;
+                return true;
+            }
+            Thread.Sleep(20);
+        }
+        id = string.Empty;
+        return false;
+    }
+
     private static bool WaitForValue(UnitySceneTestHost host, string id, Func<string, bool> predicate)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
@@ -230,6 +331,54 @@ public sealed class UnityIntegrationTests
             using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
             foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
                 if (node.GetProperty("id").GetString() == id && node.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.String && predicate(value.GetString() ?? "")) return true;
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForNodeAbsent(UnitySceneTestHost host, string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
+            if (!tree.RootElement.GetProperty("nodes").EnumerateArray()
+                    .Any(node => node.GetProperty("id").GetString() == id)) return true;
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForRedactedNode(UnitySceneTestHost host, string id, string secret)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var json = host.Context.GetUiTreeJson();
+            using var tree = JsonDocument.Parse(json);
+            foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
+            {
+                if (node.GetProperty("id").GetString() != id) continue;
+                if (!node.TryGetProperty("text", out _) && !node.TryGetProperty("value", out _) &&
+                    !json.Contains(secret, StringComparison.Ordinal)) return true;
+            }
+            Thread.Sleep(20);
+        }
+        return false;
+    }
+
+    private static bool WaitForRedactedRangeNode(UnitySceneTestHost host, string id)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var tree = JsonDocument.Parse(host.Context.GetUiTreeJson());
+            foreach (var node in tree.RootElement.GetProperty("nodes").EnumerateArray())
+            {
+                if (node.GetProperty("id").GetString() != id) continue;
+                var exposesRangeValue = node.TryGetProperty("state", out var state) && state.TryGetProperty("rangeValue", out _);
+                if (!node.TryGetProperty("value", out _) && !exposesRangeValue) return true;
+            }
             Thread.Sleep(20);
         }
         return false;

@@ -206,6 +206,49 @@ int RunSmoke()
     std::cout << context.logs_json() << '\n';
     std::cout << context.screenshot_json() << '\n';
     DumpEvents(context);
+
+    std::string sensitive_value = "initial";
+    context.begin_frame("sensitive");
+    ImGui::NewFrame();
+    GuaImGui::InputText(context, "Secret##secret-input", sensitive_value);
+    ImGui::EndFrame();
+    context.end_frame();
+
+    std::uint64_t sensitive_request_id = 0;
+    if (context.enqueue_action(gua::ActionRequest {
+            .action = gua::ActionType::set_value,
+            .node_id = "secret-input",
+            .value = "smoke-secret-value",
+            .sensitive = true,
+        }, sensitive_request_id) != GUA_ACTION_ACCEPTED) {
+        std::cerr << "Failed to enqueue the sensitive ImGui action.\n";
+        ImGui::DestroyContext();
+        return EXIT_FAILURE;
+    }
+
+    context.begin_frame("sensitive");
+    ImGui::NewFrame();
+    GuaImGui::InputText(context, "Secret##secret-input", sensitive_value);
+    ImGui::EndFrame();
+    context.end_frame();
+    const std::string sensitive_tree = context.ui_tree_json();
+    if (sensitive_value != "smoke-secret-value" || sensitive_tree.find(sensitive_value) != std::string::npos) {
+        std::cerr << "Sensitive ImGui value was not applied or was exposed in the UI tree.\n";
+        ImGui::DestroyContext();
+        return EXIT_FAILURE;
+    }
+
+    context.begin_frame("sensitive");
+    ImGui::NewFrame();
+    GuaImGui::InputText(context, "Secret##secret-input", sensitive_value);
+    ImGui::EndFrame();
+    context.end_frame();
+    if (context.ui_tree_json().find(sensitive_value) != std::string::npos) {
+        std::cerr << "Sensitive ImGui classification was not retained.\n";
+        ImGui::DestroyContext();
+        return EXIT_FAILURE;
+    }
+
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

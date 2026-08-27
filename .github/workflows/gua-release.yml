@@ -83,6 +83,7 @@ jobs:
           Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension.uid" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/gua_auto_adapter.gd" $godotTarget
+          Copy-Item "examples/godot-gdscript/addons/gua/gua_webmcp_bridge.gd" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.cfg" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godotTarget
@@ -117,9 +118,58 @@ jobs:
             build/windows-msvc-release/native/gua-runtime/Release/gua_runtime.dll
           if-no-files-found: error
 
+  web-native:
+    name: Build browser native assets
+    needs: windows-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: 4.0.20
+          actions-cache-folder: emsdk-cache
+
+      - name: Build Debug Godot Web extension
+        shell: pwsh
+        run: scripts/build-web-native.ps1 -Configuration Debug -Version '${{ needs.windows-assets.outputs.version }}' -BuildId '${{ github.sha }}'
+
+      - name: Build Release Unity WebGL runtime
+        shell: pwsh
+        run: scripts/build-web-native.ps1 -Configuration Release -RuntimeOnly -Version '${{ needs.windows-assets.outputs.version }}' -BuildId '${{ github.sha }}'
+
+      - name: Package browser native assets
+        shell: pwsh
+        run: |
+          $root = "artifacts/web-native"
+          $godot = Join-Path $root "gua-godot-plugin-web/addons/gua"
+          New-Item -ItemType Directory -Force (Join-Path $root "unity"), (Join-Path $godot "bin") | Out-Null
+          Copy-Item "build/web-release/native/gua-runtime/libgua_runtime.a" (Join-Path $root "unity")
+          Copy-Item "build/web-release/native/gua-core/libgua-core.a" (Join-Path $root "unity")
+          Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension.uid" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/gua_auto_adapter.gd" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/gua_webmcp_bridge.gd" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.cfg" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godot
+          Copy-Item "examples/godot-gdscript/addons/gua/bin/gua_godot.web.debug.wasm32.wasm" (Join-Path $godot "bin")
+          Compress-Archive -Path (Join-Path $root "gua-godot-plugin-web/addons") -DestinationPath (Join-Path $root "gua-godot-plugin-web-v${{ needs.windows-assets.outputs.version }}.zip")
+
+      - name: Upload browser native assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/web-native
+          if-no-files-found: error
+
   unity-package:
     name: Build Unity UPM package
-    needs: windows-assets
+    needs:
+      - windows-assets
+      - web-native
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -136,6 +186,12 @@ jobs:
         with:
           name: gua-unity-native-v${{ needs.windows-assets.outputs.version }}
           path: artifacts/unity-native
+
+      - name: Download Web native plugins
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/web-native
 
       - name: Prepare Unity project package dependencies
         shell: pwsh
@@ -169,7 +225,7 @@ jobs:
 
       - name: Package Unity UPM archive
         shell: pwsh
-        run: scripts/package-unity-upm-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -OutputDirectory artifacts/unity-release
+        run: scripts/package-unity-upm-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -OutputDirectory artifacts/unity-release -WebNativeDirectory artifacts/web-native
 
       - name: Upload Unity UPM artifact
         uses: actions/upload-artifact@v4
@@ -183,6 +239,7 @@ jobs:
     needs:
       - windows-assets
       - unity-package
+      - web-native
     runs-on: ubuntu-latest
     steps:
       - name: Download Windows release assets
@@ -197,6 +254,12 @@ jobs:
           name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
           path: release-assets/unity
 
+      - name: Download Web native assets
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
+          path: release-assets/web
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -205,6 +268,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector bundles, the Godot GDScript addon with Windows debug GDExtension DLLs, the ImGui adapter plugin headers, and the Unity Package Manager archive for Unity 6000.0+ Windows x64 Mono projects.
+            This release contains the Windows Inspector bundles, Godot native and Web GDExtension addons, ImGui adapter headers, and the Unity Package Manager archive with Windows x64 Mono and WebGL native runtimes.
           files: release-assets/**/*
           fail_on_unmatched_files: true
