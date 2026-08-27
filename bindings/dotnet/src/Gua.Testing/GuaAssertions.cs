@@ -389,9 +389,10 @@ public sealed class GuaNodeExpectation
     {
         Guard.NotNull(label, nameof(label));
         var snapshot = GetSnapshotOrFail();
-        if (!string.Equals(snapshot.Label, label, StringComparison.Ordinal))
+        if (!snapshot.HasLabel || !string.Equals(snapshot.Label, label, StringComparison.Ordinal))
         {
-            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have label '{label}', but it had label '{snapshot.Label}'.");
+            var actual = snapshot.HasLabel ? $"'{snapshot.Label}'" : "an unknown label";
+            GuaAssertions.Fail(_context, $"Expected Gua node {_description} to have label '{label}', but it had {actual}.");
         }
 
         return this;

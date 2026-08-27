@@ -88,8 +88,10 @@ public sealed class SelectorParityTests
             """;
         var context = new StaticTreeContext(playerTree);
         var direct = GuaAssertions.GetById(context, "public").Snapshot;
+        var omittedLabel = GuaAssertions.GetById(context, "public");
         var waited = (await GuaAssertions.WaitForStateAsync(context, "public", node => !node.KnownBounds.HasFlag(GuaBoundsKnownState.X),
             timeout: TimeSpan.FromMilliseconds(100))).Snapshot;
+        var labelError = Assert.Throws<GuaAssertionException>(() => omittedLabel.ToHaveLabel(string.Empty));
         Assert.Multiple(() =>
         {
             Assert.That(direct.HasLabel, Is.False);
@@ -97,6 +99,7 @@ public sealed class SelectorParityTests
             Assert.That(direct.KnownBounds, Is.EqualTo(GuaBoundsKnownState.Y | GuaBoundsKnownState.Width | GuaBoundsKnownState.Height));
             Assert.That(direct.Bounds.X, Is.Zero);
             Assert.That(waited.KnownBounds.HasFlag(GuaBoundsKnownState.X), Is.False);
+            Assert.That(labelError!.Message, Does.Contain("unknown label"));
         });
     }
 

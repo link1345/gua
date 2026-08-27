@@ -149,7 +149,7 @@
       "type": "object",
       "properties": {
         "exposure": { "$ref": "#/$defs/exposure" },
-        "fieldRules": { "type": "array", "items": { "$ref": "#/$defs/uiFieldRule" } },
+        "fieldRules": { "type": "array", "description": "Rules are applied in array order; a later rule replaces an earlier rule for the same path.", "items": { "$ref": "#/$defs/uiFieldRule" } },
         "allowedActions": { "$ref": "#/$defs/allowedActions" }
       },
       "additionalProperties": false
@@ -158,7 +158,7 @@
       "type": "object",
       "properties": {
         "exposure": { "$ref": "#/$defs/exposure" },
-        "fieldRules": { "type": "array", "items": { "$ref": "#/$defs/worldFieldRule" } },
+        "fieldRules": { "type": "array", "description": "Rules are applied in array order; a later rule replaces an earlier rule for the same path.", "items": { "$ref": "#/$defs/worldFieldRule" } },
         "allowedActions": { "$ref": "#/$defs/allowedActions" }
       },
       "additionalProperties": false
