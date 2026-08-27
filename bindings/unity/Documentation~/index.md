@@ -41,6 +41,8 @@ Enabling **Raw Input** creates virtual keyboard, mouse, and gamepad devices with
 Unity Input System 1.20.0. The adapter queues host-frame state events and
 neutralizes/removes the devices when it stops. Raw capabilities are omitted
 when Input System support or the opt-in map setting is unavailable.
+Physical keyboard tools accept the cross-adapter W3C code subset enumerated by
+`commands.schema.json`, including left/right modifiers and common numpad operators.
 When scenes change, the persistent runtime neutralizes the previous map and
 publishes the `GuaGameInputMap` found in the new scene before accepting more
 input.

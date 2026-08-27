@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  guaPhysicalKeyboardCodes,
   guaWebMcpToolDefinitions,
   type GuaToolDefinition,
   type GuaWebMcpToolName,
@@ -194,8 +195,9 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
   { name: "get_game_input_state", description: "Inspect held inputs owned by this MCP connection.", inputSchema: objectSchema({}) },
   { name: "release_all_game_inputs", description: "Release every semantic and raw input owned by this MCP connection.", inputSchema: objectSchema({}) },
   ...(["key_down", "key_up", "press_physical_key"] as const).map((name) => ({
-    name, description: `${name} using a W3C KeyboardEvent.code identifier.`,
-    inputSchema: objectSchema({ code: stringProperty("W3C KeyboardEvent.code such as KeyW."), leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["code"]),
+    name, description: `${name} using a supported W3C KeyboardEvent.code identifier.`,
+    inputSchema: objectSchema({ code: { type: "string", enum: guaPhysicalKeyboardCodes,
+      description: "Supported W3C KeyboardEvent.code such as KeyW or NumpadEnter." }, leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["code"]),
   })),
   { name: "pointer_move", description: "Move the engine pointer using absolute or delta coordinates.", inputSchema: objectSchema({
     mode: { type: "string", enum: ["absolute", "delta"] }, coordinateSpace: { type: "string", enum: ["viewport_normalized", "viewport_pixels"] },

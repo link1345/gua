@@ -939,6 +939,14 @@ int main()
         "NotAKey", "true", 0, 0, 5000, 0, 0
     };
     assert(gua_enqueue_game_input(context, &invalid_key, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    for (const char* code : { "NumpadEnter", "NumpadAdd" }) {
+        auto supported_key = invalid_key;
+        supported_key.target = code;
+        assert(gua_enqueue_game_input(context, &supported_key, nullptr) == GUA_GAME_INPUT_OK);
+        assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+        assert(std::string(consumed_input.target) == code);
+        assert(gua_complete_game_input_request(context, consumed_input.request_id, 0, -1) == 1);
+    }
     auto invalid_gamepad_index = invalid_key;
     invalid_gamepad_index.kind = GUA_GAME_INPUT_GAMEPAD;
     invalid_gamepad_index.operation = GUA_GAME_INPUT_DOWN;
@@ -1045,6 +1053,22 @@ int main()
     game_input_state.assign(static_cast<std::size_t>(state_size), '\0');
     gua_copy_game_input_state_json(context, owner_b, game_input_state.data(), state_size);
     assert(game_input_state.find("\"target\":\"south\"") == std::string::npos);
+
+    const uint64_t released_in_flight_owner = gua_create_game_input_owner(context);
+    auto released_in_flight_key = pending_key;
+    released_in_flight_key.owner_id = released_in_flight_owner;
+    uint64_t released_in_flight_id = 0;
+    assert(gua_enqueue_game_input(context, &released_in_flight_key, &released_in_flight_id) == GUA_GAME_INPUT_OK);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.request_id == released_in_flight_id);
+    assert(gua_release_game_input_owner(context, released_in_flight_owner) == 1);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.owner_id == released_in_flight_owner && consumed_input.operation == GUA_GAME_INPUT_RELEASE_ALL);
+    assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
+    assert(gua_complete_game_input_request(context, released_in_flight_id, 1, 0) == 1);
+    assert(gua_consume_game_input_request(context, &consumed_input) == 1);
+    assert(consumed_input.owner_id == released_in_flight_owner && consumed_input.operation == GUA_GAME_INPUT_RELEASE_ALL);
+    assert(gua_complete_game_input_request(context, consumed_input.request_id, 1, 0) == 1);
     assert(gua_tick_game_input_leases(context, 5000.0) == 1);
     assert(gua_consume_game_input_request(context, &consumed_input) == 1);
     assert(consumed_input.operation == GUA_GAME_INPUT_RELEASE && consumed_input.owner_id == owner_a);

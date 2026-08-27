@@ -203,8 +203,9 @@ bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
 
 ホストはUI Treeと独立したGame Action Mapを明示登録し、button、axis、vector、
 textを`press_game_input_action`、`set_game_input_action`、
-`release_game_input_action`で操作できます。明示opt-inのRaw toolはW3C physical
-key code、pointer移動/button/wheel、Standard Gamepad、text inputを扱います。
+`release_game_input_action`で操作できます。明示opt-inのRaw toolはcommand schemaに
+列挙されたengine共通のW3C physical key code、pointer移動/button/wheel、
+Standard Gamepad、text inputを扱います。
 保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒です。満了、切断、
 reset、replay失敗、session disposeではneutral状態へ戻します。InspectorにはAction
 Map、保持lease、Raw操作、緊急`Release all`を表示します。

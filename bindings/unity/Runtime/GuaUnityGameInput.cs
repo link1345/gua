@@ -328,6 +328,10 @@ public sealed partial class GuaUnityRuntime
         ["AltLeft"] = Key.LeftAlt, ["AltRight"] = Key.RightAlt,
         ["ArrowDown"] = Key.DownArrow, ["ArrowLeft"] = Key.LeftArrow,
         ["ArrowRight"] = Key.RightArrow, ["ArrowUp"] = Key.UpArrow,
+        ["PrintScreen"] = Key.PrintScreen, ["NumpadAdd"] = Key.NumpadPlus,
+        ["NumpadDecimal"] = Key.NumpadPeriod, ["NumpadDivide"] = Key.NumpadDivide,
+        ["NumpadEnter"] = Key.NumpadEnter, ["NumpadMultiply"] = Key.NumpadMultiply,
+        ["NumpadSubtract"] = Key.NumpadMinus,
     };
 
     private static bool TryKey(string code, out Key key)

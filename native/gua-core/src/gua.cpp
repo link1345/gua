@@ -628,6 +628,7 @@ struct gua_context_t {
     std::deque<GameInputRequest> game_input_cleanup_requests;
     std::deque<GameInputRequest> game_input_requests;
     std::deque<GameInputRequest> consumed_game_input_requests;
+    std::unordered_set<unsigned long long> released_game_input_cleanup_pending;
     std::vector<HeldGameInput> held_game_inputs;
     std::deque<GameInputResult> game_input_results;
 };
@@ -864,7 +865,9 @@ bool valid_keyboard_code(std::string_view code)
         "ContextMenu", "Delete", "End", "Enter", "Equal", "Escape", "Home", "Insert", "MetaLeft",
         "MetaRight", "Minus", "NumLock", "PageDown", "PageUp", "Pause", "Period", "Quote",
         "ScrollLock", "Semicolon", "ShiftLeft", "ShiftRight", "Slash", "Space", "Tab", "ControlLeft",
-        "ControlRight", "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp"
+        "ControlRight", "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp",
+        "PrintScreen", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter",
+        "NumpadMultiply", "NumpadSubtract"
     };
     if (named.contains(std::string(code))) return true;
     return std::regex_match(code.begin(), code.end(), std::regex("(?:Key[A-Z]|Digit[0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Numpad[0-9])"));
@@ -2356,6 +2359,9 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     std::vector<unsigned long long> game_input_cleanup_owners;
     for (const auto owner_id : ctx->game_input_owners)
         if (owner_requires_game_input_cleanup(*ctx, owner_id)) game_input_cleanup_owners.push_back(owner_id);
+    for (const auto owner_id : ctx->released_game_input_cleanup_pending)
+        if (std::find(game_input_cleanup_owners.begin(), game_input_cleanup_owners.end(), owner_id) == game_input_cleanup_owners.end())
+            game_input_cleanup_owners.push_back(owner_id);
     ctx->game_input_requests.clear();
     ctx->game_input_cleanup_requests.clear();
     for (const auto owner_id : game_input_cleanup_owners) {
@@ -2365,6 +2371,7 @@ extern "C" int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* 
     }
     ctx->held_game_inputs.clear();
     ctx->consumed_game_input_requests.clear();
+    ctx->released_game_input_cleanup_pending.clear();
     ctx->game_input_results.clear();
     if ((reset_flags & GUA_RESET_WORLD_OBJECTS) != 0U) {
         ctx->world_scene = "unknown"; ctx->world_objects.clear(); ctx->staging_world_scene = "unknown";
@@ -2492,13 +2499,15 @@ extern "C" int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_i
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->game_input_requests.end());
     ctx->game_input_cleanup_requests.erase(std::remove_if(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
         [&](const auto& request) { return request.owner_id == owner_id; }), ctx->game_input_cleanup_requests.end());
-    ctx->consumed_game_input_requests.erase(std::remove_if(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
-        [&](const auto& request) { return request.owner_id == owner_id; }), ctx->consumed_game_input_requests.end());
     ctx->game_input_results.erase(std::remove_if(ctx->game_input_results.begin(), ctx->game_input_results.end(),
         [&](const auto& result) { return result.owner_id == owner_id; }), ctx->game_input_results.end());
-    if (cleanup_required)
+    if (cleanup_required) {
+        const bool in_flight = std::any_of(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
+            [&](const auto& request) { return request.owner_id == owner_id && request.kind != GUA_GAME_INPUT_CLEANUP; });
+        if (in_flight) ctx->released_game_input_cleanup_pending.insert(owner_id);
         ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, owner_id,
             GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 0, 0, false });
+    }
     ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
         [&](const auto& held) { return held.owner_id == owner_id; }), ctx->held_game_inputs.end());
     return 1;
@@ -2612,7 +2621,8 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
     if (iterator == ctx->consumed_game_input_requests.end()) return 0;
     const GameInputRequest request = *iterator;
     ctx->consumed_game_input_requests.erase(iterator);
-    if (succeeded != 0) {
+    const bool owner_active = ctx->game_input_owners.contains(request.owner_id);
+    if (succeeded != 0 && owner_active) {
         if (request.operation == GUA_GAME_INPUT_RELEASE_ALL) {
             ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
                 [&](const auto& held) { return held.owner_id == request.owner_id; }), ctx->held_game_inputs.end());
@@ -2635,9 +2645,19 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
             else { held->value_json = request.value_json; held->remaining_ms = request.lease_ms; held->sensitive = request.sensitive; }
         }
     }
-    if (ctx->game_input_owners.contains(request.owner_id)) {
+    if (owner_active) {
         if (ctx->game_input_results.size() >= max_game_input_results) ctx->game_input_results.pop_front();
         ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, succeeded != 0, error_code });
+    } else if (request.kind != GUA_GAME_INPUT_CLEANUP &&
+        ctx->released_game_input_cleanup_pending.contains(request.owner_id) &&
+        std::none_of(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
+            [&](const auto& pending) { return pending.owner_id == request.owner_id && pending.kind != GUA_GAME_INPUT_CLEANUP; })) {
+        ctx->released_game_input_cleanup_pending.erase(request.owner_id);
+        const bool cleanup_still_queued = std::any_of(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
+            [&](const auto& cleanup) { return cleanup.owner_id == request.owner_id; });
+        if (!cleanup_still_queued)
+            ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, request.owner_id,
+                GUA_GAME_INPUT_CLEANUP, GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 0, 0, false });
     }
     return 1;
 }

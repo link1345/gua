@@ -213,11 +213,29 @@
         }
       ]
     },
+    "keyboardCode": {
+      "type": "string",
+      "enum": [
+        "Backquote", "Backslash", "Backspace", "BracketLeft", "BracketRight", "CapsLock", "Comma",
+        "ContextMenu", "Delete", "End", "Enter", "Equal", "Escape", "Home", "Insert", "MetaLeft",
+        "MetaRight", "Minus", "NumLock", "PageDown", "PageUp", "Pause", "Period", "Quote", "ScrollLock",
+        "Semicolon", "ShiftLeft", "ShiftRight", "Slash", "Space", "Tab", "ControlLeft", "ControlRight",
+        "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "PrintScreen",
+        "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadMultiply",
+        "NumpadSubtract",
+        "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM",
+        "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ",
+        "Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9",
+        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+        "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
+        "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9"
+      ]
+    },
     "rawKey": {
       "type": "object", "required": ["type", "code"], "additionalProperties": false,
       "properties": {
         "type": { "enum": ["key_down", "key_up", "press_physical_key"] },
-        "code": { "type": "string", "minLength": 1 },
+        "code": { "$ref": "#/$defs/keyboardCode" },
         "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
       }
     },

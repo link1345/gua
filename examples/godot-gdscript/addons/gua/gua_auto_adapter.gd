@@ -1020,17 +1020,18 @@ func _apply_game_input(request: Dictionary) -> int:
 		return 0
 	if kind == 2:
 		var keycode := _keycode_from_w3c(target)
+		var key_location := _key_location_from_w3c(target)
 		if keycode == KEY_NONE:
 			return -6
 		if operation == 1:
-			_inject_key(keycode, true)
-			_inject_key(keycode, _has_physical_key_holder(target))
+			_inject_key(keycode, true, key_location)
+			_inject_key(keycode, _has_physical_key_holder(target), key_location)
 		elif operation == 4:
-			held_physical_keys["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "keycode": keycode}
-			_inject_key(keycode, true)
+			held_physical_keys["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "keycode": keycode, "location": key_location}
+			_inject_key(keycode, true, key_location)
 		elif operation in [3, 5]:
 			held_physical_keys.erase("%d:%s" % [owner_id, target])
-			_inject_key(keycode, _has_physical_key_holder(target))
+			_inject_key(keycode, _has_physical_key_holder(target), key_location)
 		else:
 			return -4
 		return 0
@@ -1169,10 +1170,11 @@ func _release_semantic_input_owner(owner_id: int, action_id: String) -> void:
 	_set_semantic_input(action_id, value)
 
 
-func _inject_key(keycode: Key, pressed: bool) -> void:
+func _inject_key(keycode: Key, pressed: bool, location: KeyLocation = KEY_LOCATION_UNSPECIFIED) -> void:
 	var event := InputEventKey.new()
 	event.physical_keycode = keycode
 	event.keycode = keycode
+	event.location = location
 	event.pressed = pressed
 	Input.parse_input_event(event)
 
@@ -1221,9 +1223,19 @@ func _keycode_from_w3c(code: String) -> Key:
 		"Home": KEY_HOME, "Insert": KEY_INSERT, "Minus": KEY_MINUS, "NumLock": KEY_NUMLOCK,
 		"PageDown": KEY_PAGEDOWN, "PageUp": KEY_PAGEUP, "Pause": KEY_PAUSE, "Period": KEY_PERIOD,
 		"Quote": KEY_APOSTROPHE, "ScrollLock": KEY_SCROLLLOCK, "Semicolon": KEY_SEMICOLON,
-		"Slash": KEY_SLASH,
+		"Slash": KEY_SLASH, "PrintScreen": KEY_PRINT, "NumpadAdd": KEY_KP_ADD,
+		"NumpadDecimal": KEY_KP_PERIOD, "NumpadDivide": KEY_KP_DIVIDE, "NumpadEnter": KEY_KP_ENTER,
+		"NumpadMultiply": KEY_KP_MULTIPLY, "NumpadSubtract": KEY_KP_SUBTRACT,
 	}
 	return names.get(code, KEY_NONE)
+
+
+func _key_location_from_w3c(code: String) -> KeyLocation:
+	if code in ["ShiftLeft", "ControlLeft", "AltLeft", "MetaLeft"]:
+		return KEY_LOCATION_LEFT
+	if code in ["ShiftRight", "ControlRight", "AltRight", "MetaRight"]:
+		return KEY_LOCATION_RIGHT
+	return KEY_LOCATION_UNSPECIFIED
 
 
 func _mouse_button(name: String) -> MouseButton:
@@ -1338,8 +1350,9 @@ func _release_owner_injected_inputs(owner_id: int) -> void:
 			continue
 		var target := str(held.get("target", ""))
 		var keycode: Key = int(held.get("keycode", KEY_NONE))
+		var location: KeyLocation = int(held.get("location", KEY_LOCATION_UNSPECIFIED))
 		held_physical_keys.erase(key)
-		_inject_key(keycode, _has_physical_key_holder(target))
+		_inject_key(keycode, _has_physical_key_holder(target), location)
 	for key in held_pointer_buttons.keys():
 		var held: Dictionary = held_pointer_buttons[key]
 		if int(held.get("owner", 0)) != owner_id:
@@ -1360,7 +1373,8 @@ func _release_owner_injected_inputs(owner_id: int) -> void:
 func _release_all_injected_inputs() -> void:
 	for held in held_physical_keys.values():
 		var keycode: Key = int(held.get("keycode", KEY_NONE))
-		_inject_key(keycode, false)
+		var location: KeyLocation = int(held.get("location", KEY_LOCATION_UNSPECIFIED))
+		_inject_key(keycode, false, location)
 	held_physical_keys.clear()
 	for held in held_pointer_buttons.values():
 		var event := InputEventMouseButton.new()

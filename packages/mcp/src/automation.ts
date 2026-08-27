@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { PNG } from "pngjs";
+import { guaPhysicalKeyboardCodes } from "gua-webmcp";
 
 export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key" | "game_input";
 
@@ -349,20 +350,28 @@ export function validateRecording(value: unknown): asserts value is GuaRecording
     if (!isRecord(raw) || !recordedActions.includes(raw.action as RecordedAction)) {
       throw new Error(`Recording step ${index} has an unsupported action.`);
     }
+    if (typeof raw.sensitive !== "boolean") {
+      throw new Error(`Recording step ${index} has invalid sensitive metadata.`);
+    }
+    if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < 0 ||
+        (raw.relativeMilliseconds as number) < previous) {
+      throw new Error(`Recording step ${index} has non-monotonic relativeMilliseconds.`);
+    }
+    previous = raw.relativeMilliseconds as number;
+    if (!Number.isInteger(raw.preRevision) || (raw.preRevision as number) < 0 ||
+        !Number.isInteger(raw.postRevision) || (raw.postRevision as number) < (raw.preRevision as number)) {
+      throw new Error(`Recording step ${index} has invalid revisions.`);
+    }
+    if (raw.sensitive === false && raw.secretKey !== undefined) {
+      throw new Error(`Recording step ${index} has an unexpected secretKey.`);
+    }
     if (raw.action === "game_input") {
       if (value.schemaVersion !== 2 || !nonEmpty(raw.operation) || !isRecord(raw.arguments))
         throw new Error(`Game input recording step ${index} requires schemaVersion 2, operation, and arguments.`);
       if (raw.sensitive === true && (!nonEmpty(raw.secretKey) || raw.arguments.value !== undefined || raw.arguments.text !== undefined))
         throw new Error(`Sensitive game input recording step ${index} is invalid.`);
+      validateGameInputRecordingStep(index, raw.operation, raw.arguments, raw.sensitive);
       return;
-    }
-    if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < previous) {
-      throw new Error(`Recording step ${index} has non-monotonic relativeMilliseconds.`);
-    }
-    previous = raw.relativeMilliseconds as number;
-    if (!Number.isInteger(raw.preRevision) || !Number.isInteger(raw.postRevision) ||
-        (raw.postRevision as number) < (raw.preRevision as number)) {
-      throw new Error(`Recording step ${index} has invalid revisions.`);
     }
     const hasTarget = isRecord(raw.target);
     const hasCoordinate = isRecord(raw.coordinateFallback);
@@ -381,7 +390,6 @@ export function validateRecording(value: unknown): asserts value is GuaRecording
     if (raw.sensitive === true && (raw.action !== "set_value" || !nonEmpty(raw.secretKey) || raw.value !== undefined)) {
       throw new Error(`Sensitive recording step ${index} is invalid.`);
     }
-    if (raw.sensitive !== true && raw.secretKey !== undefined) throw new Error(`Recording step ${index} has an unexpected secretKey.`);
     if ((raw.action === "select" || raw.action === "press_key") && !nonEmpty(raw.value)) {
       throw new Error(`Recording step ${index} requires a value.`);
     }
@@ -394,7 +402,103 @@ export function validateRecording(value: unknown): asserts value is GuaRecording
   });
 }
 
+function validateGameInputRecordingStep(
+  index: number,
+  operation: string,
+  argumentsValue: Record<string, unknown>,
+  sensitive: boolean,
+): void {
+  const invalid = (): never => { throw new Error(`Recording step ${index} has invalid game input arguments.`); };
+  if (!gameInputOperations.includes(operation)) invalid();
+  const shape = (allowed: readonly string[], required: readonly string[] = []): void => {
+    if (Object.keys(argumentsValue).some((key) => !allowed.includes(key)) ||
+        required.some((key) => !(key in argumentsValue))) invalid();
+  };
+  const string = (key: string): boolean => typeof argumentsValue[key] === "string" && (argumentsValue[key] as string).length > 0;
+  const finite = (key: string): boolean => typeof argumentsValue[key] === "number" && Number.isFinite(argumentsValue[key]);
+  const optionalBoolean = (key: string): boolean => argumentsValue[key] === undefined || typeof argumentsValue[key] === "boolean";
+  const lease = (): boolean => argumentsValue.leaseMs === undefined ||
+    (Number.isInteger(argumentsValue.leaseMs) && (argumentsValue.leaseMs as number) >= 1 && (argumentsValue.leaseMs as number) <= 60000);
+  const gamepadIndex = (): boolean => argumentsValue.gamepadIndex === undefined ||
+    (Number.isInteger(argumentsValue.gamepadIndex) && (argumentsValue.gamepadIndex as number) >= 0 && (argumentsValue.gamepadIndex as number) <= 3);
+  const value = argumentsValue.value;
+  const semanticValue = value !== null && !Array.isArray(value) &&
+    (typeof value === "boolean" || typeof value === "string" ||
+      (typeof value === "number" && Number.isFinite(value)) || isRecord(value));
+
+  switch (operation) {
+    case "press_game_input_action":
+      shape(["actionId", "confirmed"], ["actionId"]);
+      if (!string("actionId") || !optionalBoolean("confirmed") || sensitive) invalid();
+      return;
+    case "set_game_input_action":
+      shape(["actionId", "value", "leaseMs", "confirmed", "sensitive"], sensitive ? ["actionId"] : ["actionId", "value"]);
+      if (!string("actionId") || (!sensitive && !semanticValue) || !lease() || !optionalBoolean("confirmed") ||
+          !optionalBoolean("sensitive") || (sensitive ? argumentsValue.sensitive !== true : argumentsValue.sensitive === true)) invalid();
+      return;
+    case "release_game_input_action":
+      shape(["actionId"], ["actionId"]);
+      if (!string("actionId") || sensitive) invalid();
+      return;
+    case "release_all_game_inputs":
+      shape([]);
+      if (sensitive) invalid();
+      return;
+    case "key_down": case "key_up": case "press_physical_key":
+      shape(["code", "leaseMs"], ["code"]);
+      if (!string("code") || !guaPhysicalKeyboardCodes.includes(argumentsValue.code as string) || !lease() || sensitive) invalid();
+      return;
+    case "pointer_move":
+      shape(["mode", "coordinateSpace", "x", "y"], ["mode", "x", "y"]);
+      if ((argumentsValue.mode !== "absolute" && argumentsValue.mode !== "delta") || !finite("x") || !finite("y") || sensitive ||
+          (argumentsValue.mode === "absolute" && argumentsValue.coordinateSpace !== "viewport_normalized" && argumentsValue.coordinateSpace !== "viewport_pixels") ||
+          (argumentsValue.mode === "delta" && argumentsValue.coordinateSpace !== undefined) ||
+          (argumentsValue.coordinateSpace === "viewport_normalized" &&
+            ((argumentsValue.x as number) < 0 || (argumentsValue.x as number) > 1 ||
+             (argumentsValue.y as number) < 0 || (argumentsValue.y as number) > 1))) invalid();
+      return;
+    case "pointer_button_down": case "pointer_button_up":
+      shape(["button", "leaseMs"], ["button"]);
+      if (!pointerButtons.includes(argumentsValue.button as string) || !lease() || sensitive) invalid();
+      return;
+    case "pointer_wheel":
+      shape(["deltaX", "deltaY", "wheelUnit"], ["deltaX", "deltaY"]);
+      if (!finite("deltaX") || !finite("deltaY") ||
+          (argumentsValue.wheelUnit !== undefined && argumentsValue.wheelUnit !== "pixels" && argumentsValue.wheelUnit !== "lines") || sensitive) invalid();
+      return;
+    case "gamepad_button_down": case "gamepad_button_up":
+      shape(["button", "gamepadIndex", "leaseMs"], ["button"]);
+      if (!gamepadButtons.includes(argumentsValue.button as string) || !gamepadIndex() || !lease() || sensitive) invalid();
+      return;
+    case "set_gamepad_axis":
+      shape(["axis", "value", "gamepadIndex", "leaseMs"], ["axis", "value"]);
+      if (!gamepadAxes.includes(argumentsValue.axis as string) || !finite("value") ||
+          (argumentsValue.value as number) < -1 || (argumentsValue.value as number) > 1 || !gamepadIndex() || !lease() || sensitive) invalid();
+      return;
+    case "reset_gamepad":
+      shape(["gamepadIndex"]);
+      if (!gamepadIndex() || sensitive) invalid();
+      return;
+    case "text_input":
+      shape(["text", "sensitive"], sensitive ? [] : ["text"]);
+      if ((!sensitive && typeof argumentsValue.text !== "string") || !optionalBoolean("sensitive") ||
+          (sensitive ? argumentsValue.sensitive !== true : argumentsValue.sensitive === true)) invalid();
+      return;
+    default:
+      invalid();
+  }
+}
+
 const recordedActions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"];
+const gameInputOperations = [
+  "press_game_input_action", "set_game_input_action", "release_game_input_action", "release_all_game_inputs",
+  "key_down", "key_up", "press_physical_key", "pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel",
+  "gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad", "text_input",
+];
+const pointerButtons = ["primary", "secondary", "auxiliary", "back", "forward"];
+const gamepadButtons = ["south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger",
+  "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right"];
+const gamepadAxes = ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"];
 
 function decodePngDataUri(dataUri: string): Buffer {
   const match = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUri);

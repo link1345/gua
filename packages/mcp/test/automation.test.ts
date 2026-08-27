@@ -4,8 +4,9 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { PNG } from "pngjs";
+import { guaPhysicalKeyboardCodes } from "gua-webmcp";
 
-import { GuaAutomationManager } from "../src/automation";
+import { GuaAutomationManager, validateRecording } from "../src/automation";
 import { GuaBridgeClient, guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
 import { validateRecording as validateInspectorRecording } from "../../inspector/src/automation";
 
@@ -121,6 +122,44 @@ describe("GuaAutomationManager", () => {
     expect(step?.operation).toBe("set_game_input_action");
     expect(step?.secretKey).toBe("chat-secret");
     expect(step?.arguments).toEqual({ actionId: "chat", sensitive: true });
+  });
+
+  test("keeps advertised physical keyboard codes aligned with the protocol schema", async () => {
+    const schema = JSON.parse(await readFile(new URL("../../../protocol/schema/commands.schema.json", import.meta.url), "utf8"));
+    expect(schema.$defs.keyboardCode.enum).toEqual(guaPhysicalKeyboardCodes);
+    for (const name of ["key_down", "key_up", "press_physical_key"]) {
+      const tool = guaMcpToolDefinitions.find((candidate) => candidate.name === name)!;
+      const code = (tool.inputSchema as { properties: { code: { enum: string[] } } }).properties.code;
+      expect(code.enum).toEqual(guaPhysicalKeyboardCodes);
+    }
+  });
+
+  test("validates common metadata on imported game-input steps", () => {
+    const step = {
+      action: "game_input", operation: "key_down", arguments: { code: "KeyW" },
+      relativeMilliseconds: 10, preRevision: 0, postRevision: 0, sensitive: false,
+    };
+    expect(() => validateRecording({ schemaVersion: 2, steps: [step] })).not.toThrow();
+    const validate = (candidate: Record<string, unknown>) => {
+      const recording = { schemaVersion: 2 as const, steps: [{ ...step, ...candidate }] };
+      return () => validateRecording(recording);
+    };
+    expect(validate({ relativeMilliseconds: undefined })).toThrow("relativeMilliseconds");
+    expect(validate({ relativeMilliseconds: -1 })).toThrow("relativeMilliseconds");
+    expect(validate({ preRevision: -1 })).toThrow("revisions");
+    expect(validate({ postRevision: -1 })).toThrow("revisions");
+    expect(validate({ sensitive: undefined })).toThrow("sensitive metadata");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [step, { ...step, relativeMilliseconds: 9 }] }))
+      .toThrow("non-monotonic relativeMilliseconds");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      operation: "reset_context", arguments: { expectedSessionEpoch: 1 } }] }))
+      .toThrow("invalid game input arguments");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      arguments: { type: "reset_context", code: "KeyW" } }] }))
+      .toThrow("invalid game input arguments");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      arguments: { code: "IntlBackslash" } }] }))
+      .toThrow("invalid game input arguments");
   });
 
   test("creates an explicit baseline and emits diff artifacts on mismatch", async () => {

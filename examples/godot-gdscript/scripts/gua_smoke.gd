@@ -9,6 +9,7 @@ var click_completed_before_handler := false
 var smoke_root: Control
 var finishing := false
 var observed_wheel_buttons: Array[int] = []
+var observed_shift_locations: Array[int] = []
 
 
 func _ready() -> void:
@@ -18,6 +19,8 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT, MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		observed_wheel_buttons.append(event.button_index)
+	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_SHIFT:
+		observed_shift_locations.append(event.location)
 
 
 func _run() -> void:
@@ -190,10 +193,25 @@ func _run() -> void:
 		return
 	web_input_bridge._release_game_input_owner([])
 	web_input_bridge.adapter_ref = null
-	for code in ["Backspace", "ContextMenu", "F1", "F24", "Numpad0", "Numpad9", "Quote", "ScrollLock"]:
+	for code in ["Backspace", "ContextMenu", "F1", "F24", "Numpad0", "Numpad9",
+			"NumpadEnter", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadMultiply",
+			"NumpadSubtract", "PrintScreen", "Quote", "ScrollLock"]:
 		if ui._keycode_from_w3c(code) == KEY_NONE:
 			_fail("Gua raw-keyboard capability did not implement protocol-valid code %s." % code)
 			return
+	if ui._key_location_from_w3c("ShiftLeft") != KEY_LOCATION_LEFT \
+			or ui._key_location_from_w3c("ShiftRight") != KEY_LOCATION_RIGHT:
+		_fail("Gua raw-keyboard capability lost left/right modifier locations.")
+		return
+	observed_shift_locations.clear()
+	ui._inject_key(KEY_SHIFT, true, KEY_LOCATION_LEFT)
+	ui._inject_key(KEY_SHIFT, false, KEY_LOCATION_LEFT)
+	ui._inject_key(KEY_SHIFT, true, KEY_LOCATION_RIGHT)
+	ui._inject_key(KEY_SHIFT, false, KEY_LOCATION_RIGHT)
+	await get_tree().process_frame
+	if not observed_shift_locations.has(KEY_LOCATION_LEFT) or not observed_shift_locations.has(KEY_LOCATION_RIGHT):
+		_fail("Gua raw-keyboard events did not preserve left/right modifier locations: %s" % observed_shift_locations)
+		return
 	if ui._gamepad_button("left_shoulder") != JOY_BUTTON_LEFT_SHOULDER \
 			or ui._gamepad_button("start") != JOY_BUTTON_START \
 			or ui._gamepad_button("dpad_right") != JOY_BUTTON_DPAD_RIGHT:

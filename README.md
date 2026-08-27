@@ -165,8 +165,9 @@ The bridge, MCP, and Inspector expose `get_clock`, `clock_install`,
 Hosts can publish an explicit game-action map independent of the UI tree, then
 drive buttons, axes, vectors, or text through `press_game_input_action`,
 `set_game_input_action`, and `release_game_input_action`. Opt-in raw tools cover
-W3C physical keyboard codes, pointer motion/buttons/wheel, Standard Gamepad
-controls, and text input. Stateful input is isolated per connection, defaults
+the cross-adapter W3C physical keyboard code subset enumerated by the command
+schema, pointer motion/buttons/wheel, Standard Gamepad controls, and text input.
+Stateful input is isolated per connection, defaults
 to a five-second lease (maximum 60 seconds), and is neutralized on expiry,
 disconnect, reset, replay failure, or session disposal. Inspector shows action
 metadata, held leases, raw controls, and an emergency **Release all** button.

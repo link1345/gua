@@ -323,8 +323,12 @@ Semantic commands are `get_game_input_actions`, `press_game_input_action`,
 and `release_all_game_inputs`. Raw commands are `key_down`, `key_up`,
 `press_physical_key`, pointer move/button/wheel operations, standard-mapping
 gamepad button/axis/reset operations, and `text_input`. The existing UI-tree
-`press_key` command is unchanged; physical keyboard input uses W3C
-`KeyboardEvent.code` through `press_physical_key`.
+`press_key` command is unchanged; physical keyboard input uses the supported
+W3C `KeyboardEvent.code` values enumerated by `commands.schema.json` through
+`press_physical_key`. This explicit cross-adapter subset includes standard
+alphanumeric, navigation, left/right modifier locations, F1-F24, numpad
+digit/operator, and PrintScreen codes; clients must not assume every optional
+or platform-specific W3C code is available.
 Before dispatching `press_game_input_action` or `set_game_input_action`, MCP
 must resolve the current descriptor and require `confirmed=true` when
 `requiresConfirmation` is set; Inspector presents its local confirmation UI.
@@ -341,6 +345,12 @@ before runtime destruction; .NET adapters register that shutdown path when they
 enable game input. Enqueue acceptance is not completion: clients
 must wait for the matching request ID to be completed after injection into the
 host input path.
+If an owner disconnects after its request was consumed, the adapter may still
+complete that in-flight request so its pump can drain normally. The core accepts
+that late completion but does not recreate a hold or retain a result for the
+released owner. It queues neutral cleanup immediately and, if that cleanup was
+already consumed before the last ordinary in-flight request completes, queues a
+final cleanup again so delayed host injection cannot remain active.
 Local C++ sessions use `result_json(requestId)` and .NET sessions use
 `PollResult(requestId)` to distinguish pending, successful, and failed host
 injection. A completed result is acknowledged and removed after a successful

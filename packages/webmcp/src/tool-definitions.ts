@@ -30,6 +30,20 @@ export type GuaGameInputToolName = (typeof guaGameInputToolNames)[number];
 
 export const maxBrowserTimerDelayMs = 2_147_483_647;
 
+export const guaPhysicalKeyboardCodes: readonly string[] = [
+  "Backquote", "Backslash", "Backspace", "BracketLeft", "BracketRight", "CapsLock", "Comma",
+  "ContextMenu", "Delete", "End", "Enter", "Equal", "Escape", "Home", "Insert", "MetaLeft",
+  "MetaRight", "Minus", "NumLock", "PageDown", "PageUp", "Pause", "Period", "Quote", "ScrollLock",
+  "Semicolon", "ShiftLeft", "ShiftRight", "Slash", "Space", "Tab", "ControlLeft", "ControlRight",
+  "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "PrintScreen",
+  "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadMultiply",
+  "NumpadSubtract",
+  ...Array.from({ length: 26 }, (_, index) => `Key${String.fromCharCode(65 + index)}`),
+  ...Array.from({ length: 10 }, (_, index) => `Digit${index}`),
+  ...Array.from({ length: 24 }, (_, index) => `F${index + 1}`),
+  ...Array.from({ length: 10 }, (_, index) => `Numpad${index}`),
+];
+
 export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolName>[] = [
   {
     name: "get_ui_tree",
@@ -120,8 +134,9 @@ export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInpu
   { name: "get_game_input_state", description: "Inspect held inputs owned by this page-local WebMCP session.", inputSchema: objectSchema({}) },
   { name: "release_all_game_inputs", description: "Release every semantic and raw input owned by this page-local WebMCP session.", inputSchema: objectSchema({}) },
   ...(["key_down", "key_up", "press_physical_key"] as const).map((name) => ({
-    name, description: `${name} using a W3C KeyboardEvent.code identifier.`,
-    inputSchema: objectSchema({ code: stringProperty("W3C KeyboardEvent.code such as KeyW."), leaseMs: leaseProperty() }, ["code"]),
+    name, description: `${name} using a supported W3C KeyboardEvent.code identifier.`,
+    inputSchema: objectSchema({ code: { type: "string", enum: guaPhysicalKeyboardCodes,
+      description: "Supported W3C KeyboardEvent.code such as KeyW or NumpadEnter." }, leaseMs: leaseProperty() }, ["code"]),
   })),
   { name: "pointer_move", description: "Move the engine pointer using absolute or delta coordinates.", inputSchema: objectSchema({
     mode: { type: "string", enum: ["absolute", "delta"] }, coordinateSpace: { type: "string", enum: ["viewport_normalized", "viewport_pixels"] },
