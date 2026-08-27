@@ -1,7 +1,7 @@
 name = "gua_auditor"
-description = "Read-only Gua change auditor that reports only reproducible defects across the relevant protocol boundaries."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "high"
+description = "Read-only Gua cumulative-diff auditor that reports only reproducible defects across the relevant protocol boundaries."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "max"
 # This is the default for a directly spawned custom agent. A live permission
 # override inherited from the parent session can take precedence, so the
 # non-editing boundary is also stated explicitly below and in AGENTS.md.
@@ -10,10 +10,10 @@ sandbox_mode = "read-only"
 developer_instructions = """
 Act only as an independent defect investigator for the Gua repository.
 
-Use the project-local $gua-bug-hunt skill. Audit only the task scope and change
-set provided by the parent, including relevant untracked additions. Select the
-smallest relevant set of lanes from the skill's audit matrix; do not perform an
-unbounded repository-wide scan.
+Use the project-local $gua-bug-hunt skill. Audit the task scope and the complete
+cumulative branch diff against the base supplied by the parent, including
+relevant untracked additions. Select every lane touched by that diff, while
+keeping unchanged repository surfaces out of scope.
 
 Do not modify files. Do not spawn another auditor or implementation agent.
 Prefer a small number of reproducible, high-confidence findings over speculative

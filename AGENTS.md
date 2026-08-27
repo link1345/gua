@@ -42,16 +42,42 @@ bot, or full UI framework.
   skill. Keep bug-hunting subagents read-only and require reproducible evidence;
   fixes are a separate task unless the user explicitly requests them.
 
+## Code Review Rules
+
+- Review the cumulative branch diff against its merge base, not only the most
+  recent task or commit. A fix can expose a defect in an older part of the same
+  pull request.
+- For cross-boundary changes, trace the affected contract from `protocol/`
+  through the C ABI, managed bindings, engine adapters, bridge, MCP, Inspector,
+  recording, and tests. Do not assume that matching type names prove matching
+  behavior.
+- Reauthorize owner-, session-, visibility-, capability-, and confirmation-bound
+  operations at the point where the host consumes them. Enqueue-time validation
+  is not sufficient across disconnect, reset, policy, or Action Map changes.
+- Owner cleanup must neutralize held input on disconnect, dispose, reset, and
+  lease expiry. A consumed request must retain a completion path even if its
+  owner disconnects before the host reports completion.
+- Validate common request metadata before dispatching to command-specific paths;
+  an early return must not bypass epoch, timing, cancellation, or correlation
+  checks.
+- Publicly advertised keyboard, pointer, gamepad, action, and capability values
+  must be accepted consistently or rejected consistently at every boundary.
+- Preserve request correlation and one-shot bounded result retention. Never let
+  cleanup, polling, or one client consume another request's completion.
+- Keep sensitive input out of logs, diagnostics, errors, recordings, and review
+  artifacts while preserving safe replay references.
+
 ## Automatic Audit Gate
 
 - After changing repository content, including adding an untracked file,
   complete the initial focused validation, then spawn exactly one `gua_auditor`
   subagent before the final handoff.
-- Give the auditor only the current task scope and change set. Include
-  `git status --short`, tracked and staged diffs, and the contents of relevant
-  untracked files so additions cannot escape review. Require the auditor to use
-  `$gua-bug-hunt`, select only the relevant audit-matrix lanes, and return
-  reproducible findings with file references and verification evidence.
+- Give the auditor the current task scope plus the cumulative branch diff against
+  the intended base branch. Include `git status --short`, tracked and staged
+  diffs, and the contents of relevant untracked files so additions cannot escape
+  review. Require the auditor to use `$gua-bug-hunt`, select every audit-matrix
+  lane touched by that cumulative diff, and return reproducible findings with
+  file references and verification evidence.
 - Treat the auditor as behaviorally read-only: its custom-agent sandbox defaults
   to read-only, but a live parent permission override may take precedence.
   Explicitly prohibit edits in every audit prompt, reject any audit-authored
@@ -65,4 +91,11 @@ bot, or full UI framework.
   the final pass reports no actionable finding. This bounds the automatic gate
   to at most two audit passes per task.
 - Skip the automatic audit only when no repository file changed, when the task
-  is itself a read-only audit, or when the user explicitly asks to skip it.
+  is itself a read-only audit, when running as the fix phase inside
+  `scripts/run-local-pr-audit.ps1` (the outer loop owns re-audit), or when the
+  user explicitly asks to skip it.
+
+For a deliberate pull-request-wide gate, run
+`scripts/run-local-pr-audit.ps1 -Base origin/main`. Add `-Fix` to let a parent
+Codex validate findings, apply only supported fixes, run focused checks, and
+repeat the full review for at most four passes.
