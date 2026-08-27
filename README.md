@@ -58,6 +58,25 @@ observe, operate, and verify the running game. Gua does not replace the game
 engine or coding agent, and semantic targeting does not depend on image
 recognition.
 
+### Browser-native WebMCP (experimental)
+
+Godot Web Export and Unity WebGL pages can expose the same live Semantic UI Tree
+through the experimental browser `document.modelContext` API. The
+`gua-webmcp` package registers `get_ui_tree`, semantic actions, waits, the
+read-only World Object Tree observation tools, capability-gated Semantic Game
+Action / Raw Input tools, and an optional screenshot tool
+against an engine-owned same-page bridge. Shared world types and selector
+definitions are published as `gua-world-tools`. It requires
+neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
+fully functional. Each tab owns its game and tool registrations; there is no
+custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
+Game input is owned by the current page, waits for request-correlated host
+completion, and is released on timeout, cancellation, unregister, or engine
+shutdown. Raw tools remain absent until the host explicitly initializes their
+input pump and cleanup path.
+The current Godot Web addon supports debug Web exports only; release export
+support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
+
 ## Godot 4.7 support
 
 The recommended Godot integration is the GDScript addon backed by GDExtension.

@@ -23,6 +23,7 @@ public sealed partial class GuaUnityRuntime
     private readonly Dictionary<string, object?> gameInputValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<ulong, OwnedSemanticValue>> semanticValuesByOwner = new(StringComparer.Ordinal);
     private long gameInputSequence;
+    private GuaGameInputCapabilities gameInputCapabilities;
     public static event Action<string, object?>? GameInputChanged;
 
 #if ENABLE_INPUT_SYSTEM
@@ -55,6 +56,7 @@ public sealed partial class GuaUnityRuntime
         }
 #endif
         runtime.EnableGameInput(capabilities, DisposeGameInput);
+        gameInputCapabilities = capabilities;
     }
 
     private void PumpGameInput()
@@ -169,10 +171,10 @@ public sealed partial class GuaUnityRuntime
             if (request.Operation == GuaGameInputOperation.Release)
             {
                 var released = false;
-                var button = GamepadButton(gamepad, request.Target);
-                if (button != null)
+                var releasedButton = GamepadButton(gamepad, request.Target);
+                if (releasedButton != null)
                 {
-                    SetButtonOwner(button, request.OwnerId, false);
+                    SetButtonOwner(releasedButton, request.OwnerId, false);
                     released = true;
                 }
                 var axis = GamepadAxis(gamepad, request.Target);
@@ -247,6 +249,7 @@ public sealed partial class GuaUnityRuntime
 
     private void DisposeGameInput()
     {
+        gameInputCapabilities = GuaGameInputCapabilities.None;
         ReleaseAllInjectedInput();
         gameInputValues.Clear();
 #if ENABLE_INPUT_SYSTEM

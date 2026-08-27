@@ -6,3 +6,5 @@ compatibility_minimum = "4.7"
 [libraries]
 
 windows.debug.x86_64 = "res://addons/gua/bin/gua_godot.windows.debug.x86_64.dll"
+; The current Web addon supports debug exports only. Release support is tracked in link1345/gua#75.
+web.wasm32.single.debug = "res://addons/gua/bin/gua_godot.web.debug.wasm32.wasm"

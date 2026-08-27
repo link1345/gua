@@ -17,6 +17,21 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void CoreContextExposesQueuedActionCancellation()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("fixture");
+        context.RegisterNode("name", "textbox", "Name", new GuaBounds(0, 0, 1, 1));
+        context.EndFrame();
+
+        Assert.That(context.EnqueueAction(new GuaActionRequest(GuaActionType.Focus, "name"), out var requestId),
+            Is.EqualTo(GuaActionError.None));
+        IGuaContext abstraction = context;
+        Assert.That(abstraction.CancelAction(requestId), Is.EqualTo(GuaActionCancelResult.Cancelled));
+        Assert.That(abstraction.CancelAction(requestId), Is.EqualTo(GuaActionCancelResult.NotFound));
+    }
+
+    [Test]
     public void WorldObjectTreePublishesQueriesProjectsAndResetsIndependently()
     {
         using var context = new GuaContext();
@@ -43,6 +58,37 @@ public sealed class SelectorParityTests
     }
 
     [Test]
+    public void RuntimePlayerWorldReadsCannotExposeDebugOnlyObjects()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.EnableWorldObjectTreeAdapter();
+        runtime.BeginWorldFrame("corridor");
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
+            new GuaWorldPosition(640, 180), VisibleToPlayer: true));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
+            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+        runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden", "item", "Hidden", GuaWorldSpace.World2D,
+            new GuaWorldPosition(2, 2), VisibleToPlayer: false));
+        runtime.EndWorldFrame();
+
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var debugTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetWorldObjectTreeJson(), options)!;
+        var playerTree = JsonSerializer.Deserialize<GuaWorldTree>(runtime.GetPlayerWorldObjectTreeJson(), options)!;
+        var debugSecret = JsonSerializer.Deserialize<GuaWorldQueryResult>(
+            runtime.QueryWorldObjectsJson(new GuaWorldSelector(Id: "secret")), options)!;
+        var playerSecret = JsonSerializer.Deserialize<GuaWorldQueryResult>(
+            runtime.QueryPlayerWorldObjectsJson(new GuaWorldSelector(Id: "secret")), options)!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(debugTree.Objects.Select(item => item.Id), Is.EquivalentTo(new[] { "door-a", "secret", "hidden" }));
+            Assert.That(playerTree.Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
+            Assert.That(debugSecret.Matches, Has.Count.EqualTo(1));
+            Assert.That(playerSecret.Matches, Is.Empty);
+        });
+    }
+
+    [Test]
     public async Task RemoteWorldObjectTreeKeepsTheHostPlayerProfileAndStateSelector()
     {
         var port = ReservePort();
@@ -60,6 +106,13 @@ public sealed class SelectorParityTests
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
             new GuaWorldPosition(3, 3), VisibleToPlayer: true, ParentId: "hidden-parent"));
         runtime.EndWorldFrame();
+        var localQuery = JsonSerializer.Deserialize<GuaWorldQueryResult>(
+            runtime.QueryWorldObjectsJson(new GuaWorldSelector(State: new GuaWorldStateCriterion("locked", true))),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        Assert.That(localQuery.Matches.Single().Id, Is.EqualTo("door-a"));
+        Assert.Throws<ArgumentException>(() => runtime.QueryWorldObjectsJson(new GuaWorldSelector(DirectChild: true)));
+        Assert.Throws<ArgumentException>(() => runtime.QueryWorldObjectsJson(
+            new GuaWorldSelector(State: new GuaWorldStateCriterion("code", 9_007_199_254_740_993UL))));
         Assert.That(runtime.StartInspectorBridge(port), Is.True);
         try
         {

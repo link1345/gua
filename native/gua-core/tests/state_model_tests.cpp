@@ -514,6 +514,13 @@ int main()
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 10.0);
     assert(cpp_context.poll_clock_step(cpp_step) && cpp_step.delta_ms == 5.0);
+    cpp_context.begin_frame("actions");
+    cpp_context.button("cpp-cancel", "Cancel", { 0, 0, 1, 1 });
+    cpp_context.end_frame();
+    std::uint64_t cpp_request_id = 0;
+    assert(cpp_context.enqueue_action({ 0, gua::ActionType::click, "cpp-cancel" }, cpp_request_id) == GUA_ACTION_ACCEPTED);
+    assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::cancelled);
+    assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::not_found);
 
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();
@@ -642,6 +649,11 @@ int main()
     assert(gua_enqueue_action(context, &scroll, &action_ids[3]) == GUA_ACTION_ACCEPTED);
     assert(gua_enqueue_action(context, &key, &action_ids[4]) == GUA_ACTION_ACCEPTED);
     for (std::size_t i = 1; i < 5; ++i) assert(action_ids[i] > action_ids[i - 1]);
+    const gua_action_request_descriptor_t cancelled_focus { sizeof(gua_action_request_descriptor_t), GUA_ACTION_FOCUS, "name" };
+    std::uint64_t cancelled_request_id = 0;
+    assert(gua_enqueue_action(context, &cancelled_focus, &cancelled_request_id) == GUA_ACTION_ACCEPTED);
+    assert(gua_cancel_action_request(context, cancelled_request_id) == GUA_ACTION_CANCELLED);
+    assert(gua_cancel_action_request(context, cancelled_request_id) == GUA_ACTION_CANCEL_NOT_FOUND);
 
     const gua_action_request_descriptor_t secret { sizeof(gua_action_request_descriptor_t), GUA_ACTION_SET_VALUE, "name", "secret-marker", 0, 0, 0, nullptr, 0, 1 };
     std::uint64_t request_id = 0;
@@ -651,6 +663,7 @@ int main()
     assert(gua_consume_action_request(context, GUA_ACTION_SET_VALUE, "name", &consumed) == 1);
     assert(consumed.request_id == request_id);
     assert(std::strcmp(consumed.value, "secret-marker") == 0);
+    assert(gua_cancel_action_request(context, request_id) == GUA_ACTION_CANCEL_IN_FLIGHT);
     const gua_action_result_t result { sizeof(gua_action_result_t), request_id, GUA_ACTION_SET_VALUE,
         GUA_ACTION_STATUS_SUCCEEDED, 0, "name", "secret-marker", 1 };
     assert(gua_emit_action_result(context, &result) == 1);
@@ -751,6 +764,17 @@ int main()
     assert(reset_diagnostics.find("\"operations\":[]") != std::string::npos);
     assert(reset_diagnostics.find("\"events\":[]") != std::string::npos);
     assert(std::string(gua_get_ui_tree_json(context)).find("\"sessionEpoch\":2") != std::string::npos);
+    gua_begin_frame(context, "post-reset");
+    gua_register_node(context, "post-reset-focus", "textbox", "Post-reset focus", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(context);
+    const gua_action_request_descriptor_t post_reset_focus {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_FOCUS, "post-reset-focus"
+    };
+    std::uint64_t post_reset_request_id = 0;
+    assert(gua_enqueue_action(context, &post_reset_focus, &post_reset_request_id) == GUA_ACTION_ACCEPTED);
+    assert(post_reset_request_id > request_id);
+    assert(gua_cancel_action_request(context, action_ids[0]) == GUA_ACTION_CANCEL_NOT_FOUND);
+    assert(gua_cancel_action_request(context, post_reset_request_id) == GUA_ACTION_CANCELLED);
     char other_id[16] {};
     assert(gua_find_node_by_id(other, "other", other_id, sizeof(other_id)) == 1);
 

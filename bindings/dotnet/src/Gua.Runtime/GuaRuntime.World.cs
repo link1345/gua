@@ -52,7 +52,7 @@ public sealed partial class GuaRuntime
         } finally { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
     }
 
-    private static double WorldNumber(string key, object value)
+    internal static double WorldNumber(string key, object value)
     {
         var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
         if (!double.IsFinite(number)) throw new ArgumentException($"World state '{key}' must be a finite number.");
@@ -71,19 +71,100 @@ public sealed partial class GuaRuntime
         return number;
     }
 
-    public unsafe string GetWorldObjectTreeJson()
+    public string GetWorldObjectTreeJson() => GetWorldObjectTreeJson(playerProjection: false);
+    public string GetPlayerWorldObjectTreeJson() => GetWorldObjectTreeJson(playerProjection: true);
+
+    private unsafe string GetWorldObjectTreeJson(bool playerProjection)
     {
         ThrowIfDisposed();
-        var required = Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
+        var required = playerProjection
+            ? Native.gua_runtime_copy_player_world_object_tree_json(_handle, null, 0)
+            : Native.gua_runtime_copy_world_object_tree_json(_handle, null, 0);
         if (required <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
         while (true) {
             var bytes = new byte[required];
             fixed (byte* output = bytes) {
-                var actual = Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length);
+                var actual = playerProjection
+                    ? Native.gua_runtime_copy_player_world_object_tree_json(_handle, output, bytes.Length)
+                    : Native.gua_runtime_copy_world_object_tree_json(_handle, output, bytes.Length);
                 if (actual <= 0) throw new InvalidOperationException("World Object Tree is unavailable.");
                 if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
                 required = actual;
             }
         }
     }
+
+    public string QueryWorldObjectsJson(GuaWorldSelector selector) => QueryWorldObjectsJson(selector, playerProjection: false);
+    public string QueryPlayerWorldObjectsJson(GuaWorldSelector selector) => QueryWorldObjectsJson(selector, playerProjection: true);
+
+    private unsafe string QueryWorldObjectsJson(GuaWorldSelector selector, bool playerProjection)
+    {
+        ThrowIfDisposed();
+        if (selector is null) throw new ArgumentNullException(nameof(selector));
+        using var native = new RuntimeWorldSelector(selector);
+        var value = native.Value;
+        var required = playerProjection
+            ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, null, 0)
+            : Native.gua_runtime_query_world_objects_json(_handle, in value, null, 0);
+        if (required <= 0) throw new InvalidOperationException("World object query is unavailable.");
+        while (true) {
+            var bytes = new byte[required];
+            fixed (byte* output = bytes) {
+                var actual = playerProjection
+                    ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, output, bytes.Length)
+                    : Native.gua_runtime_query_world_objects_json(_handle, in value, output, bytes.Length);
+                if (actual <= 0) throw new InvalidOperationException("World object query is unavailable.");
+                if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
+                required = actual;
+            }
+        }
+    }
+}
+
+internal sealed class RuntimeWorldSelector : IDisposable
+{
+    private readonly List<nint> allocations = [];
+    public Native.WorldSelector Value { get; }
+
+    public RuntimeWorldSelector(GuaWorldSelector source)
+    {
+        foreach (var (name, value) in new[] {
+            (nameof(source.Id), source.Id), (nameof(source.Kind), source.Kind), (nameof(source.Label), source.Label),
+            (nameof(source.Tag), source.Tag), (nameof(source.ParentId), source.ParentId) })
+            if (value is not null && value.Length == 0)
+                throw new ArgumentException($"World selector criterion '{name}' must be a non-empty string.", nameof(source));
+        if (source.DirectChild && source.ParentId is null)
+            throw new ArgumentException("World selector ParentId is required when DirectChild is true.", nameof(source));
+        nint Text(string? text) { if (text is null) return 0; var pointer = Marshal.StringToCoTaskMemUTF8(text); allocations.Add(pointer); return pointer; }
+        try {
+            nint statePointer = 0;
+            if (source.State is { } state) {
+                if (string.IsNullOrEmpty(state.Key)) throw new ArgumentException("World selector state key must be non-empty.", nameof(source));
+                var nativeState = new Native.WorldState { StructSize = (uint)Marshal.SizeOf<Native.WorldState>(), Key = Text(state.Key) };
+                switch (state.Value) {
+                    case null: nativeState.Type = 0; break;
+                    case string text: nativeState.Type = 1; nativeState.StringValue = Text(text); break;
+                    case bool boolean: nativeState.Type = 3; nativeState.BoolValue = boolean ? 1 : 0; break;
+                    case byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal:
+                        nativeState.Type = 2; nativeState.NumberValue = GuaRuntime.WorldNumber(state.Key, state.Value); break;
+                    default: throw new ArgumentException("World selector state value must be a primitive JSON value.", nameof(source));
+                }
+                statePointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.WorldState>());
+                allocations.Add(statePointer);
+                Marshal.StructureToPtr(nativeState, statePointer, false);
+            }
+            Value = new Native.WorldSelector {
+                StructSize = (uint)Marshal.SizeOf<Native.WorldSelector>(),
+                Id = Text(source.Id), IdMatch = (int)source.IdMatch,
+                Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
+                Label = Text(source.Label), LabelMatch = (int)source.LabelMatch,
+                Tag = Text(source.Tag), TagMatch = (int)source.TagMatch,
+                ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
+                VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer,
+            };
+        } catch { Dispose(); throw; }
+    }
+
+    private static int Filter(bool? value) => value is null ? 0 : value.Value ? 2 : 1;
+    public void Dispose() { foreach (var allocation in allocations) Marshal.FreeCoTaskMem(allocation); }
 }

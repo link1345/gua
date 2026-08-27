@@ -2,6 +2,10 @@
 
 This sample uses the Gua Godot GDExtension from GDScript.
 
+The packaged Godot Web GDExtension currently supports debug Web exports only.
+Release Web export support is tracked in
+[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).
+
 ## Opt-in visual capture
 
 `GuaAutoAdapter.capture_viewport_screenshot()` reads the current viewport after a
@@ -19,6 +23,9 @@ adapter's main-thread pump is active. The adapter emits
 `game_input_action_changed`, exposes `get_game_input_action_value(id)`, injects
 raw events through `Input.parse_input_event`, and releases held values when the
 lease or session ends.
+In a Web export, the page-local WebMCP bridge advertises only those initialized
+capabilities. It creates a private game-input owner and releases all input on
+abort, timeout, bridge replacement, adapter disposal, or tool unregister.
 Because Godot's dummy headless renderer has no viewport texture, the smoke injects
 a deterministic `Image`; normal runtime calls omit that test-only argument and
 capture `Viewport.get_texture().get_image()`.
@@ -129,5 +136,7 @@ For a headless smoke check of the load-order-safe path:
 Run the command from the repository root. The wrapper keeps Godot's temporary
 `user://` data under the ignored `build/` directory, avoiding a Godot 4.7
 Windows access violation when `%APPDATA%` is not writable.
-The sample disables built-in file logging because the smoke already writes to
-stdout and Godot 4.7 can crash while creating an unavailable `user://logs` path.
+It writes Godot's log inside the repository, disables the crash handler for
+deterministic headless failures, and terminates a stalled smoke process after
+two minutes. Override the executable with `GODOT_EXECUTABLE` or
+`-GodotExecutable` when needed.

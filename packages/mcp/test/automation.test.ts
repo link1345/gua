@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { PNG } from "pngjs";
 
 import { GuaAutomationManager } from "../src/automation";
-import { GuaBridgeClient, guaMcpTools, parseClockRunForArguments } from "../src/index";
+import { GuaBridgeClient, guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
 import { validateRecording as validateInspectorRecording } from "../../inspector/src/automation";
 
 const roots: string[] = [];
@@ -43,7 +43,7 @@ describe("GuaAutomationManager", () => {
   test("keeps bundled workspace packages out of published dependencies", async () => {
     const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     expect(Object.values(manifest.dependencies ?? {}).some((version) => String(version).startsWith("workspace:"))).toBe(false);
-    expect(manifest.devDependencies["@gua/world-tools"]).toBe("workspace:*");
+    expect(manifest.devDependencies["gua-world-tools"]).toBe("^0.19.2");
   });
 
   test("rejects clock_run_for without its required duration", () => {
@@ -68,6 +68,20 @@ describe("GuaAutomationManager", () => {
     expect(guaMcpTools).toContain("find_world_objects");
     expect(guaMcpTools).toContain("wait_for_world_object");
     expect(guaMcpTools).not.toContain("interact_world_object" as never);
+  });
+
+  test("publishes MCP-specific sensitive value and screenshot contracts", () => {
+    const setValue = guaMcpToolDefinitions.find((tool) => tool.name === "set_value")!;
+    const setValueSchema = setValue.inputSchema as {
+      properties: Record<string, unknown>;
+      allOf: Array<{ then: { required: string[] } }>;
+    };
+    expect(setValueSchema.properties.secretKey).toBeDefined();
+    expect(setValueSchema.allOf[0]?.then.required).toContain("secretKey");
+
+    const screenshot = guaMcpToolDefinitions.find((tool) => tool.name === "get_screenshot")!;
+    expect(screenshot.description).toContain("latest screenshot published");
+    expect(screenshot.description).toContain("does not request a fresh capture");
   });
 
   test("records, redacts, saves, and reloads semantic operations", async () => {

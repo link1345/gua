@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Gua.Core;
 using Gua.Unity;
 using TMPro;
 using UnityEngine;
@@ -19,6 +20,7 @@ public static class GuaUnityFixture
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Build()
     {
+        GuaUnityAdapterRegistry.Register(new GuaUnityThrowingAdapter());
         Application.runInBackground = true;
         Application.targetFrameRate = 60;
         Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
@@ -109,6 +111,23 @@ public static class GuaUnityFixture
         input.text = "pilot";
         input.caretPosition = input.text.Length;
 
+        var sensitiveInputObject = new GameObject("SensitiveInput", typeof(RectTransform), typeof(UnityEngine.UI.Image), typeof(InputField), typeof(GuaId));
+        sensitiveInputObject.transform.SetParent(coverage.transform, false);
+        sensitiveInputObject.GetComponent<GuaId>().Value = "sensitive-input";
+        var sensitiveInputRect = sensitiveInputObject.GetComponent<RectTransform>();
+        sensitiveInputRect.anchoredPosition = new Vector2(-420, 320);
+        sensitiveInputRect.sizeDelta = new Vector2(220, 44);
+        var sensitiveInputText = Text("Text", sensitiveInputObject.transform, "private", Vector2.zero, sensitiveInputRect.sizeDelta, 16);
+        Stretch(sensitiveInputText.rectTransform);
+        var sensitiveInput = sensitiveInputObject.GetComponent<InputField>();
+        sensitiveInput.textComponent = sensitiveInputText;
+        sensitiveInput.text = "private";
+        sensitiveInput.caretPosition = sensitiveInput.text.Length;
+
+        var throwingInputObject = new GameObject("ThrowingInput", typeof(RectTransform), typeof(GuaId), typeof(GuaUnityThrowingControl));
+        throwingInputObject.transform.SetParent(coverage.transform, false);
+        throwingInputObject.GetComponent<GuaId>().Value = "throwing-input";
+
         var sliderRect = Rect("SampleSlider", coverage.transform, new Vector2(-420, 200), new Vector2(220, 32));
         sliderRect.gameObject.AddComponent<GuaId>().Value = "sample-slider";
         var slider = sliderRect.gameObject.AddComponent<UnityEngine.UI.Slider>();
@@ -163,6 +182,10 @@ public static class GuaUnityFixture
 
         var integerSlider = new SliderInt("integer-slider", 0, 10) { name = "integer-slider", value = 3 };
         root.Add(integerSlider);
+
+        var detachedSensitiveInput = new TextField("detached-sensitive-input") { name = "detached-sensitive-input", value = "attached" };
+        root.Add(detachedSensitiveInput);
+        documentObject.AddComponent<GuaUnityToolkitDetachDriver>().Configure(root, detachedSensitiveInput);
 
         var tabView = new TabView { name = "fixture-tabs" };
         tabView.Add(new Tab("First") { name = "first-tab" });
@@ -246,6 +269,47 @@ public static class GuaUnityFixture
     }
 }
 
+public sealed class GuaUnityThrowingControl : MonoBehaviour
+{
+    public string Value { get; set; } = "unchanged";
+}
+
+public sealed class GuaUnityThrowingAdapter : IGuaUnityControlAdapter
+{
+    private sealed class Target
+    {
+        public Target(GuaUnityThrowingControl control) => Control = control;
+
+        public GuaUnityThrowingControl Control { get; }
+    }
+
+    public bool TryDescribe(Transform transform, out object target, out string role, out string label, out string value)
+    {
+        var control = transform.GetComponent<GuaUnityThrowingControl>();
+        if (control != null)
+        {
+            target = new Target(control);
+            role = "textbox";
+            label = "throwing-input";
+            value = control.Value;
+            return true;
+        }
+        target = null;
+        role = null;
+        label = null;
+        value = null;
+        return false;
+    }
+
+    public bool TryApply(object target, GuaActionRequest request, out string value)
+    {
+        value = null;
+        if (target is not Target wrapper || request.Action != GuaActionType.SetValue) return false;
+        wrapper.Control.Value = request.Value ?? string.Empty;
+        throw new InvalidOperationException("Rejected sensitive value: " + request.Value);
+    }
+}
+
 public sealed class GuaUnityHostClickDriver : MonoBehaviour
 {
     public UnityEngine.UI.Button Button { get; set; }
@@ -255,6 +319,36 @@ public sealed class GuaUnityHostClickDriver : MonoBehaviour
         yield return null;
         yield return null;
         Button.onClick.Invoke();
+        Destroy(this);
+    }
+}
+
+public sealed class GuaUnityToolkitDetachDriver : MonoBehaviour
+{
+    private VisualElement parent;
+    private TextField target;
+    private string initialValue;
+    private int detachedFrames = -1;
+
+    public void Configure(VisualElement targetParent, TextField targetField)
+    {
+        parent = targetParent;
+        target = targetField;
+        initialValue = targetField.value;
+    }
+
+    private void Update()
+    {
+        if (target == null || parent == null) return;
+        if (detachedFrames < 0)
+        {
+            if (string.Equals(target.value, initialValue, StringComparison.Ordinal)) return;
+            target.RemoveFromHierarchy();
+            detachedFrames = 10;
+            return;
+        }
+        if (detachedFrames-- > 0) return;
+        parent.Add(target);
         Destroy(this);
     }
 }

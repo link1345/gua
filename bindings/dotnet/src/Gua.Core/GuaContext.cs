@@ -441,6 +441,12 @@ public sealed partial class GuaContext : IGuaContext, IGuaClockContext, IDisposa
         }
     }
 
+    public GuaActionCancelResult CancelAction(ulong requestId)
+    {
+        ThrowIfDisposed();
+        return (GuaActionCancelResult)Native.gua_cancel_action_request(_handle, requestId);
+    }
+
     public bool TryPollActionEvent(out GuaActionEvent e)
     {
         return TryPollActionEventCore(null, out e);

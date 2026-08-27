@@ -34,14 +34,25 @@ target_link_libraries(gua-godot
 
 target_compile_features(gua-godot PRIVATE cxx_std_20)
 
+if(EMSCRIPTEN)
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.web.debug.wasm32")
+else()
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.debug.x86_64")
+endif()
+
 set_target_properties(gua-godot
     PROPERTIES
-        OUTPUT_NAME "gua_godot.windows.debug.x86_64"
+        OUTPUT_NAME "${GUA_GODOT_OUTPUT_NAME}"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
 )
+
+if(EMSCRIPTEN)
+    set_target_properties(gua-godot PROPERTIES PREFIX "" SUFFIX ".wasm")
+    target_link_options(gua-godot PRIVATE "-sSIDE_MODULE=1")
+endif()
 
 if(MSVC)
     target_compile_options(gua-godot

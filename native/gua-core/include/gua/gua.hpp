@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <unordered_set>
 
 namespace gua {
 
@@ -42,6 +43,12 @@ enum class ActionType {
     click = GUA_ACTION_CLICK, focus = GUA_ACTION_FOCUS, set_value = GUA_ACTION_SET_VALUE,
     set_checked = GUA_ACTION_SET_CHECKED, select = GUA_ACTION_SELECT, scroll = GUA_ACTION_SCROLL,
     press_key = GUA_ACTION_PRESS_KEY,
+};
+
+enum class ActionCancelResult {
+    in_flight = GUA_ACTION_CANCEL_IN_FLIGHT,
+    not_found = GUA_ACTION_CANCEL_NOT_FOUND,
+    cancelled = GUA_ACTION_CANCELLED,
 };
 
 struct ActionRequest {
@@ -117,7 +124,7 @@ public:
     Context& operator=(const Context&) = delete;
 
     Context(Context&& other) noexcept
-        : context_(other.context_)
+        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_))
     {
         other.context_ = nullptr;
     }
@@ -127,6 +134,7 @@ public:
         if (this != &other) {
             reset();
             context_ = other.context_;
+            sensitive_node_ids_ = std::move(other.sensitive_node_ids_);
             other.context_ = nullptr;
         }
         return *this;
@@ -140,6 +148,16 @@ public:
     [[nodiscard]] gua_context_t* native_handle() const noexcept
     {
         return context_;
+    }
+
+    void mark_node_sensitive(std::string_view id)
+    {
+        sensitive_node_ids_.emplace(id);
+    }
+
+    [[nodiscard]] bool is_node_sensitive(std::string_view id) const
+    {
+        return sensitive_node_ids_.contains(std::string(id));
     }
 
     void install_clock(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0)
@@ -350,6 +368,11 @@ public:
         return gua_enqueue_action(context_, &descriptor, &request_id);
     }
 
+    [[nodiscard]] ActionCancelResult cancel_action(std::uint64_t request_id)
+    {
+        return static_cast<ActionCancelResult>(gua_cancel_action_request(context_, request_id));
+    }
+
     [[nodiscard]] bool consume_action(ActionType action, std::string_view node_id, ActionRequest& out)
     {
         id_buffer_.assign(node_id);
@@ -468,6 +491,7 @@ private:
     {
         gua_destroy_context(context_);
         context_ = nullptr;
+        sensitive_node_ids_.clear();
     }
 
     gua_context_t* context_;
@@ -482,6 +506,7 @@ private:
     std::string screenshot_buffer_;
     std::string environment_buffer_;
     std::string screen_buffer_;
+    std::unordered_set<std::string> sensitive_node_ids_;
 };
 
 class GameInputSession {

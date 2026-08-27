@@ -25,9 +25,10 @@
     "prepack": "bun run build"
   },
   "devDependencies": {
-    "@gua/world-tools": "workspace:*",
+    "gua-world-tools": "^0.19.2",
     "@types/pngjs": "^6.0.5",
     "bun-types": "^1.3.0",
+    "gua-webmcp": "^0.19.2",
     "typescript": "^5.5.0"
   },
   "dependencies": { "pngjs": "^7.0.0" }
