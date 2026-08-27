@@ -22,6 +22,13 @@ public enum GuaActionError
     InvalidValue = -6,
 }
 
+public enum GuaActionCancelResult
+{
+    InFlight = -1,
+    NotFound = 0,
+    Cancelled = 1,
+}
+
 public readonly record struct GuaActionRequest(
     GuaActionType Action,
     string? NodeId = null,
@@ -33,7 +40,8 @@ public readonly record struct GuaActionRequest(
     uint Modifiers = 0,
     bool Sensitive = false,
     int ScrollUnit = 0,
-    ulong RequestId = 0);
+    ulong RequestId = 0,
+    GuaObservationProfile ObservationProfile = GuaObservationProfile.Debug);
 
 public readonly record struct GuaActionEvent(
     ulong RequestId,

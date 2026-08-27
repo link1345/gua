@@ -5,10 +5,30 @@ players, reflects UI Toolkit, uGUI, and TextMeshPro runtime controls, and listen
 `GUA_BRIDGE_PORT` (8765 by default). Add `GuaId` only where a stable explicit id
 is required; semantic registration is otherwise automatic.
 
-Supported in the initial release: Windows x64, Unity 6000.0 or newer, and Mono.
-The package contains precompiled managed assemblies and Windows Editor/Player
-native libraries. IL2CPP, other operating systems, IMGUI, and EditorWindow UI
-automation are outside the supported range.
+The stable support range is Windows x64, Unity 6000.0 or newer, and Mono. The
+package contains precompiled managed assemblies and Windows Editor/Player native
+libraries. Other IL2CPP targets, other operating systems, IMGUI, and EditorWindow
+UI automation remain outside that stable range; the WebGL path below is
+experimental.
+
+## Unity WebGL and browser-native WebMCP (experimental)
+
+WebGL builds install a tab-local `__guaUnityWebPort` from
+`Runtime/Plugins/WebGL/GuaWebMcp.jslib`. A surrounding page passes it to
+`gua-webmcp` with `createUnityWebGlBridge()` and `registerGuaWebMcp()`. Calls
+remain in the page. Action promises resolve from request-correlated host
+completion after Unity applies the action, not when it is enqueued.
+UI reads and action enqueueing cross Player-only runtime entry points, so a
+local Debug Inspector does not make private nodes available to browser tools.
+The same bridge exposes the host-filtered World Object Tree through the
+read-only `get_world_object_tree`, `find_world_objects`, and
+`wait_for_world_object` tools. Shared browser-safe world contracts are provided
+by `gua-world-tools`; WebMCP callers cannot elevate the runtime observation
+profile or invoke actions on world objects.
+
+The WebGL build must include the Gua C ABI runtime as a WebAssembly native plugin;
+the managed adapter remains a P/Invoke wrapper and does not implement another UI
+model. The initial Unity bridge does not advertise screenshot support.
 
 ## World objects
 

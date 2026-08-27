@@ -1,0 +1,46 @@
+# gua-webmcp
+
+Browser-native WebMCP adapter for a Gua-enabled Godot Web Export or Unity WebGL page.
+It registers tools on the experimental `document.modelContext` API and calls an
+engine bridge in the same page. It does not start an MCP server or WebSocket.
+Alongside Semantic UI Tree actions, the Godot and Unity bridge helpers register
+the read-only `get_world_object_tree`, `find_world_objects`, and
+`wait_for_world_object` tools when the engine-owned world adapter is available.
+World types and selector definitions come from the public `gua-world-tools`
+package; observation remains host-filtered and browser callers cannot request a
+debug profile.
+The engine ports always use the runtime's Player projection for UI and World
+observations and Player authorization for actions. This is independent of the
+profile used by a local Inspector, and no WebMCP tool exposes a profile argument.
+
+```ts
+import { createGodotWebBridge, registerGuaWebMcp } from "gua-webmcp";
+
+const registration = await registerGuaWebMcp(createGodotWebBridge());
+if (!registration.supported) console.info(registration.error);
+```
+
+Only objects explicitly opted into the engine adapter are observable. World v1
+does not expose actions, arbitrary scene traversal, or host method invocation.
+
+For Unity WebGL, use `createUnityWebGlBridge()` instead. The engine export must
+run in the same document so that its `__guaGodotWebPort` or
+`__guaUnityWebPort` is available before constructing the bridge.
+
+The engine bridge is the source of truth. Its `performAction()` promise must not
+resolve on enqueue; it resolves with the request-correlated completion emitted
+after the engine adapter applies the action. `performAction(request, { signal })`
+must cancel an accepted request that is still queued when the signal aborts;
+`registerGuaWebMcp` uses this to propagate caller cancellation and its configured
+action timeout into Godot or Unity. If the host already consumed the action, the
+caller remains cancelled while the engine bridge drains its eventual correlated
+completion. `getScreenshot` is an optional read
+of the latest published image, and the tool is not registered when the engine
+has no drawable-frame readback path.
+
+Feature detection is non-fatal. Each browser tab creates its own bridge and tool
+registrations, so no Gua session router or cross-tab session ID is introduced.
+
+The currently released Godot Web addon supports debug Web exports only. Release
+Web GDExtension builds are tracked in
+[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).

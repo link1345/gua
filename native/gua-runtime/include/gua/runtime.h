@@ -47,10 +47,15 @@ int gua_runtime_end_world_frame(gua_runtime_t* runtime);
 int gua_runtime_abort_world_frame(gua_runtime_t* runtime);
 int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
+/* Browser/public-agent projection. These calls cannot elevate to the runtime's Debug profile. */
+int gua_runtime_copy_player_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_query_player_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
 
 const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_runtime_copy_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+/* Browser/public-agent projection. This call cannot elevate to the runtime's Debug profile. */
+int gua_runtime_copy_player_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 void gua_runtime_add_log(gua_runtime_t* runtime, int level, const char* message);
 const char* gua_runtime_get_logs_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -99,6 +104,10 @@ int gua_runtime_consume_click_request(gua_runtime_t* runtime, const char* node_i
 int gua_runtime_emit_click(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_poll_event(gua_runtime_t* runtime, gua_event_t* out_event);
 int gua_runtime_enqueue_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+/* Browser/public-agent authorization. The captured request profile is always Player. */
+int gua_runtime_enqueue_player_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+int gua_runtime_cancel_action_request(gua_runtime_t* runtime, uint64_t request_id);
+int gua_runtime_get_action_request_observation_profile(gua_runtime_t* runtime, uint64_t request_id);
 int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const char* node_id, gua_action_request_t* out_request);
 int gua_runtime_emit_action_result(gua_runtime_t* runtime, const gua_action_result_t* result);
 int gua_runtime_poll_event_v2(gua_runtime_t* runtime, gua_event_v2_t* out_event);

@@ -1,4 +1,10 @@
-add_library(gua-runtime SHARED
+if(EMSCRIPTEN)
+    set(GUA_RUNTIME_LIBRARY_TYPE STATIC)
+else()
+    set(GUA_RUNTIME_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(gua-runtime ${GUA_RUNTIME_LIBRARY_TYPE}
     src/runtime.cpp
 )
 
@@ -12,8 +18,14 @@ target_include_directories(gua-runtime
 target_link_libraries(gua-runtime
     PUBLIC
         gua::core
-        gua::ws-bridge
 )
+
+if(TARGET gua-ws-bridge)
+    target_link_libraries(gua-runtime PUBLIC gua::ws-bridge)
+    target_compile_definitions(gua-runtime PRIVATE GUA_RUNTIME_WITH_WS=1)
+else()
+    target_compile_definitions(gua-runtime PRIVATE GUA_RUNTIME_WITH_WS=0)
+endif()
 
 target_compile_features(gua-runtime PUBLIC cxx_std_20)
 

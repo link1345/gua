@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { registerWorldWebMcpTools, selectorFromArguments, worldObservationTools } from "../src/index";
+import { parseWorldObjectTree, parseWorldQueryResult, registerWorldWebMcpTools, selectorFromArguments, worldObservationTools } from "../src/index";
 
 describe("World WebMCP tools", () => {
   test("feature detects and pins calls to the injected provider", async () => {
@@ -56,5 +56,23 @@ describe("World WebMCP tools", () => {
     await expect(tools.get("get_world_object_tree")?.({ id: "door" })).rejects.toThrow("Unknown get_world_object_tree argument");
     await expect(tools.get("find_world_objects")?.({ timeoutMs: 10 })).rejects.toThrow("Unknown find_world_objects argument");
     await expect(tools.get("wait_for_world_object")?.({ timeoutMs: 0 })).rejects.toThrow("timeoutMs must be an integer");
+  });
+
+  test("validates World Object Tree and query payloads before exposing them", () => {
+    const object = { id: "door", kind: "door", label: "Door", space: "world3d", position: { x: 1, y: 2, z: 3 },
+      visibleToPlayer: true, active: true, agentExposure: "auto", tags: ["interactive"], state: { locked: true } };
+    const tree = { schemaVersion: 1, sessionEpoch: 1, frameSequence: 2, revision: 3, scene: "level", objects: [object] };
+    expect(parseWorldObjectTree(JSON.stringify(tree))).toEqual(tree);
+    expect(parseWorldQueryResult({ valid: true, matches: [object] })).toEqual({ valid: true, matches: [object] });
+    const projected = { ...object, label: undefined, tags: undefined, position: { x: 1 } };
+    expect(parseWorldObjectTree({ ...tree, objects: [projected] }).objects).toEqual([projected]);
+    for (const invalid of [
+      { ...tree, sessionEpoch: 0 },
+      { ...tree, objects: [{ ...object, kind: "Door" }] },
+      { ...tree, objects: [{ ...object, space: "world2d", position: { x: 1, y: 2, z: 3 } }] },
+      { ...tree, objects: [{ ...object, tags: ["same", "same"] }] },
+      { ...tree, objects: [{ ...object, state: { distance: Number.NaN } }] },
+    ]) expect(() => parseWorldObjectTree(invalid)).toThrow("invalid protocol World Object Tree");
+    expect(() => parseWorldQueryResult({ valid: true, matches: [{ ...object, position: null }] })).toThrow("invalid world query result");
   });
 });

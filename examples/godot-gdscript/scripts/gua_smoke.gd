@@ -110,6 +110,8 @@ func _run() -> void:
 	screen.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.name = "scroll"
+	scroll.scroll_horizontal_custom_step = 7.0
+	scroll.scroll_vertical_custom_step = 9.0
 	var scroll_content := Control.new()
 	scroll_content.custom_minimum_size = Vector2(1000, 1000)
 	scroll.add_child(scroll_content)
@@ -126,6 +128,21 @@ func _run() -> void:
 			or not bare_context.get_version_json().contains("agent_projection_v1"):
 		_fail("GuaContext did not expose the agent projection ABI required by the adapter.")
 		return
+	bare_context.begin_frame("player-request")
+	bare_context.register_node_v2({
+		"id": "player-target", "role": "button", "label": "Player target",
+		"bounds": Rect2(0, 0, 10, 10), "visible": true, "enabled": true,
+		"agent_allowed_actions": ["focus"], "agent_allowed_actions_set": true,
+	})
+	bare_context.end_frame()
+	var player_action: Dictionary = bare_context.enqueue_player_action({"action": "focus", "node_id": "player-target"})
+	var player_request: Dictionary = bare_context.consume_action_request("focus", "player-target")
+	if player_action.get("error_code", -1) != 0 or player_request.get("observation_profile", -1) != 1:
+		_fail("GuaContext did not preserve the Player profile on a browser action request: %s / %s" % [player_action, player_request])
+		return
+	bare_context.emit_action_result({
+		"request_id": player_request.get("request_id", 0), "action": "focus", "node_id": "player-target", "succeeded": true,
+	})
 	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
@@ -161,6 +178,11 @@ func _run() -> void:
 			or float(world_door.get("position", {}).get("x", -1)) != 640.0 or float(world_door.get("position", {}).get("y", -1)) != 180.0 \
 			or not world_door.get("visibleToPlayer", false) or not world_door.get("state", {}).get("locked", false):
 		_fail("Gua Godot adapter did not publish the shared Door fixture: %s" % world_tree)
+		return
+	var world_query = JSON.parse_string(ui.context.query_world_objects_json({"kind": "door", "state_key": "locked", "state_type": 3, "state_bool": true}))
+	if not world_query.get("valid", false) or world_query.get("matches", []).size() != 1 \
+			or world_query.get("matches", [])[0].get("id", "") != "door-a":
+		_fail("Gua Godot world query did not return the shared Door fixture: %s" % world_query)
 		return
 	var world_status: Dictionary = ui.context.get_context_status()
 	if world_status.get("world_frame_sequence", 0) != 1 or world_status.get("world_revision", 0) != 1 \
@@ -331,6 +353,7 @@ func _run() -> void:
 		[{"action": "select", "node_id": "servers", "value": "Osaka"}, func(): return item_list.is_selected(1)],
 		[{"action": "select", "node_id": "tabs", "value": "General"}, func(): return tabs.current_tab == 0],
 		[{"action": "scroll", "node_id": "scroll", "delta_x": 25.0, "delta_y": 30.0}, func(): return scroll.scroll_horizontal == 25 and scroll.scroll_vertical == 30],
+		[{"action": "scroll", "node_id": "scroll", "delta_x": 1.0, "delta_y": 1.0, "scroll_unit": 1}, func(): return scroll.scroll_horizontal == 32 and scroll.scroll_vertical == 39],
 		[{"action": "scroll", "node_id": "servers", "delta_x": 30.0}, func(): return item_list.get_h_scroll_bar().value > 0],
 		[{"action": "press_key", "node_id": "name", "key": "A", "modifiers": 5}, func(): return key_events.size() == 2 and key_events[0].pressed and not key_events[1].pressed and key_events[0].shift_pressed and key_events[0].ctrl_pressed],
 	]
@@ -347,6 +370,15 @@ func _run() -> void:
 		if observed.get("request_id", 0) != accepted.get("request_id", 0) or not observed.get("succeeded", false):
 			_fail("Gua smoke did not correlate observed action event: %s / %s" % [accepted, observed])
 			return
+	var invalid_scroll := ui.enqueue_action({"action": "scroll", "node_id": "scroll", "delta_y": 1.0, "scroll_unit": 2})
+	ui.update("title")
+	var invalid_scroll_event := ui.poll_event_v2()
+	if invalid_scroll_event.get("request_id", 0) != invalid_scroll.get("request_id", 0) \
+			or invalid_scroll_event.get("succeeded", true) \
+			or invalid_scroll_event.get("error_code", 0) != -6 \
+			or scroll.scroll_vertical != 39:
+		_fail("Gua accepted an unsupported semantic scroll unit: %s" % invalid_scroll_event)
+		return
 	var spin_focus := ui.enqueue_action({"action": "focus", "node_id": "limit"})
 	ui.update("title")
 	var spin_focus_event := ui.poll_event_v2()
@@ -375,6 +407,21 @@ func _run() -> void:
 	if not grouped_first.button_pressed or grouped_second.button_pressed or grouped_click_event.get("request_id", 0) != grouped_click.get("request_id", 0):
 		_fail("Gua click action cleared an exclusive ButtonGroup selection: %s / %s" % [grouped_click, grouped_click_event])
 		return
+	var invalid_sensitive_range := ui.enqueue_action({"action": "set_value", "node_id": "volume", "value": "not-a-number", "sensitive": true})
+	ui.update("title")
+	var invalid_sensitive_range_event := ui.poll_event_v2()
+	ui.update("title")
+	var unchanged_range_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "volume")
+	if invalid_sensitive_range_event.get("request_id", 0) != invalid_sensitive_range.get("request_id", 0) \
+			or invalid_sensitive_range_event.get("succeeded", true) \
+			or invalid_sensitive_range_event.get("error_code", 0) != -6 \
+			or slider.value != 42.0 \
+			or unchanged_range_node == null \
+			or not unchanged_range_node.has("value") \
+			or float(unchanged_range_node.get("value", -1.0)) != 42.0 \
+			or float(unchanged_range_node.get("state", {}).get("rangeValue", -1.0)) != 42.0:
+		_fail("Gua marked a range sensitive after rejecting its value: %s / %s" % [invalid_sensitive_range_event, unchanged_range_node])
+		return
 	var sensitive := ui.enqueue_action({"action": "set_value", "node_id": "name", "value": "secret-marker", "sensitive": true})
 	ui.update("title")
 	var sensitive_event := ui.poll_event_v2()
@@ -384,6 +431,15 @@ func _run() -> void:
 		return
 	if ui.get_ui_tree_json().contains("secret-marker"):
 		_fail("Gua smoke leaked a sensitive value in the semantic UI tree.")
+		return
+	var sensitive_range := ui.enqueue_action({"action": "set_value", "node_id": "volume", "value": "37", "sensitive": true})
+	ui.update("title")
+	var sensitive_range_event := ui.poll_event_v2()
+	ui.update("title")
+	var sensitive_range_node = _find_node(JSON.parse_string(ui.get_ui_tree_json()), "volume")
+	if sensitive_range_event.get("request_id", 0) != sensitive_range.get("request_id", 0) \
+			or sensitive_range_node == null or sensitive_range_node.get("state", {}).has("rangeValue"):
+		_fail("Gua smoke leaked a sensitive range value: %s / %s" % [sensitive_range_event, sensitive_range_node])
 		return
 
 	var preinstall_schedule_count := [0]

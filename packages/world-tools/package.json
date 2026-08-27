@@ -1,6 +1,28 @@
 {
-  "name": "@gua/world-tools", "version": "0.0.0", "private": true, "type": "module",
-  "exports": "./src/index.ts",
-  "scripts": { "check": "tsc --noEmit", "test": "bun test" },
+  "name": "gua-world-tools",
+  "version": "0.19.2",
+  "description": "Shared World Object Tree types and observation tools for Gua MCP and WebMCP consumers.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/link1345/gua.git",
+    "directory": "packages/world-tools"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./src/index.ts",
+  "files": ["dist", "src", "README.md", "package.json"],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build src/index.ts --target browser --format esm --outfile dist/index.js && tsc --emitDeclarationOnly",
+    "prepack": "bun run build"
+  },
   "devDependencies": { "typescript": "^5.5.0" }
 }

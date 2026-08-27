@@ -462,6 +462,9 @@ internal static partial class Native
     internal static partial int gua_enqueue_action(nint context, in GuaNativeActionRequestDescriptor descriptor, out ulong requestId);
 
     [LibraryImport("gua")]
+    internal static partial int gua_cancel_action_request(nint context, ulong requestId);
+
+    [LibraryImport("gua")]
     internal static unsafe partial int gua_poll_event_v2(nint context, GuaNativeEventV2* outEvent);
 
     [LibraryImport("gua")]

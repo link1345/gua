@@ -17,6 +17,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"register_node_v2",
 	"end_frame",
 	"get_ui_tree_json",
+	"get_player_ui_tree_json",
 	"get_version_json",
 	"get_observation_profile",
 	"set_screenshot",
@@ -28,9 +29,12 @@ const REQUIRED_CONTEXT_METHODS := [
 	"emit_click",
 	"poll_event",
 	"enqueue_action",
+	"enqueue_player_action",
+	"cancel_action_request",
 	"consume_action_request",
 	"emit_action_result",
 	"poll_event_v2",
+	"poll_action_result",
 	"get_context_status",
 	"reset_context",
 	"clock_install",
@@ -47,6 +51,9 @@ const REQUIRED_CONTEXT_METHODS := [
 	"end_world_frame",
 	"abort_world_frame",
 	"get_world_object_tree_json",
+	"query_world_objects_json",
+	"get_player_world_object_tree_json",
+	"query_player_world_objects_json",
 	"enable_world_object_tree_adapter",
 	"start_inspector_bridge",
 	"inspector_bridge_url",
@@ -63,6 +70,7 @@ var suppressed_clicks: Dictionary = {}
 var gdextension_resource: Resource
 var unavailable := false
 var screenshot_capture_scheduled := false
+var webmcp_bridge: RefCounted
 var last_clock_ticks_ms := Time.get_ticks_msec()
 var observed_clock_generation := -1
 var clock_schedules: Array[Dictionary] = []
@@ -76,9 +84,25 @@ var clock_execution_limit_reached := false
 
 
 func attach(root_control: Control) -> void:
+	_detach_webmcp_bridge()
 	root = root_control
 	last_clock_ticks_ms = Time.get_ticks_msec()
-	_ensure_context()
+	if _ensure_context() and OS.has_feature("web"):
+		var bridge_script := load("res://addons/gua/gua_webmcp_bridge.gd")
+		if bridge_script != null:
+			webmcp_bridge = bridge_script.new()
+			webmcp_bridge.attach(self)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_detach_webmcp_bridge()
+
+
+func _detach_webmcp_bridge() -> void:
+	if webmcp_bridge != null and webmcp_bridge.has_method("detach"):
+		webmcp_bridge.detach()
+	webmcp_bridge = null
 
 
 func update(screen: String) -> void:
@@ -299,6 +323,37 @@ func get_ui_tree_json() -> String:
 	return context.get_ui_tree_json()
 
 
+func get_player_ui_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+
+	return context.get_player_ui_tree_json()
+
+
+func get_world_object_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+	return context.get_world_object_tree_json()
+
+
+func query_world_objects_json(selector: Dictionary) -> String:
+	if not _ensure_context():
+		return ""
+	return context.query_world_objects_json(selector)
+
+
+func get_player_world_object_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+	return context.get_player_world_object_tree_json()
+
+
+func query_player_world_objects_json(selector: Dictionary) -> String:
+	if not _ensure_context():
+		return ""
+	return context.query_player_world_objects_json(selector)
+
+
 func enqueue_click(id: String) -> bool:
 	if not _ensure_context():
 		return false
@@ -319,10 +374,28 @@ func enqueue_action(request: Dictionary) -> Dictionary:
 	return context.enqueue_action(request)
 
 
+func enqueue_player_action(request: Dictionary) -> Dictionary:
+	if not _ensure_context():
+		return {"error_code": -1, "request_id": 0}
+	return context.enqueue_player_action(request)
+
+
+func cancel_action_request(request_id: int) -> int:
+	if not _ensure_context():
+		return 0
+	return context.cancel_action_request(request_id)
+
+
 func poll_event_v2() -> Dictionary:
 	if not _ensure_context():
 		return {}
 	return context.poll_event_v2()
+
+
+func poll_action_result(request_id: int) -> Dictionary:
+	if not _ensure_context():
+		return {}
+	return context.poll_action_result(request_id)
 
 
 func get_context_status() -> Dictionary:
@@ -585,7 +658,8 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		descriptor["scroll_max_y"] = scroll.get_v_scroll_bar().max_value
 	if control is Range:
 		var range := control as Range
-		descriptor["range_value"] = range.value
+		if not (control.has_meta(META_SENSITIVE) and control.get_meta(META_SENSITIVE)):
+			descriptor["range_value"] = range.value
 		descriptor["range_min"] = range.min_value
 		descriptor["range_max"] = range.max_value
 	if control is OptionButton:
@@ -654,7 +728,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -2 if not _agent_action_allowed(button, "click") else (-3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0))
+			var error_code := -2 if not _agent_action_allowed(button, "click", request) else (-3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -674,7 +748,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -2 if not _agent_action_allowed(tab_container, "click") else (-3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0))
+			var error_code := -2 if not _agent_action_allowed(tab_container, "click", request) else (-3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -727,8 +801,8 @@ func _dispatch_action_requests() -> void:
 		})
 
 
-func _agent_action_allowed(target: Node, action: String) -> bool:
-	if context.get_observation_profile() != 1:
+func _agent_action_allowed(target: Node, action: String, request: Dictionary = {}) -> bool:
+	if int(request.get("observation_profile", context.get_observation_profile())) != 1:
 		return true
 	var current: Node = target
 	var target_node := true
@@ -745,7 +819,7 @@ func _agent_action_allowed(target: Node, action: String) -> bool:
 
 
 func _apply_action(control: Control, action: String, request: Dictionary) -> int:
-	if not _agent_action_allowed(control, action):
+	if not _agent_action_allowed(control, action, request):
 		return -2
 	if not control.is_visible_in_tree():
 		return -3
@@ -763,8 +837,6 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				return -5
 		"set_value":
 			var value = request.get("value", "")
-			if request.get("sensitive", false):
-				control.set_meta(META_SENSITIVE, true)
 			if control is LineEdit:
 				(control as LineEdit).text = value
 			elif control is TextEdit:
@@ -773,6 +845,8 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 				(control as Range).value = float(value)
 			else:
 				return -6
+			if request.get("sensitive", false):
+				control.set_meta(META_SENSITIVE, true)
 		"set_checked":
 			if control is BaseButton:
 				(control as BaseButton).button_pressed = request.get("bool_value", false)
@@ -782,14 +856,22 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 			if not _select_value(control, str(request.get("value", ""))):
 				return -6
 		"scroll":
+			var scroll_unit := int(request.get("scroll_unit", 0))
+			if scroll_unit != 0 and scroll_unit != 1:
+				return -6
+			var delta_x := float(request.get("delta_x", 0.0))
+			var delta_y := float(request.get("delta_y", 0.0))
+			if scroll_unit == 1:
+				delta_x *= _semantic_scroll_extent(control, true)
+				delta_y *= _semantic_scroll_extent(control, false)
 			if control is ScrollContainer:
 				var scroll := control as ScrollContainer
-				scroll.scroll_horizontal += int(request.get("delta_x", 0.0))
-				scroll.scroll_vertical += int(request.get("delta_y", 0.0))
+				scroll.scroll_horizontal += int(round(delta_x))
+				scroll.scroll_vertical += int(round(delta_y))
 			elif control is ItemList:
 				var item_list := control as ItemList
-				item_list.get_h_scroll_bar().value += float(request.get("delta_x", 0.0))
-				item_list.get_v_scroll_bar().value += float(request.get("delta_y", 0.0))
+				item_list.get_h_scroll_bar().value += delta_x
+				item_list.get_v_scroll_bar().value += delta_y
 			else:
 				return -5
 		"press_key":
@@ -818,12 +900,34 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 	return 0
 
 
+func _semantic_scroll_extent(control: Control, horizontal: bool) -> float:
+	if control is ItemList:
+		var item_list := control as ItemList
+		if item_list.item_count > 0:
+			var item_size := item_list.get_item_rect(0).size
+			var item_extent := item_size.x if horizontal else item_size.y
+			if item_extent > 0.0:
+				return item_extent
+		var list_bar: ScrollBar = item_list.get_h_scroll_bar() if horizontal else item_list.get_v_scroll_bar()
+		if list_bar.custom_step > 0.0:
+			return list_bar.custom_step
+	elif control is ScrollContainer:
+		var scroll := control as ScrollContainer
+		var custom_step := scroll.scroll_horizontal_custom_step if horizontal else scroll.scroll_vertical_custom_step
+		if custom_step > 0.0:
+			return custom_step
+		var scroll_bar: ScrollBar = scroll.get_h_scroll_bar() if horizontal else scroll.get_v_scroll_bar()
+		if scroll_bar.custom_step > 0.0:
+			return scroll_bar.custom_step
+	return maxf(1.0, float(control.get_theme_default_font_size()))
+
+
 func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
 	while true:
 		var request: Dictionary = context.consume_action_request("select", id)
 		if request.is_empty():
 			break
-		var error_code := _select_derived_item(target)
+		var error_code := _select_derived_item(target, request)
 		context.emit_action_result({
 			"request_id": request.get("request_id", 0),
 			"action": "select",
@@ -833,11 +937,11 @@ func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
 		})
 
 
-func _select_derived_item(target: Dictionary) -> int:
+func _select_derived_item(target: Dictionary, request: Dictionary) -> int:
 	var index := int(target["index"])
 	if target.has("list"):
 		var item_list := target["list"] as ItemList
-		if not _agent_action_allowed(item_list, "select"):
+		if not _agent_action_allowed(item_list, "select", request):
 			return -2
 		if not item_list.is_visible_in_tree():
 			return -3
@@ -847,7 +951,7 @@ func _select_derived_item(target: Dictionary) -> int:
 		item_list.item_selected.emit(index)
 		return 0
 	var tab_container := target["container"] as TabContainer
-	if not _agent_action_allowed(tab_container, "select"):
+	if not _agent_action_allowed(tab_container, "select", request):
 		return -2
 	if not tab_container.is_visible_in_tree():
 		return -3

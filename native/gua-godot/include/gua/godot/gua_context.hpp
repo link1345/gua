@@ -33,9 +33,13 @@ public:
     bool end_world_frame();
     bool abort_world_frame();
     String get_world_object_tree_json() const;
+    String query_world_objects_json(const Dictionary& selector) const;
+    String get_player_world_object_tree_json() const;
+    String query_player_world_objects_json(const Dictionary& selector) const;
     void enable_world_object_tree_adapter();
 
     String get_ui_tree_json() const;
+    String get_player_ui_tree_json() const;
     String get_version_json() const;
     int get_observation_profile() const;
     void set_screenshot(const String& data_uri, int width, int height);
@@ -47,9 +51,12 @@ public:
     bool emit_click(const String& node_id);
     Dictionary poll_event();
     Dictionary enqueue_action(const Dictionary& request);
+    Dictionary enqueue_player_action(const Dictionary& request);
+    int cancel_action_request(uint64_t request_id);
     Dictionary consume_action_request(const String& action, const String& node_id);
     bool emit_action_result(const Dictionary& result);
     Dictionary poll_event_v2();
+    Dictionary poll_action_result(uint64_t request_id);
     Dictionary get_context_status() const;
     Dictionary reset_context(const Dictionary& options = Dictionary());
     Dictionary clock_install(double initial_time_ms = 0.0, double step_ms = 1000.0 / 60.0);
@@ -71,6 +78,7 @@ protected:
     static void _bind_methods();
 
 private:
+    String query_world_objects_json_with_projection(const Dictionary& selector, bool player_projection) const;
     gua_runtime_t* runtime_ = nullptr;
 };
 

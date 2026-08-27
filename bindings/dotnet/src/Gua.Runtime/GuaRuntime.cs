@@ -132,8 +132,74 @@ public sealed partial class GuaRuntime : IDisposable
         byte* node = native.NodeId;
         byte* value = native.Value;
         byte* key = native.Key;
+        var observationProfile = (GuaObservationProfile)Native.gua_runtime_get_action_request_observation_profile(_handle, native.RequestId);
         request = new GuaActionRequest((GuaActionType)native.Action, Utf8(node, 128), Utf8(value, 256), native.DeltaX, native.DeltaY,
-            native.BoolValue != 0, Utf8(key, 64), native.Modifiers, native.Sensitive != 0, native.ScrollUnit, native.RequestId);
+            native.BoolValue != 0, Utf8(key, 64), native.Modifiers, native.Sensitive != 0, native.ScrollUnit, native.RequestId,
+            observationProfile);
+        return true;
+    }
+
+    public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId)
+        => EnqueueAction(request, playerProjection: false, out requestId);
+
+    public GuaActionError EnqueuePlayerAction(GuaActionRequest request, out ulong requestId)
+        => EnqueueAction(request, playerProjection: true, out requestId);
+
+    private GuaActionError EnqueueAction(GuaActionRequest request, bool playerProjection, out ulong requestId)
+    {
+        ThrowIfDisposed();
+        nint node = request.NodeId is null ? 0 : Marshal.StringToCoTaskMemUTF8(request.NodeId);
+        nint value = request.Value is null ? 0 : Marshal.StringToCoTaskMemUTF8(request.Value);
+        nint key = request.Key is null ? 0 : Marshal.StringToCoTaskMemUTF8(request.Key);
+        try
+        {
+            var descriptor = new Native.ActionDescriptor
+            {
+                StructSize = (uint)Marshal.SizeOf<Native.ActionDescriptor>(), Action = (int)request.Action,
+                NodeId = node, Value = value, DeltaX = request.DeltaX, DeltaY = request.DeltaY,
+                BoolValue = request.BoolValue ? 1 : 0, Key = key, Modifiers = request.Modifiers,
+                Sensitive = request.Sensitive ? 1 : 0, ScrollUnit = request.ScrollUnit,
+            };
+            var result = playerProjection
+                ? Native.gua_runtime_enqueue_player_action(_handle, in descriptor, out requestId)
+                : Native.gua_runtime_enqueue_action(_handle, in descriptor, out requestId);
+            return result == 1 ? GuaActionError.None : (GuaActionError)result;
+        }
+        finally
+        {
+            if (node != 0) Marshal.FreeCoTaskMem(node);
+            if (value != 0) Marshal.FreeCoTaskMem(value);
+            if (key != 0) Marshal.FreeCoTaskMem(key);
+        }
+    }
+
+    public GuaActionCancelResult CancelAction(ulong requestId)
+    {
+        ThrowIfDisposed();
+        if (requestId == 0) throw new ArgumentOutOfRangeException(nameof(requestId));
+        return (GuaActionCancelResult)Native.gua_runtime_cancel_action_request(_handle, requestId);
+    }
+
+    public unsafe bool TryPollActionEvent(ulong requestId, out GuaActionEvent e)
+    {
+        ThrowIfDisposed();
+        if (requestId == 0) throw new ArgumentOutOfRangeException(nameof(requestId));
+        var native = new Native.ActionEventV3
+        {
+            StructSize = (uint)sizeof(Native.ActionEventV3),
+            Base = new Native.ActionEventV2 { StructSize = (uint)sizeof(Native.ActionEventV2) },
+        };
+        if (Native.gua_runtime_poll_event_v3_for_request(_handle, requestId, ref native) == 0)
+        {
+            e = default;
+            return false;
+        }
+        byte* node = native.Base.NodeId;
+        byte* value = native.Base.Value;
+        e = new GuaActionEvent(native.Base.RequestId, (GuaActionType)native.Base.Action,
+            native.Base.Status == 1, (GuaActionError)native.Base.ErrorCode,
+            Utf8(node, 128), native.Base.Sensitive != 0 ? string.Empty : Utf8(value, 256), native.Base.Sensitive != 0,
+            native.SessionEpoch, native.FrameSequence, native.Revision);
         return true;
     }
 
@@ -179,6 +245,7 @@ public sealed partial class GuaRuntime : IDisposable
 
     public void AddLog(int level, string message) { ThrowIfDisposed(); Native.gua_runtime_add_log(_handle, level, message); }
     public string GetUiTreeJson() { ThrowIfDisposed(); return CopyUiTree(_handle); }
+    public string GetPlayerUiTreeJson() { ThrowIfDisposed(); return CopyJson(_handle, JsonSource.PlayerUiTree); }
     public string GetVersionJson() { ThrowIfDisposed(); return CopyVersion(_handle); }
 
     public void Dispose()
@@ -212,8 +279,9 @@ public sealed partial class GuaRuntime : IDisposable
     private static unsafe int CopyJson(JsonSource source, nint handle, byte* buffer, int bufferSize) => source switch
     {
         JsonSource.UiTree => Native.gua_runtime_copy_ui_tree_json(handle, buffer, bufferSize),
+        JsonSource.PlayerUiTree => Native.gua_runtime_copy_player_ui_tree_json(handle, buffer, bufferSize),
         JsonSource.Version => Native.gua_runtime_copy_version_json(handle, buffer, bufferSize),
         _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
     };
-    private enum JsonSource { UiTree, Version }
+    private enum JsonSource { UiTree, PlayerUiTree, Version }
 }

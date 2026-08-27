@@ -398,11 +398,60 @@ bool GuaContext::register_world_object(const Dictionary& source)
 bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }
 bool GuaContext::abort_world_frame() { return gua_runtime_abort_world_frame(runtime_) != 0; }
 String GuaContext::get_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_world_object_tree_json); }
+String GuaContext::get_player_world_object_tree_json() const { return copy_runtime_json(runtime_, gua_runtime_copy_player_world_object_tree_json); }
+String GuaContext::query_world_objects_json(const Dictionary& source) const { return query_world_objects_json_with_projection(source, false); }
+String GuaContext::query_player_world_objects_json(const Dictionary& source) const { return query_world_objects_json_with_projection(source, true); }
+String GuaContext::query_world_objects_json_with_projection(const Dictionary& source, bool player_projection) const
+{
+    const String id = source.get("id", String()), kind = source.get("kind", String()), label = source.get("label", String());
+    const String tag = source.get("tag", String()), parent = source.get("parent_id", String()), state_key = source.get("state_key", String());
+    const CharString id8 = id.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), tag8 = tag.utf8(), parent8 = parent.utf8(), state_key8 = state_key.utf8();
+    const int direct_child = source.get("direct_child", 0), visible = source.get("visible_to_player", 0), active = source.get("active", 0);
+    if (direct_child < 0 || direct_child > 1 || (direct_child != 0 && parent.is_empty()) || visible < 0 || visible > 2 || active < 0 || active > 2)
+        return "{\"valid\":false,\"error\":\"invalid_selector\",\"matches\":[]}";
+
+    gua_world_state_value_v1_t state { sizeof(gua_world_state_value_v1_t) };
+    CharString state_string8;
+    const gua_world_state_value_v1_t* state_pointer = nullptr;
+    if (!state_key.is_empty()) {
+        state.key = state_key8.get_data();
+        state.type = source.get("state_type", GUA_WORLD_VALUE_NULL);
+        if (state.type == GUA_WORLD_VALUE_STRING) {
+            state_string8 = String(source.get("state_string", String())).utf8();
+            state.string_value = state_string8.get_data();
+        } else if (state.type == GUA_WORLD_VALUE_NUMBER) {
+            state.number_value = source.get("state_number", 0.0);
+        } else if (state.type == GUA_WORLD_VALUE_BOOLEAN) {
+            state.bool_value = static_cast<bool>(source.get("state_bool", false)) ? 1 : 0;
+        } else if (state.type != GUA_WORLD_VALUE_NULL) {
+            return "{\"valid\":false,\"error\":\"invalid_selector\",\"matches\":[]}";
+        }
+        state_pointer = &state;
+    }
+    const gua_world_selector_v1_t selector {
+        sizeof(gua_world_selector_v1_t), id.is_empty() ? nullptr : id8.get_data(), GUA_MATCH_EXACT,
+        kind.is_empty() ? nullptr : kind8.get_data(), GUA_MATCH_EXACT,
+        label.is_empty() ? nullptr : label8.get_data(), GUA_MATCH_EXACT,
+        tag.is_empty() ? nullptr : tag8.get_data(), GUA_MATCH_EXACT,
+        parent.is_empty() ? nullptr : parent8.get_data(), direct_child != 0 ? 1 : 0, visible, active, state_pointer,
+    };
+    const auto query = player_projection ? gua_runtime_query_player_world_objects_json : gua_runtime_query_world_objects_json;
+    int required = query(runtime_, &selector, nullptr, 0);
+    if (required <= 0) return "{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}";
+    std::vector<char> json(static_cast<std::size_t>(required));
+    required = query(runtime_, &selector, json.data(), static_cast<int>(json.size()));
+    return required > 0 ? String::utf8(json.data()) : String("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}");
+}
 void GuaContext::enable_world_object_tree_adapter() { gua_runtime_set_world_object_tree_enabled(runtime_, 1); }
 
 String GuaContext::get_ui_tree_json() const
 {
     return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
+}
+
+String GuaContext::get_player_ui_tree_json() const
+{
+    return copy_runtime_json(runtime_, gua_runtime_copy_player_ui_tree_json);
 }
 
 String GuaContext::get_version_json() const
@@ -472,6 +521,36 @@ Dictionary GuaContext::enqueue_action(const Dictionary& source)
     return result;
 }
 
+Dictionary GuaContext::enqueue_player_action(const Dictionary& source)
+{
+    const String action = source.get("action", String());
+    const String node_id = source.get("node_id", String());
+    const String value = source.get("value", String());
+    const String key = source.get("key", String());
+    const CharString node_utf8 = node_id.utf8();
+    const CharString value_utf8 = value.utf8();
+    const CharString key_utf8 = key.utf8();
+    const gua_action_request_descriptor_t request {
+        sizeof(gua_action_request_descriptor_t), action_type(action), node_id.is_empty() ? nullptr : node_utf8.get_data(),
+        value.is_empty() ? nullptr : value_utf8.get_data(), source.get("delta_x", 0.0), source.get("delta_y", 0.0),
+        source.get("bool_value", false) ? 1 : 0, key.is_empty() ? nullptr : key_utf8.get_data(),
+        static_cast<uint32_t>(static_cast<int64_t>(source.get("modifiers", 0))), source.get("sensitive", false) ? 1 : 0,
+        source.get("scroll_unit", 0)
+    };
+    uint64_t request_id = 0;
+    const int code = gua_runtime_enqueue_player_action(runtime_, &request, &request_id);
+    Dictionary result;
+    result["error_code"] = code == GUA_ACTION_ACCEPTED ? 0 : code;
+    result["request_id"] = request_id;
+    return result;
+}
+
+int GuaContext::cancel_action_request(uint64_t request_id)
+{
+    if (request_id == 0) return GUA_ACTION_CANCEL_NOT_FOUND;
+    return gua_runtime_cancel_action_request(runtime_, request_id);
+}
+
 Dictionary GuaContext::consume_action_request(const String& action, const String& node_id)
 {
     const CharString node_utf8 = node_id.utf8();
@@ -479,6 +558,7 @@ Dictionary GuaContext::consume_action_request(const String& action, const String
     if (gua_runtime_consume_action_request(runtime_, action_type(action), node_utf8.get_data(), &request) == 0) return Dictionary();
     Dictionary result;
     result["request_id"] = request.request_id;
+    result["observation_profile"] = gua_runtime_get_action_request_observation_profile(runtime_, request.request_id);
     result["action"] = action_name(request.action);
     result["node_id"] = String::utf8(request.node_id);
     result["value"] = String::utf8(request.value);
@@ -519,6 +599,25 @@ Dictionary GuaContext::poll_event_v2()
     result["node_id"] = String::utf8(event.node_id);
     result["value"] = String::utf8(event.value);
     result["sensitive"] = event.sensitive != 0;
+    return result;
+}
+
+Dictionary GuaContext::poll_action_result(uint64_t request_id)
+{
+    if (request_id == 0) return Dictionary();
+    gua_event_v3_t event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    if (gua_runtime_poll_event_v3_for_request(runtime_, request_id, &event) == 0) return Dictionary();
+    Dictionary result;
+    result["requestId"] = event.base.request_id;
+    result["action"] = action_name(event.base.action);
+    result["succeeded"] = event.base.status == GUA_ACTION_STATUS_SUCCEEDED;
+    result["error"] = event.base.error_code;
+    result["nodeId"] = String::utf8(event.base.node_id);
+    result["value"] = event.base.sensitive != 0 ? String() : String::utf8(event.base.value);
+    result["sensitive"] = event.base.sensitive != 0;
+    result["sessionEpoch"] = event.session_epoch;
+    result["frameSequence"] = event.frame_sequence;
+    result["revision"] = event.revision;
     return result;
 }
 
@@ -658,8 +757,12 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("end_world_frame"), &GuaContext::end_world_frame);
     ClassDB::bind_method(D_METHOD("abort_world_frame"), &GuaContext::abort_world_frame);
     ClassDB::bind_method(D_METHOD("get_world_object_tree_json"), &GuaContext::get_world_object_tree_json);
+    ClassDB::bind_method(D_METHOD("query_world_objects_json", "selector"), &GuaContext::query_world_objects_json);
+    ClassDB::bind_method(D_METHOD("get_player_world_object_tree_json"), &GuaContext::get_player_world_object_tree_json);
+    ClassDB::bind_method(D_METHOD("query_player_world_objects_json", "selector"), &GuaContext::query_player_world_objects_json);
     ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
+    ClassDB::bind_method(D_METHOD("get_player_ui_tree_json"), &GuaContext::get_player_ui_tree_json);
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
     ClassDB::bind_method(D_METHOD("get_observation_profile"), &GuaContext::get_observation_profile);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
@@ -671,9 +774,12 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);
     ClassDB::bind_method(D_METHOD("poll_event"), &GuaContext::poll_event);
     ClassDB::bind_method(D_METHOD("enqueue_action", "request"), &GuaContext::enqueue_action);
+    ClassDB::bind_method(D_METHOD("enqueue_player_action", "request"), &GuaContext::enqueue_player_action);
+    ClassDB::bind_method(D_METHOD("cancel_action_request", "request_id"), &GuaContext::cancel_action_request);
     ClassDB::bind_method(D_METHOD("consume_action_request", "action", "node_id"), &GuaContext::consume_action_request);
     ClassDB::bind_method(D_METHOD("emit_action_result", "result"), &GuaContext::emit_action_result);
     ClassDB::bind_method(D_METHOD("poll_event_v2"), &GuaContext::poll_event_v2);
+    ClassDB::bind_method(D_METHOD("poll_action_result", "request_id"), &GuaContext::poll_action_result);
     ClassDB::bind_method(D_METHOD("get_context_status"), &GuaContext::get_context_status);
     ClassDB::bind_method(D_METHOD("reset_context", "options"), &GuaContext::reset_context, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("clock_install", "initial_time_ms", "step_ms"), &GuaContext::clock_install, DEFVAL(0.0), DEFVAL(1000.0 / 60.0));
