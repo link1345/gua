@@ -14,6 +14,7 @@ Select only lanes touched by the requested component or diff.
 | MCP | `packages/mcp` | tool/schema mismatch, unsupported command claims, timeouts, lost bridge errors |
 | Inspector | `packages/inspector` | stale push/poll ordering, incorrect node state rendering, reconnect state leaks |
 | Visual/recording | `Gua.Testing.Visual`, screenshot and recording schemas | implicit resize, mask denominator errors, secret retention, nondeterministic replay |
+| Game input | game-input schemas, core/runtime queues, engine input adapters, MCP, Inspector, recording | owner cleanup gaps, lease escape, consume/complete races, device-index drift, unsupported advertised codes, confirmation bypass |
 
 ## Cross-boundary invariants
 
@@ -27,6 +28,15 @@ Select only lanes touched by the requested component or diff.
 - Adapter-owned reflection follows the host UI rather than manual semantic
   restatement.
 - MCP and Inspector do not own runtime state.
+- Game input is owner-bound and lease-bounded; disconnect, dispose, reset, and
+  expiry neutralize held state without destroying already-consumed requests'
+  correlated completion path.
+- Common metadata, current policy, confirmation, capability, and Action Map
+  authorization are checked at consumption or dispatch, including specialized
+  game-input paths.
+- Advertised W3C keyboard codes, pointer controls, gamepad controls, and device
+  indexes have one consistent contract across schemas, validators, adapters,
+  Inspector, MCP, and recording.
 
 ## Bounded verification menu
 
