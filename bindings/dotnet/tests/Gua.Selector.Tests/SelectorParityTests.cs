@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
@@ -16,6 +17,13 @@ namespace Gua.Selector.Tests;
 [TestFixture]
 public sealed class SelectorParityTests
 {
+    [Test]
+    public void ProjectedWorldLabelsAreDeclaredNullable()
+    {
+        var label = typeof(GuaWorldObject).GetProperty(nameof(GuaWorldObject.Label))!;
+        Assert.That(new NullabilityInfoContext().Create(label).ReadState, Is.EqualTo(NullabilityState.Nullable));
+    }
+
     [Test]
     public void AgentPolicyProjectsUiFieldsAndKeepsDebugTreeComplete()
     {

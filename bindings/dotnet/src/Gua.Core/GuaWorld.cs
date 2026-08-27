@@ -27,7 +27,7 @@ public sealed record GuaWorldSelector(
     bool? Active = null, GuaWorldStateCriterion? State = null);
 
 public sealed record GuaWorldObject(
-    string Id, string Kind, string Label, string Space, JsonElement Position, bool VisibleToPlayer,
+    string Id, string Kind, string? Label, string Space, JsonElement Position, bool VisibleToPlayer,
     bool Active, string AgentExposure, string? ParentId, string? Description,
     IReadOnlyList<string>? Tags, IReadOnlyDictionary<string, JsonElement> State,
     string? DomainId, string? RelatedUiNodeId);

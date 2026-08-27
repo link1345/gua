@@ -137,6 +137,7 @@ struct ActionRequest {
     bool sensitive;
     int scroll_unit;
     int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG;
+    AgentPolicy agent_policy;
 };
 
 struct LogEntry {
@@ -169,7 +170,39 @@ struct HistoryEntry {
     std::string key;
     unsigned int modifiers;
     int scroll_unit;
+    int observation_profile;
 };
+
+struct HistoryPayload {
+    std::string value;
+    int bool_value;
+};
+
+HistoryPayload project_history_payload(
+    int action, const std::string& value, int bool_value, int observation_profile, const AgentPolicy* policy)
+{
+    HistoryPayload result { value, bool_value };
+    if (observation_profile != GUA_OBSERVATION_PROFILE_PLAYER || policy == nullptr) return result;
+    const std::string_view path = action == GUA_ACTION_SET_CHECKED
+        ? "state.checked"
+        : (action == GUA_ACTION_SET_VALUE || action == GUA_ACTION_SELECT ? "value" : "");
+    if (path.empty()) return result;
+    const auto rule = std::find_if(policy->field_rules.begin(), policy->field_rules.end(),
+        [&](const AgentFieldRule& candidate) { return candidate.path == path; });
+    if (rule == policy->field_rules.end() || rule->mode == GUA_AGENT_FIELD_KEEP) return result;
+    if (rule->mode == GUA_AGENT_FIELD_OMIT || rule->mode == GUA_AGENT_FIELD_REDACT) {
+        result.value.clear();
+        if (action == GUA_ACTION_SET_CHECKED) result.bool_value = 0;
+    } else if (rule->mode == GUA_AGENT_FIELD_REPLACE) {
+        if (action == GUA_ACTION_SET_CHECKED) {
+            result.bool_value = rule->bool_value ? 1 : 0;
+            result.value = rule->bool_value ? "true" : "false";
+        } else {
+            result.value = rule->string_value;
+        }
+    }
+    return result;
+}
 
 const char* log_level_name(int level)
 {
@@ -539,6 +572,31 @@ void apply_node_policy(Node& node)
                 if (node.omitted_fields.contains("state.scrollX") && node.omitted_fields.contains("state.scrollY")) node.known_mask &= ~GUA_NODE_KNOWN_SCROLL;
                 if (node.omitted_fields.contains("state.scrollMaxX") && node.omitted_fields.contains("state.scrollMaxY")) node.known_mask &= ~GUA_NODE_KNOWN_SCROLL_MAX;
                 continue;
+            }
+            if (rule.mode == GUA_AGENT_FIELD_REPLACE) {
+                node.omitted_fields.erase(rule.path);
+                if (key == "focused") node.known_mask |= GUA_NODE_KNOWN_FOCUSED;
+                else if (key == "hovered") node.known_mask |= GUA_NODE_KNOWN_HOVERED;
+                else if (key == "pressed") node.known_mask |= GUA_NODE_KNOWN_PRESSED;
+                else if (key == "checked") node.known_mask |= GUA_NODE_KNOWN_CHECKED;
+                else if (key == "selected") node.known_mask |= GUA_NODE_KNOWN_SELECTED;
+                else if (key == "caretPosition") node.known_mask |= GUA_NODE_KNOWN_CARET_POSITION;
+                else if (key == "selectionStart" || key == "selectionEnd") {
+                    if ((node.known_mask & GUA_NODE_KNOWN_SELECTION) == 0U)
+                        node.omitted_fields.insert(key == "selectionStart" ? "state.selectionEnd" : "state.selectionStart");
+                    node.known_mask |= GUA_NODE_KNOWN_SELECTION;
+                } else if (key == "scrollX" || key == "scrollY") {
+                    if ((node.known_mask & GUA_NODE_KNOWN_SCROLL) == 0U)
+                        node.omitted_fields.insert(key == "scrollX" ? "state.scrollY" : "state.scrollX");
+                    node.known_mask |= GUA_NODE_KNOWN_SCROLL;
+                } else if (key == "scrollMaxX" || key == "scrollMaxY") {
+                    if ((node.known_mask & GUA_NODE_KNOWN_SCROLL_MAX) == 0U)
+                        node.omitted_fields.insert(key == "scrollMaxX" ? "state.scrollMaxY" : "state.scrollMaxX");
+                    node.known_mask |= GUA_NODE_KNOWN_SCROLL_MAX;
+                } else if (key == "rangeValue") node.known_mask |= GUA_NODE_KNOWN_RANGE_VALUE;
+                else if (key == "rangeMin") node.known_mask |= GUA_NODE_KNOWN_RANGE_MIN;
+                else if (key == "rangeMax") node.known_mask |= GUA_NODE_KNOWN_RANGE_MAX;
+                else if (key == "selectedIndex") node.known_mask |= GUA_NODE_KNOWN_SELECTED_INDEX;
             }
             const bool boolean = key == "focused" || key == "hovered" || key == "pressed" || key == "checked" || key == "selected";
             if (boolean) {
@@ -1179,33 +1237,41 @@ void trim_history(std::deque<HistoryEntry>& history, std::size_t limit)
 void append_history(gua_context_t& ctx, std::deque<HistoryEntry>& history, std::string phase,
     unsigned long long request_id, int action, const std::string& node_id, int status,
     int error_code, const std::string& value, bool sensitive, float delta_x = 0, float delta_y = 0,
-    int bool_value = 0, const std::string& key = {}, unsigned int modifiers = 0, int scroll_unit = 0)
+    int bool_value = 0, const std::string& key = {}, unsigned int modifiers = 0, int scroll_unit = 0,
+    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG, const AgentPolicy* policy = nullptr)
 {
     if (ctx.diagnostics_history_limit == 0) return;
+    const auto payload = project_history_payload(action, value, bool_value, observation_profile, policy);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - ctx.diagnostics_history_started_at).count();
     history.push_back(HistoryEntry { ctx.next_history_sequence++, static_cast<unsigned long long>(elapsed),
-        ctx.revision, std::move(phase), request_id, action, node_id, status, error_code,
-        sensitive ? "" : value, sensitive, delta_x, delta_y, bool_value,
-        sensitive ? "" : key, modifiers, scroll_unit });
+        observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx.player_revision : ctx.revision,
+        std::move(phase), request_id, action, node_id, status, error_code,
+        sensitive ? "" : payload.value, sensitive, delta_x, delta_y, payload.bool_value,
+        sensitive ? "" : key, modifiers, scroll_unit, observation_profile });
     trim_history(history, ctx.diagnostics_history_limit);
     ctx.diagnostics_json_cache.clear();
 }
 
 std::string build_request_json(const ActionRequest& request)
 {
+    const auto payload = project_history_payload(request.action, request.value, request.bool_value,
+        request.observation_profile, &request.agent_policy);
     return "{\"requestId\":" + std::to_string(request.request_id) +
         ",\"action\":\"" + action_name(request.action) + "\",\"nodeId\":\"" + escape_json(request.node_id) +
-        "\",\"value\":\"" + escape_json(request.sensitive ? "" : request.value) +
+        "\",\"value\":\"" + escape_json(request.sensitive ? "" : payload.value) +
         "\",\"sensitive\":" + (request.sensitive ? "true" : "false") + "}";
 }
 
-std::string build_history_json(const std::deque<HistoryEntry>& history)
+std::string build_history_json(const std::deque<HistoryEntry>& history, int observation_profile = -1)
 {
     std::string json = "[";
+    bool wrote_entry = false;
     for (std::size_t i = 0; i < history.size(); ++i) {
-        if (i > 0) json += ",";
         const auto& entry = history[i];
+        if (observation_profile != -1 && entry.observation_profile != observation_profile) continue;
+        if (wrote_entry) json += ",";
+        wrote_entry = true;
         json += "{\"sequence\":" + std::to_string(entry.sequence) +
             ",\"elapsedMilliseconds\":" + std::to_string(entry.elapsed_milliseconds) +
             ",\"revision\":" + std::to_string(entry.revision) +
@@ -1278,7 +1344,10 @@ std::string build_player_diagnostics_json(const gua_context_t& ctx)
         ",\"unconsumedEventCount\":" + std::to_string(event_count) +
         ",\"environment\":{},\"version\":" + build_version_json() +
         ",\"uiTree\":" + build_ui_tree_json(ctx, GUA_OBSERVATION_PROFILE_PLAYER) +
-        ",\"pendingRequests\":" + pending + ",\"operations\":[],\"events\":[],\"logs\":[],\"screenshot\":null}";
+        ",\"pendingRequests\":" + pending +
+        ",\"operations\":" + build_history_json(ctx.operation_history, GUA_OBSERVATION_PROFILE_PLAYER) +
+        ",\"events\":" + build_history_json(ctx.event_history, GUA_OBSERVATION_PROFILE_PLAYER) +
+        ",\"logs\":[],\"screenshot\":null}";
 }
 
 } // namespace
@@ -1327,9 +1396,17 @@ extern "C" void gua_end_frame(gua_context_t* ctx)
         ctx->frame_in_progress = false;
         return;
     }
+    const auto player_nodes = project_nodes(ctx->staging_nodes, GUA_OBSERVATION_PROFILE_PLAYER);
+    const auto player_focused_count = std::count_if(player_nodes.begin(), player_nodes.end(), [](const Node& node) {
+        return (node.known_mask & GUA_NODE_KNOWN_FOCUSED) != 0U && node.focused;
+    });
+    if (player_focused_count > 1) {
+        ctx->staging_nodes.clear();
+        ctx->frame_in_progress = false;
+        return;
+    }
     const std::string semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, ctx->staging_nodes, false);
-    const std::string player_semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen,
-        project_nodes(ctx->staging_nodes, GUA_OBSERVATION_PROFILE_PLAYER), true);
+    const std::string player_semantic_snapshot = build_semantic_snapshot_json(ctx->staging_screen, player_nodes, true);
     ctx->screen.swap(ctx->staging_screen);
     ctx->nodes.swap(ctx->staging_nodes);
     ctx->staging_nodes.clear();
@@ -2249,14 +2326,21 @@ extern "C" int gua_enqueue_action_for_profile(gua_context_t* ctx, const gua_acti
     if (authorization != GUA_ACTION_ACCEPTED) return authorization;
 
     const unsigned long long request_id = ctx->next_request_id++;
+    AgentPolicy request_policy;
+    if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && !node_id.empty()) {
+        const auto source = std::find_if(ctx->nodes.begin(), ctx->nodes.end(),
+            [&](const Node& node) { return node.id == node_id; });
+        if (source != ctx->nodes.end()) request_policy = source->agent_policy;
+    }
     ctx->action_requests.push_back(ActionRequest {
         request_id, descriptor->action, node_id, value, descriptor->delta_x, descriptor->delta_y,
         descriptor->bool_value, key, descriptor->modifiers, descriptor->sensitive != 0, descriptor->scroll_unit,
-        observation_profile
+        observation_profile, request_policy
     });
     append_history(*ctx, ctx->operation_history, "enqueued", request_id, descriptor->action, node_id,
         GUA_ACTION_ACCEPTED, 0, value, descriptor->sensitive != 0, descriptor->delta_x, descriptor->delta_y,
-        descriptor->bool_value, key, descriptor->modifiers, descriptor->scroll_unit);
+        descriptor->bool_value, key, descriptor->modifiers, descriptor->scroll_unit, observation_profile,
+        &request_policy);
     if (out_request_id != nullptr) *out_request_id = request_id;
     return GUA_ACTION_ACCEPTED;
 }
@@ -2312,6 +2396,10 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
                 error_code, "", value.sensitive, ctx->session_epoch, ctx->frame_sequence,
                 value.observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_revision : ctx->revision,
                 value.observation_profile, ctx->player_revision, false });
+            append_history(*ctx, ctx->event_history, "observed", value.request_id, value.action,
+                value.node_id, GUA_ACTION_STATUS_FAILED, error_code, "", value.sensitive,
+                value.delta_x, value.delta_y, value.bool_value, value.key, value.modifiers,
+                value.scroll_unit, value.observation_profile, &value.agent_policy);
             return 0;
         }
     }
@@ -2319,7 +2407,8 @@ extern "C" int gua_consume_action_request(gua_context_t* ctx, int action, const 
     ctx->consumed_requests.push_back(value);
     append_history(*ctx, ctx->operation_history, "consumed", value.request_id, value.action, value.node_id,
         GUA_ACTION_ACCEPTED, 0, value.value, value.sensitive, value.delta_x, value.delta_y,
-        value.bool_value, value.key, value.modifiers, value.scroll_unit);
+        value.bool_value, value.key, value.modifiers, value.scroll_unit, value.observation_profile,
+        &value.agent_policy);
     out_request->request_id = value.request_id;
     out_request->action = value.action;
     std::snprintf(out_request->node_id, sizeof(out_request->node_id), "%s", value.node_id.c_str());
@@ -2350,14 +2439,21 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
     const int event_profile = consumed != ctx->consumed_requests.end()
         ? consumed->observation_profile
         : event_observation_profile_neutral;
+    const bool event_sensitive = result->sensitive != 0 ||
+        (consumed != ctx->consumed_requests.end() && consumed->sensitive);
+    const AgentPolicy* event_policy = consumed != ctx->consumed_requests.end()
+        ? &consumed->agent_policy
+        : nullptr;
+    const auto event_payload = project_history_payload(result->action,
+        result->value != nullptr ? result->value : "", 0, event_profile, event_policy);
     Event event {
         result->action,
         result->node_id != nullptr ? result->node_id : "",
         result->request_id,
         result->status,
         result->error_code,
-        result->sensitive != 0 ? "" : (result->value != nullptr ? result->value : ""),
-        result->sensitive != 0,
+        event_sensitive ? "" : event_payload.value,
+        event_sensitive,
         ctx->session_epoch,
         ctx->frame_sequence,
         event_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_revision : ctx->revision,
@@ -2369,7 +2465,8 @@ extern "C" int gua_emit_action_result(gua_context_t* ctx, const gua_action_resul
     ctx->events.push_back(std::move(event));
     append_history(*ctx, ctx->event_history, "observed", result->request_id, result->action,
         result->node_id != nullptr ? result->node_id : "", result->status, result->error_code,
-        result->value != nullptr ? result->value : "", result->sensitive != 0);
+        event_payload.value, event_sensitive,
+        0, 0, event_payload.bool_value, {}, 0, 0, event_profile, event_policy);
     if (consumed != ctx->consumed_requests.end()) ctx->consumed_requests.erase(consumed);
     return 1;
 }
