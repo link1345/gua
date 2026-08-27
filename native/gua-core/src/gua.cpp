@@ -2369,6 +2369,7 @@ extern "C" int gua_begin_game_input_frame(gua_context_t* ctx, const char* input_
 {
     if (ctx == nullptr || input_context == nullptr || input_context[0] == '\0') return 0;
     const std::lock_guard lock(ctx->mutex);
+    if (ctx->game_input_frame_in_progress) return 0;
     ctx->staging_game_input_context = input_context;
     ctx->staging_game_input_actions.clear();
     ctx->game_input_frame_in_progress = true;
@@ -2494,6 +2495,8 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
     const std::string value = descriptor->value_json != nullptr ? descriptor->value_json : "null";
     if (target.size() >= 128 || !valid_json_value(value)) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     if (descriptor->kind == GUA_GAME_INPUT_SEMANTIC) {
+        if (!one_of(descriptor->operation, { GUA_GAME_INPUT_PRESS, GUA_GAME_INPUT_SET, GUA_GAME_INPUT_RELEASE }))
+            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         const int validation = validate_semantic_game_input(ctx->game_input_actions, descriptor->operation, target, value);
         if (validation != GUA_GAME_INPUT_OK) return validation;
     } else if (descriptor->kind == GUA_GAME_INPUT_KEYBOARD) {
@@ -2517,19 +2520,25 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         }
     } else if (descriptor->kind == GUA_GAME_INPUT_GAMEPAD) {
-        if (descriptor->device_index < 0 || descriptor->device_index > 3)
+        if (!one_of(descriptor->operation, { GUA_GAME_INPUT_DOWN, GUA_GAME_INPUT_UP,
+                GUA_GAME_INPUT_SET, GUA_GAME_INPUT_RESET }) ||
+            descriptor->device_index < 0 || descriptor->device_index > 3)
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         if ((descriptor->operation == GUA_GAME_INPUT_DOWN || descriptor->operation == GUA_GAME_INPUT_UP) &&
             !one_of(target, { "south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger",
                 "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right" }))
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         if (descriptor->operation == GUA_GAME_INPUT_SET) {
-            if (!one_of(target, { "left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y", "left_trigger", "right_trigger" }))
+            if (!one_of(target, { "left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y" }))
                 return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
             char* end = nullptr; const double axis = std::strtod(value.c_str(), &end);
             if (end != value.c_str() + value.size() || !std::isfinite(axis) || axis < -1.0 || axis > 1.0)
                 return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         }
+    } else if (descriptor->kind == GUA_GAME_INPUT_TEXT_INPUT) {
+        if (descriptor->operation != GUA_GAME_INPUT_SET) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+    } else if (descriptor->kind == GUA_GAME_INPUT_CLEANUP) {
+        if (descriptor->operation != GUA_GAME_INPUT_RELEASE_ALL) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     }
     const unsigned int lease = descriptor->lease_ms == 0 ? 5000U : descriptor->lease_ms;
     const auto request_id = ctx->next_game_input_request_id++;

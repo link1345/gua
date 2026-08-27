@@ -116,7 +116,10 @@ describe("InspectorRecorder", () => {
 
     const commands: unknown[] = [];
     await replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never,
-      { "chat-secret": "restored" }, async (command) => { commands.push(command); });
+      { "chat-secret": "restored" }, async (command) => { commands.push(command); }, async () => ({
+        schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "gameplay", actions: [{ id: "chat", valueType: "text",
+          holdable: false, active: true, bindings: [], risk: "safe", requiresConfirmation: false }],
+      }));
     expect(commands).toEqual([
       { type: "set_game_input_action", actionId: "chat", sensitive: true, value: "restored" },
       { type: "release_all_game_inputs" },
@@ -142,6 +145,27 @@ describe("InspectorRecorder", () => {
       calls += 1;
       if (calls === 2) throw new Error("cleanup failed");
     })).rejects.toThrow("cleanup failed");
+  });
+
+  test("re-resolves and reconfirms protected semantic actions during replay", async () => {
+    const recording = { schemaVersion: 2 as const, steps: [{ action: "game_input" as const,
+      operation: "press_game_input_action" as const, arguments: { actionId: "launch", confirmed: true }, sensitive: false,
+      relativeMilliseconds: 0, preRevision: 0, postRevision: 0 }] };
+    const actions = async () => ({ schemaVersion: 1 as const, sessionEpoch: 1, revision: 2, context: "launch",
+      actions: [{ id: "launch", valueType: "button" as const, holdable: false, active: true, bindings: [],
+        risk: "dangerous", requiresConfirmation: true }] });
+    const declined: unknown[] = [];
+    await expect(replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never, {},
+      async (command) => { declined.push(command); }, actions, () => false)).rejects.toThrow("Confirmation was declined");
+    expect(declined).toEqual([{ type: "release_all_game_inputs" }]);
+
+    const confirmed: unknown[] = [];
+    await replayRecording(recording, async () => ({ nodes: [] }) as never, async () => ({}) as never, {},
+      async (command) => { confirmed.push(command); }, actions, () => true);
+    expect(confirmed).toEqual([
+      { type: "press_game_input_action", actionId: "launch", confirmed: true },
+      { type: "release_all_game_inputs" },
+    ]);
   });
 
   test("rejects v1 and non-game-input operations before replay", async () => {

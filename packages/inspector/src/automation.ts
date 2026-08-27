@@ -1,4 +1,4 @@
-import type { GameInputCommandInput, GuaNode, GuaUiTree } from "./core";
+import type { GameInputCommandInput, GuaGameInputAction, GuaGameInputActions, GuaNode, GuaUiTree } from "./core";
 
 export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key" | "game_input";
 
@@ -107,6 +107,8 @@ export async function replayRecording(
   perform: (action: SemanticActionInput) => Promise<ActionOutcome>,
   secrets: Record<string, string> = {},
   performGameInput?: (command: GameInputCommandInput) => Promise<unknown>,
+  getGameInputActions?: () => Promise<GuaGameInputActions>,
+  confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
 ): Promise<void> {
   validateRecording(recording);
   let previous = 0;
@@ -118,6 +120,19 @@ export async function replayRecording(
     if (step.action === "game_input") {
       if (performGameInput === undefined || step.operation === undefined || step.arguments === undefined) throw new Error("Game input replay is unavailable.");
       const argumentsValue = { ...step.arguments, type: step.operation } as Record<string, unknown>;
+      if (step.operation === "press_game_input_action" || step.operation === "set_game_input_action") {
+        delete argumentsValue.confirmed;
+        if (getGameInputActions === undefined) throw new Error("Current game input actions are unavailable for replay.");
+        const actionId = argumentsValue.actionId as string;
+        const action = (await getGameInputActions()).actions.find((candidate) => candidate.id === actionId);
+        if (action === undefined) throw new Error(`Game input action '${actionId}' is not currently published.`);
+        if (action.requiresConfirmation) {
+          if (confirmGameInputAction === undefined || !await confirmGameInputAction(action)) {
+            throw new Error(`Confirmation was declined for game input action '${actionId}'.`);
+          }
+          argumentsValue.confirmed = true;
+        }
+      }
       if (step.sensitive) {
         const secret = secrets[step.secretKey as string];
         if (secret === undefined) throw new Error(`Missing secret '${step.secretKey}'.`);

@@ -168,10 +168,20 @@ public sealed partial class GuaUnityRuntime
             }
             if (request.Operation == GuaGameInputOperation.Release)
             {
+                var released = false;
+                var button = GamepadButton(gamepad, request.Target);
+                if (button != null)
+                {
+                    SetButtonOwner(button, request.OwnerId, false);
+                    released = true;
+                }
                 var axis = GamepadAxis(gamepad, request.Target);
-                if (axis == null) return false;
-                ReleaseAxisOwner(axis, request.OwnerId);
-                return true;
+                if (axis != null)
+                {
+                    ReleaseAxisOwner(axis, request.OwnerId);
+                    released = true;
+                }
+                return released;
             }
             var button = GamepadButton(gamepad, request.Target);
             if (button == null) return false;
@@ -309,8 +319,7 @@ public sealed partial class GuaUnityRuntime
     private static AxisControl? GamepadAxis(Gamepad gamepad, string name) => name switch
     {
         "left_stick_x" => gamepad.leftStick.x, "left_stick_y" => gamepad.leftStick.y,
-        "right_stick_x" => gamepad.rightStick.x, "right_stick_y" => gamepad.rightStick.y,
-        "left_trigger" => gamepad.leftTrigger, "right_trigger" => gamepad.rightTrigger, _ => null,
+        "right_stick_x" => gamepad.rightStick.x, "right_stick_y" => gamepad.rightStick.y, _ => null,
     };
     private static ButtonControl? GamepadButton(Gamepad gamepad, string name) => name switch
     {

@@ -213,6 +213,8 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
         (action) => inspectorClient.performAction(action),
         parsedSecrets as Record<string, string>,
         (command) => inspectorClient.performGameInput(command),
+        () => inspectorClient.getGameInputActions(),
+        (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
       );
       await refresh();
       setError(null);

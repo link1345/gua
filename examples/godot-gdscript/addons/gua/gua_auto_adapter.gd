@@ -1138,7 +1138,7 @@ func _gamepad_button(name: String) -> int:
 
 
 func _gamepad_axis(name: String) -> int:
-	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y", "left_trigger", "right_trigger"].find(name)
+	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"].find(name)
 
 
 func _release_gamepad(device: int) -> void:

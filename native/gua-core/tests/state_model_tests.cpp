@@ -824,6 +824,19 @@ int main()
     gua_destroy_context(concurrent);
 
     // Game input maps commit atomically and held state is isolated by owner.
+    const gua_game_input_action_descriptor_v1_t overlap_action {
+        sizeof(gua_game_input_action_descriptor_v1_t), "overlap", "Overlap", GUA_GAME_INPUT_BUTTON,
+        0.0, 0.0, 0, 0, 1, "[]", "safe", 0
+    };
+    assert(gua_begin_game_input_frame(context, "context-a") == 1);
+    assert(gua_begin_game_input_frame(context, "context-b") == 0);
+    assert(gua_register_game_input_action_v1(context, &overlap_action) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    int overlap_map_size = gua_copy_game_input_actions_json(context, nullptr, 0);
+    std::string overlap_map(static_cast<std::size_t>(overlap_map_size), '\0');
+    gua_copy_game_input_actions_json(context, overlap_map.data(), overlap_map_size);
+    assert(overlap_map.find("\"context\":\"context-a\"") != std::string::npos);
+    assert(overlap_map.find("\"id\":\"overlap\"") != std::string::npos);
     assert(gua_begin_game_input_frame(context, "invalid-bindings") == 1);
     const gua_game_input_action_descriptor_v1_t invalid_bindings {
         sizeof(gua_game_input_action_descriptor_v1_t), "invalid", "Invalid bindings", GUA_GAME_INPUT_BUTTON,
@@ -908,6 +921,29 @@ int main()
     invalid_gamepad_index.target = "south";
     invalid_gamepad_index.device_index = 4;
     assert(gua_enqueue_game_input(context, &invalid_gamepad_index, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_gamepad_operation = invalid_gamepad_index;
+    invalid_gamepad_operation.device_index = 0;
+    invalid_gamepad_operation.operation = GUA_GAME_INPUT_MOVE_ABSOLUTE;
+    assert(gua_enqueue_game_input(context, &invalid_gamepad_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    invalid_gamepad_operation.operation = GUA_GAME_INPUT_SET;
+    invalid_gamepad_operation.target = "left_trigger";
+    invalid_gamepad_operation.value_json = "0.5";
+    assert(gua_enqueue_game_input(context, &invalid_gamepad_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_semantic_operation = invalid_gamepad_operation;
+    invalid_semantic_operation.kind = GUA_GAME_INPUT_SEMANTIC;
+    invalid_semantic_operation.operation = GUA_GAME_INPUT_MOVE_ABSOLUTE;
+    invalid_semantic_operation.target = "interact";
+    assert(gua_enqueue_game_input(context, &invalid_semantic_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_text_operation = invalid_gamepad_operation;
+    invalid_text_operation.kind = GUA_GAME_INPUT_TEXT_INPUT;
+    invalid_text_operation.operation = GUA_GAME_INPUT_DOWN;
+    invalid_text_operation.target = "text";
+    invalid_text_operation.value_json = "\"hello\"";
+    assert(gua_enqueue_game_input(context, &invalid_text_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_cleanup_operation = invalid_text_operation;
+    invalid_cleanup_operation.kind = GUA_GAME_INPUT_CLEANUP;
+    invalid_cleanup_operation.target = "all";
+    assert(gua_enqueue_game_input(context, &invalid_cleanup_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     auto invalid_lease = invalid_key;
     invalid_lease.target = "Space"; invalid_lease.lease_ms = 60001;
     assert(gua_enqueue_game_input(context, &invalid_lease, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT);
