@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
@@ -16,6 +17,103 @@ namespace Gua.Selector.Tests;
 [TestFixture]
 public sealed class SelectorParityTests
 {
+    [Test]
+    public void ProjectedQueryLabelsAreDeclaredNullable()
+    {
+        var label = typeof(GuaNodeQueryMatch).GetProperty(nameof(GuaNodeQueryMatch.Label))!;
+        Assert.That(new NullabilityInfoContext().Create(label).ReadState, Is.EqualTo(NullabilityState.Nullable));
+        var result = JsonSerializer.Deserialize<GuaQueryResult>(
+            """{"valid":true,"matches":[{"id":"public","role":"button","parentId":null}]}""",
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.That(result!.Matches.Single().Label, Is.Null);
+    }
+
+    [Test]
+    public void ProjectedWorldLabelsAreDeclaredNullable()
+    {
+        var label = typeof(GuaWorldObject).GetProperty(nameof(GuaWorldObject.Label))!;
+        Assert.That(new NullabilityInfoContext().Create(label).ReadState, Is.EqualTo(NullabilityState.Nullable));
+    }
+
+    [Test]
+    public void AgentPolicyProjectsUiFieldsAndKeepsDebugTreeComplete()
+    {
+        using var context = new GuaContext();
+        context.BeginFrame("policy");
+        context.RegisterNode(new GuaNodeDescriptor("public", "button", "Secret label", new GuaBounds(17, 2, 20, 10),
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [
+                new("label", GuaAgentFieldMode.Redact),
+                new("bounds.x", GuaAgentFieldMode.Quantize, Quantum: 10),
+            ], AllowedActions: [GuaActionType.Focus])));
+        context.RegisterNode(new GuaNodeDescriptor("private", "button", "Private label", new GuaBounds(0, 0, 1, 1),
+            AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Private)));
+        context.EndFrame();
+
+        var debug = context.GetUiTreeJson(GuaObservationProfile.Debug);
+        var player = context.GetUiTreeJson(GuaObservationProfile.Player);
+        Assert.Multiple(() =>
+        {
+            Assert.That(debug, Does.Contain("Secret label").And.Contain("Private label"));
+            Assert.That(player, Does.Contain("[redacted]").And.Contain("\"x\":10.000"));
+            Assert.That(player, Does.Not.Contain("Private label"));
+            Assert.That(player, Does.Contain("\"actions\":[\"focus\"]"));
+            Assert.That(context.GetDiagnosticsJson(GuaObservationProfile.Player), Does.Not.Contain("Private label"));
+        });
+    }
+
+    [Test]
+    public void BrowserRuntimeEntryPointsRemainPlayerWhileLocalRuntimeStaysDebug()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.BeginFrame("policy");
+        runtime.RegisterNode(new GuaNodeDescriptor("public", "button", "Public", new GuaBounds(0, 0, 10, 10),
+            AgentPolicy: new GuaAgentPolicy(AllowedActions: [GuaActionType.Focus])));
+        runtime.RegisterNode(new GuaNodeDescriptor("private", "button", "Private", new GuaBounds(0, 0, 10, 10),
+            AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Private)));
+        runtime.EndFrame();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(runtime.GetUiTreeJson(), Does.Contain("Private"));
+            Assert.That(runtime.GetPlayerUiTreeJson(), Does.Not.Contain("Private"));
+        });
+        Assert.That(runtime.EnqueueAction(new GuaActionRequest(GuaActionType.Click, "public"), out var debugRequest),
+            Is.EqualTo(GuaActionError.None));
+        Assert.That(runtime.CancelAction(debugRequest), Is.EqualTo(GuaActionCancelResult.Cancelled));
+        Assert.That(runtime.EnqueuePlayerAction(new GuaActionRequest(GuaActionType.Click, "public"), out _),
+            Is.EqualTo(GuaActionError.Unsupported));
+        Assert.That(runtime.EnqueuePlayerAction(new GuaActionRequest(GuaActionType.Click, "private"), out _),
+            Is.EqualTo(GuaActionError.NodeNotFound));
+        Assert.That(runtime.EnqueuePlayerAction(new GuaActionRequest(GuaActionType.Focus, "public"), out _),
+            Is.EqualTo(GuaActionError.None));
+        Assert.That(runtime.TryConsumeAction(GuaActionType.Focus, "public", out var playerRequest), Is.True);
+        Assert.That(playerRequest.ObservationProfile, Is.EqualTo(GuaObservationProfile.Player));
+        runtime.EmitActionResult(playerRequest, true);
+    }
+
+    [Test]
+    public async Task PlayerTestingParsersPreserveOmittedLabelsAndBounds()
+    {
+        const string playerTree = """
+            {"schemaVersion":2,"sessionEpoch":1,"frameSequence":1,"revision":1,"screen":"policy","nodes":[{"id":"public","role":"button","visible":true,"enabled":true,"bounds":{"y":2,"w":20,"h":10},"actions":["click"]}]}
+            """;
+        var context = new StaticTreeContext(playerTree);
+        var direct = GuaAssertions.GetById(context, "public").Snapshot;
+        var omittedLabel = GuaAssertions.GetById(context, "public");
+        var waited = (await GuaAssertions.WaitForStateAsync(context, "public", node => !node.KnownBounds.HasFlag(GuaBoundsKnownState.X),
+            timeout: TimeSpan.FromMilliseconds(100))).Snapshot;
+        var labelError = Assert.Throws<GuaAssertionException>(() => omittedLabel.ToHaveLabel(string.Empty));
+        Assert.Multiple(() =>
+        {
+            Assert.That(direct.HasLabel, Is.False);
+            Assert.That(direct.Label, Is.Empty);
+            Assert.That(direct.KnownBounds, Is.EqualTo(GuaBoundsKnownState.Y | GuaBoundsKnownState.Width | GuaBoundsKnownState.Height));
+            Assert.That(direct.Bounds.X, Is.Zero);
+            Assert.That(waited.KnownBounds.HasFlag(GuaBoundsKnownState.X), Is.False);
+            Assert.That(labelError!.Message, Does.Contain("unknown label"));
+        });
+    }
+
     [Test]
     public void CoreContextExposesQueuedActionCancellation()
     {
@@ -41,19 +139,27 @@ public sealed class SelectorParityTests
             State: new Dictionary<string, object?> { ["open"] = false, ["locked"] = true }));
         context.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World3D,
             new GuaWorldPosition(1, 2, 3), VisibleToPlayer: true, ParentId: "door-a", AgentExposure: GuaAgentExposure.Private));
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("field-private", "item", "Field Private", GuaWorldSpace.World2D,
+            new GuaWorldPosition(2, 3), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [new("label", GuaAgentFieldMode.Redact)])));
+        context.RegisterWorldObject(new GuaWorldObjectDescriptor("explicit-public", "item", "Explicit Public", GuaWorldSpace.World2D,
+            new GuaWorldPosition(3, 4), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            Tags: ["private-tag"], AgentPolicy: new GuaAgentPolicy(GuaAgentExposure.Auto,
+                [new("label", GuaAgentFieldMode.Redact), new("tags", GuaAgentFieldMode.Omit)])));
         context.EndWorldFrame();
 
         Assert.Multiple(() =>
         {
-            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(2));
-            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a" }));
+            Assert.That(context.GetWorldObjectTree().Objects, Has.Count.EqualTo(4));
+            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Select(item => item.Id), Is.EqualTo(new[] { "door-a", "explicit-public" }));
+            Assert.That(context.GetWorldObjectTree(GuaObservationProfile.Player).Objects.Single(item => item.Id == "explicit-public").Tags, Is.Null);
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Id: "secret"), GuaObservationProfile.Player).Matches, Is.Empty);
             Assert.That(context.QueryWorldObjects(new GuaWorldSelector(Kind: "door")).Matches.Single().State["locked"].GetBoolean(), Is.True);
-            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(2));
+            Assert.That(context.GetContextStatus().WorldObjectCount, Is.EqualTo(4));
         });
 
         var reset = context.Reset();
-        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(2));
+        Assert.That(reset.DiscardedWorldObjectCount, Is.EqualTo(4));
         Assert.That(context.GetWorldObjectTree().Objects, Is.Empty);
     }
 
@@ -95,12 +201,14 @@ public sealed class SelectorParityTests
         using var runtime = new GuaRuntime();
         runtime.EnableWorldObjectTreeAdapter();
         runtime.SetObservationProfile(GuaObservationProfile.Player);
+        Assert.That(runtime.ObservationProfile, Is.EqualTo(GuaObservationProfile.Player));
         runtime.BeginWorldFrame("corridor");
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("door-a", "door", "Door A", GuaWorldSpace.World2D,
             new GuaWorldPosition(640, 180), VisibleToPlayer: true,
             State: new Dictionary<string, object?> { ["locked"] = true, ["priority"] = (byte)7, ["code"] = "" }));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("secret", "item", "Secret", GuaWorldSpace.World2D,
-            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private));
+            new GuaWorldPosition(1, 1), VisibleToPlayer: true, AgentExposure: GuaAgentExposure.Private,
+            AgentPolicy: new GuaAgentPolicy(FieldRules: [new("label", GuaAgentFieldMode.Redact)])));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-parent", "area", "Hidden", GuaWorldSpace.World2D,
             new GuaWorldPosition(2, 2), VisibleToPlayer: false));
         runtime.RegisterWorldObject(new GuaWorldObjectDescriptor("hidden-child", "item", "Child", GuaWorldSpace.World2D,
@@ -1707,6 +1815,20 @@ public sealed class SelectorParityTests
         public bool TryPollActionEvent(out GuaActionEvent e) => throw new NotSupportedException();
         public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) => throw new NotSupportedException();
         public bool TryPollEvent(out GuaEvent e) => throw new NotSupportedException();
+    }
+
+    private sealed class StaticTreeContext(string json) : IGuaContext
+    {
+        public string GetUiTreeJson() => json;
+        public GuaNodeState GetNodeState(string id) => throw new NotSupportedException();
+        public string FindNodeById(string id) => id == "public" ? id : string.Empty;
+        public string FindNodeByRole(string role, string? name = null) => throw new NotSupportedException();
+        public string FindNodeByText(string text) => throw new NotSupportedException();
+        public bool EnqueueClick(string id) => throw new NotSupportedException();
+        public GuaActionError EnqueueAction(GuaActionRequest request, out ulong requestId) { requestId = 0; throw new NotSupportedException(); }
+        public bool TryPollActionEvent(out GuaActionEvent e) { e = default!; return false; }
+        public bool TryPollActionEvent(ulong requestId, out GuaActionEvent e) { e = default!; return false; }
+        public bool TryPollEvent(out GuaEvent e) { e = default; return false; }
     }
 
     private static class Native

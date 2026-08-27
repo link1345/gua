@@ -1,17 +1,17 @@
 export type WorldPrimitive = string | number | boolean | null;
 export interface GuaWorldObject {
-  id: string; parentId?: string; kind: string; label: string; description?: string;
-  space: "world2d" | "world3d"; position: { x: number; y: number; z?: number };
+  id: string; parentId?: string; kind: string; label?: string; description?: string;
+  space: "world2d" | "world3d"; position: { x?: number; y?: number; z?: number };
   visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private";
-  domainId?: string; relatedUiNodeId?: string; tags: string[]; state: Record<string, WorldPrimitive>;
+  domainId?: string; relatedUiNodeId?: string; tags?: string[]; state: Record<string, WorldPrimitive>;
 }
 export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
 export interface GuaWorldSelector { id?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: boolean; visibleToPlayer?: boolean; active?: boolean; state?: { key: string; value: WorldPrimitive } }
 export interface GuaWorldQueryResult { valid: boolean; matches: GuaWorldObject[]; error?: string }
 export interface GuaWorldProvider {
-  getWorldObjectTree(profile?: "player"): Promise<GuaWorldObjectTree>;
-  findWorldObjects(selector: GuaWorldSelector, profile?: "player"): Promise<GuaWorldQueryResult>;
-  waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number, profile?: "player"): Promise<GuaWorldObject>;
+  getWorldObjectTree(): Promise<GuaWorldObjectTree>;
+  findWorldObjects(selector: GuaWorldSelector): Promise<GuaWorldQueryResult>;
+  waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number): Promise<GuaWorldObject>;
 }
 
 export function parseWorldObjectTree(value: unknown): GuaWorldObjectTree {
@@ -51,16 +51,17 @@ function worldObject(value: unknown): value is GuaWorldObject {
   const position = record(object?.position);
   const state = record(object?.state);
   if (!object || !only(object, objectKeys) || !nonEmptyString(object.id) || !optionalNonEmptyString(object.parentId) ||
-      typeof object.kind !== "string" || !kindPattern.test(object.kind) || typeof object.label !== "string" ||
+      typeof object.kind !== "string" || !kindPattern.test(object.kind) ||
+      (object.label !== undefined && typeof object.label !== "string") ||
       (object.description !== undefined && typeof object.description !== "string") ||
       (object.space !== "world2d" && object.space !== "world3d") || !position ||
       !only(position, object.space === "world2d" ? position2dKeys : position3dKeys) ||
-      !finiteNumber(position.x) || !finiteNumber(position.y) ||
-      (object.space === "world3d" && !finiteNumber(position.z)) ||
+      !optionalFiniteNumber(position.x) || !optionalFiniteNumber(position.y) ||
+      (object.space === "world3d" && !optionalFiniteNumber(position.z)) ||
       typeof object.visibleToPlayer !== "boolean" || typeof object.active !== "boolean" ||
       (object.agentExposure !== "auto" && object.agentExposure !== "private") ||
-      !optionalNonEmptyString(object.domainId) || !optionalNonEmptyString(object.relatedUiNodeId) ||
-      !Array.isArray(object.tags) || !object.tags.every(nonEmptyString) || new Set(object.tags).size !== object.tags.length ||
+      !optionalString(object.domainId) || !optionalString(object.relatedUiNodeId) ||
+      (object.tags !== undefined && (!Array.isArray(object.tags) || !object.tags.every(nonEmptyString) || new Set(object.tags).size !== object.tags.length)) ||
       !state || Object.keys(state).some((key) => key.length === 0) || !Object.values(state).every(worldPrimitive)) return false;
   return true;
 }
@@ -76,7 +77,9 @@ function record(value: unknown): Record<string, unknown> | undefined {
 function only(value: Record<string, unknown>, keys: Set<string>): boolean { return Object.keys(value).every((key) => keys.has(key)); }
 function nonEmptyString(value: unknown): value is string { return typeof value === "string" && value.length > 0; }
 function optionalNonEmptyString(value: unknown): boolean { return value === undefined || nonEmptyString(value); }
+function optionalString(value: unknown): boolean { return value === undefined || typeof value === "string"; }
 function finiteNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function optionalFiniteNumber(value: unknown): boolean { return value === undefined || finiteNumber(value); }
 function positiveInteger(value: unknown): boolean { return Number.isInteger(value) && (value as number) >= 1; }
 function nonNegativeInteger(value: unknown): boolean { return Number.isInteger(value) && (value as number) >= 0; }
 function worldPrimitive(value: unknown): value is WorldPrimitive {
@@ -143,17 +146,17 @@ export function registerWorldWebMcpTools(modelContext: WebMcpModelContext | unde
   for (const tool of worldObservationTools) modelContext.registerTool({ ...tool, execute: async (args) => {
     if (tool.name === "get_world_object_tree") {
       if (Object.keys(args).length !== 0) throw new TypeError(`Unknown get_world_object_tree argument: ${Object.keys(args)[0]}.`);
-      return provider.getWorldObjectTree("player");
+      return provider.getWorldObjectTree();
     }
     if (tool.name === "find_world_objects" && Object.prototype.hasOwnProperty.call(args, "timeoutMs"))
       throw new TypeError("Unknown find_world_objects argument: timeoutMs.");
     const selector = selectorFromArguments(args);
-    if (tool.name === "find_world_objects") return provider.findWorldObjects(selector, "player");
+    if (tool.name === "find_world_objects") return provider.findWorldObjects(selector);
     if (Object.prototype.hasOwnProperty.call(args, "timeoutMs") &&
         (typeof args.timeoutMs !== "number" || !Number.isInteger(args.timeoutMs) || args.timeoutMs < 1 || args.timeoutMs > 300000))
       throw new TypeError("timeoutMs must be an integer from 1 through 300000.");
     const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : 5000;
-    return provider.waitForWorldObject(selector, timeoutMs, "player");
+    return provider.waitForWorldObject(selector, timeoutMs);
   }});
   return true;
 }

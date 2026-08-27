@@ -202,6 +202,18 @@ The MCP and WebMCP tools expose the same criterion as the paired `stateKey` and 
 
 World v1 provides no actions, relationship/distance queries, pathfinding, teleportation, or arbitrary host method invocation. Capability `world_object_tree_v1` is advertised only after an adapter installs its world-frame publisher.
 
+## Agent projection policy v1
+
+Capability `agent_projection_v1` applies the host-owned `debug` or `player` observation profile before data reaches a transport. Existing C ABI entry points remain debug-compatible; runtimes use the additive profile-aware tree, query, diagnostics, and action entry points. A runtime may narrow from debug to player before starting its bridge and cannot be elevated again by a command or tool argument.
+
+Debug returns the complete registered UI and World snapshots. Player UI `auto` nodes require effective visibility through every ancestor. Player World `auto` objects require host-defined semantic visibility and active state through every ancestor; render visibility is not a substitute. A `private` ancestor removes its complete subtree, and projection never reparents descendants.
+
+`agent-policy.schema.json` defines field rules `keep`, `omit`, `redact`, typed replacement, and numeric `quantize`; UI policies validate against `$defs/uiPolicy` and World policies against `$defs/worldPolicy`. When a policy contains multiple rules for the same path, the later rule replaces the earlier rule. Quantization is `floor(value / quantum) * quantum`; integer-valued UI state uses an exact integer path whenever the quantum is an exactly representable positive integer. Replacement values must preserve the target field's protocol constraints, including nonnegative UI bounds width and height and integral caret, selection, and selected-index state. Identity and hierarchy fields (`id`, `parentId`, `role`, and `kind`) cannot be transformed. UI action allowlists are intersected with role support and current enabled state. World actions remain outside World v1, but future world and raw-input capabilities must use the same host authorization boundary.
+`omit` removes the targeted JSON member rather than publishing an empty substitute; accordingly, projected World objects may omit `tags` even though Debug publishers continue to emit it. A string `replace` rule keeps the member present even when its replacement is the empty string, including for World `description`, `domainId`, and `relatedUiNodeId`.
+`replace` supplies the projected field even when the host did not report that field as known. Replacing one component of a paired UI state does not make its unknown sibling component observable. The at-most-one-focused-node invariant is validated after Player field rules are applied as well as before projection; a frame whose policies create multiple focused nodes is rejected atomically.
+
+Snapshot, query, wait, revision/count metadata, diagnostics, and action authorization use the projected view. Query match objects omit `label` when the corresponding field rule omits it; omission is not serialized as an observed empty string. Player actions are revalidated both when queued and when consumed; a private and an unknown ID produce the same not-found result. Player diagnostics omit debug environment metadata and Debug/unscoped history, while retaining operations and events whose Player profile was captured at authorization time even if their former target is no longer in the current projection. Retained and pending Player action payloads use the field policy captured at authorization time; slider `set_value` payloads use `state.rangeValue`, while textual controls use `value`. A sensitive request also forces its correlated event payload to remain empty even if the host forgets to mark the result sensitive. Logs are empty. Screenshots are denied by default because rendered pixels cannot be projected semantically; a host may explicitly allow them only before starting the bridge, and transports cannot change that setting.
+
 ## Inspector Snapshots
 
 The Inspector consumes four protocol payloads:
@@ -318,7 +330,7 @@ an in-flight request has already been handed to the host and must finish through
 the ordinary correlated result path. A successfully cancelled request is never
 later consumed if a node with the same ID reappears.
 
-`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. After applying a sensitive value, adapters must also omit that control's plaintext `text` and `value` from subsequent semantic snapshots (and must not copy the plaintext into another semantic field such as `state.rangeValue`). `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`.
+`sensitive=true` permits the adapter to receive the requested value, but event values, logs, diagnostics, and recordings must use an empty or redacted representation. After applying a sensitive value, adapters must also omit that control's plaintext `text` and `value` from subsequent semantic snapshots (and must not copy the plaintext into another semantic field such as `state.rangeValue`). `scrollUnit=0` means host pixels and `scrollUnit=1` means semantic lines. A key request may omit `nodeId` to target the host's current focus; when a node is provided it must expose `press_key`. In Player mode, a node-less key request is accepted only when exactly one currently projected node is explicitly focused, and that resolved target is reauthorized again before consumption.
 Key modifiers use a transport-neutral bit mask: Shift is `1`, Alt is `2`, Control is `4`, and Meta/Command is `8`. Adapters must route both key-down and key-up through the host input pipeline and report success only after accepting the complete key gesture.
 - `text_input`
 - `move_gamepad`
@@ -408,6 +420,10 @@ in-page engine contract reads the current protocol UI tree, performs an action
 and resolves only with its request-ID-correlated host completion, and may expose
 the latest published screenshot. JavaScript validates live visibility, enabled
 state, and the advertised action but never owns or recreates the semantic tree.
+The engine boundary always projects UI and World observations as Player and
+captures browser action requests as Player, even when the same local runtime
+continues to serve Debug observations to an Inspector. Neither tool arguments
+nor transport payloads may select or elevate an observation profile.
 
 Feature detection is required. Missing WebMCP, a missing engine bridge, invalid
 input, unsupported action, host failure, timeout, and cancellation are structured
@@ -427,6 +443,9 @@ Language bindings should poll events instead of passing callbacks across ABI
 boundaries. External commands such as `click_node` are requests first; adapters
 consume them and emit events only after the corresponding host UI action has
 been applied.
+Requestless host-observed events remain available to Debug consumers. Player
+consumers receive them only when the target belongs to the Player projection at
+both emission and polling time.
 
 Testing clients may combine enqueue and request-id-specific polling in one
 convenience operation. Such helpers must not consume unrelated results or

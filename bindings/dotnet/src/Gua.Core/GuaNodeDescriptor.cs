@@ -1,5 +1,13 @@
 namespace Gua.Core;
 
+public enum GuaAgentExposure { Auto = 0, Private = 1 }
+public enum GuaAgentFieldMode { Keep = 0, Omit = 1, Redact = 2, Replace = 3, Quantize = 4 }
+public sealed record GuaAgentFieldRule(string Path, GuaAgentFieldMode Mode, object? Replacement = null, double Quantum = 0);
+public sealed record GuaAgentPolicy(
+    GuaAgentExposure? Exposure = null,
+    IReadOnlyList<GuaAgentFieldRule>? FieldRules = null,
+    IReadOnlyList<GuaActionType>? AllowedActions = null);
+
 [Flags]
 public enum GuaNodeKnownState : ulong
 {
@@ -39,7 +47,8 @@ public sealed record GuaNodeDescriptor(
     bool? Selected = null,
     long? CaretPosition = null, long? SelectionStart = null, long? SelectionEnd = null,
     double? ScrollX = null, double? ScrollY = null, double? ScrollMaxX = null, double? ScrollMaxY = null,
-    double? RangeValue = null, double? RangeMin = null, double? RangeMax = null, long? SelectedIndex = null);
+    double? RangeValue = null, double? RangeMin = null, double? RangeMax = null, long? SelectedIndex = null,
+    GuaAgentPolicy? AgentPolicy = null);
 
 public sealed record GuaNodeStateV2(
     GuaNodeKnownState KnownState,

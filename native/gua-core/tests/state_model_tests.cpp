@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <cstdint>
 #include <atomic>
@@ -56,17 +57,542 @@ int main()
     assert(std::string(version.data()).find("\"godotPluginVersion\":null") != std::string::npos);
     assert(std::string(version.data()).find("\"version_v1\"") != std::string::npos);
     assert(std::string(version.data()).find("\"world_object_tree_v1\"") != std::string::npos);
+    assert(std::string(version.data()).find("\"agent_projection_v1\"") != std::string::npos);
+
+    gua_context_t* projected_ui = gua_create_context();
+    const gua_agent_field_rule_v1_t ui_rules[] {
+        { sizeof(gua_agent_field_rule_v1_t), "label", GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "bounds.x", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 10 },
+        { sizeof(gua_agent_field_rule_v1_t), "text", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "bounds.y", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, 42, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.checked", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.selected", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "bounds.w", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, std::numeric_limits<double>::denorm_min() },
+    };
+    const gua_agent_policy_v1_t ui_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 1,
+        1ULL << GUA_ACTION_FOCUS, ui_rules, 7 };
+    const gua_node_descriptor_v2_t projected_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_TEXT | GUA_NODE_KNOWN_CHECKED | GUA_NODE_KNOWN_SELECTED,
+        "public", nullptr, "button", "Secret label", "Secret text", nullptr, { 17, 2, 20, 10 }, 1, 1, 0, 0, 0, 1, 1 };
+    const gua_node_descriptor_v3_t projected_detail { sizeof(gua_node_descriptor_v3_t), projected_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+    const gua_node_descriptor_v4_t projected_node { sizeof(gua_node_descriptor_v4_t), projected_detail, ui_policy };
+    auto private_base = projected_base; private_base.id = "private"; private_base.label = "Private label";
+    const gua_node_descriptor_v3_t private_detail { sizeof(gua_node_descriptor_v3_t), private_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+    const gua_agent_policy_v1_t private_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE, 0, 0, nullptr, 0 };
+    const gua_node_descriptor_v4_t private_node { sizeof(gua_node_descriptor_v4_t), private_detail, private_policy };
+    gua_begin_frame(projected_ui, "policy");
+    assert(gua_register_node_v4(projected_ui, &projected_node) == 1);
+    assert(gua_register_node_v4(projected_ui, &private_node) == 1);
+    gua_end_frame(projected_ui);
+    int debug_ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    std::vector<char> debug_ui_json(static_cast<std::size_t>(debug_ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_DEBUG, debug_ui_json.data(), debug_ui_size);
+    assert(std::string(debug_ui_json.data()).find("\"click\"") != std::string::npos);
+    int ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> ui_json(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    assert(std::string(ui_json.data()).find("[redacted]") != std::string::npos);
+    assert(std::string(ui_json.data()).find("\"x\":10.000") != std::string::npos);
+    assert(std::string(ui_json.data()).find("\"y\":42.000") != std::string::npos);
+    assert(std::string(ui_json.data()).find("Secret text") == std::string::npos);
+    assert(std::string(ui_json.data()).find("\"checked\":false") != std::string::npos);
+    assert(std::string(ui_json.data()).find("\"selected\"") == std::string::npos);
+    assert(std::string(ui_json.data()).find("inf") == std::string::npos);
+    assert(std::string(ui_json.data()).find("Private label") == std::string::npos);
+    gua_node_state_v2_t projected_state { sizeof(gua_node_state_v2_t) };
+    assert(gua_get_node_state_v2_for_profile(projected_ui, "public", GUA_OBSERVATION_PROFILE_PLAYER, &projected_state) == 1);
+    assert((projected_state.known_mask & GUA_NODE_KNOWN_SELECTED) == 0);
+    assert((projected_state.known_mask & GUA_NODE_KNOWN_TEXT) == 0);
+    assert(projected_state.selected == 0);
+    assert(projected_state.text[0] == '\0');
+    const gua_action_request_descriptor_t projected_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "public" };
+    uint64_t debug_click_id = 0;
+    assert(gua_enqueue_action(projected_ui, &projected_click, &debug_click_id) == GUA_ACTION_ACCEPTED);
+    gua_action_request_t debug_click { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(projected_ui, GUA_ACTION_CLICK, "public", &debug_click) == 1);
+    const gua_action_result_t debug_click_result { sizeof(gua_action_result_t), debug_click_id, GUA_ACTION_CLICK,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, "public", nullptr, 0 };
+    assert(gua_emit_action_result(projected_ui, &debug_click_result) == 1);
+    gua_event_v2_t debug_click_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request(projected_ui, debug_click_id, &debug_click_event) == 1);
+    assert(gua_enqueue_action_for_profile(projected_ui, &projected_click, GUA_OBSERVATION_PROFILE_PLAYER, nullptr) == GUA_ACTION_ERROR_UNSUPPORTED);
+
+    const gua_agent_field_rule_v1_t overflowing_rule { sizeof(gua_agent_field_rule_v1_t), "bounds.x",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, 1e308, 0, 0 };
+    const gua_agent_policy_v1_t overflowing_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, &overflowing_rule, 1 };
+    const gua_node_descriptor_v4_t overflowing_node { sizeof(gua_node_descriptor_v4_t), projected_detail, overflowing_policy };
+    gua_begin_frame(projected_ui, "overflowing-policy");
+    assert(gua_register_node_v4(projected_ui, &overflowing_node) == 0);
+    gua_end_frame(projected_ui);
+    assert(std::string(gua_get_ui_tree_json(projected_ui)).find("\"screen\":\"policy\"") != std::string::npos);
+
+    const gua_agent_field_rule_v1_t negative_width_rule { sizeof(gua_agent_field_rule_v1_t), "bounds.w",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, -1, 0, 0 };
+    const gua_agent_policy_v1_t negative_width_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, &negative_width_rule, 1 };
+    const gua_node_descriptor_v4_t negative_width_node { sizeof(gua_node_descriptor_v4_t), projected_detail, negative_width_policy };
+    gua_begin_frame(projected_ui, "negative-width-policy");
+    assert(gua_register_node_v4(projected_ui, &negative_width_node) == 0);
+    gua_end_frame(projected_ui);
+
+    const gua_agent_field_rule_v1_t negative_x_rule { sizeof(gua_agent_field_rule_v1_t), "bounds.x",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, -1, 0, 0 };
+    const gua_agent_policy_v1_t negative_x_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, &negative_x_rule, 1 };
+    const gua_node_descriptor_v4_t negative_x_node { sizeof(gua_node_descriptor_v4_t), projected_detail, negative_x_policy };
+    gua_begin_frame(projected_ui, "negative-coordinate-policy");
+    assert(gua_register_node_v4(projected_ui, &negative_x_node) == 1);
+    gua_end_frame(projected_ui);
+    ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    ui_json.resize(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    assert(std::string(ui_json.data()).find("\"x\":-1.000") != std::string::npos);
+
+    const gua_agent_field_rule_v1_t exact_integer_rule { sizeof(gua_agent_field_rule_v1_t), "state.selectedIndex",
+        GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 1 };
+    const gua_agent_policy_v1_t exact_integer_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, &exact_integer_rule, 1 };
+    auto exact_integer_detail = projected_detail;
+    exact_integer_detail.base.known_mask = GUA_NODE_KNOWN_SELECTED_INDEX;
+    exact_integer_detail.selected_index = std::numeric_limits<int64_t>::max() - 1;
+    const gua_node_descriptor_v4_t exact_integer_node {
+        sizeof(gua_node_descriptor_v4_t), exact_integer_detail, exact_integer_policy };
+    gua_begin_frame(projected_ui, "exact-integer-policy");
+    assert(gua_register_node_v4(projected_ui, &exact_integer_node) == 1);
+    gua_end_frame(projected_ui);
+    ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    ui_json.resize(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    assert(std::string(ui_json.data()).find(
+        "\"selectedIndex\":" + std::to_string(std::numeric_limits<int64_t>::max() - 1)) != std::string::npos);
+
+    auto fractional_integer_rule = exact_integer_rule;
+    fractional_integer_rule.quantum = 0.5;
+    const gua_agent_policy_v1_t fractional_integer_policy { sizeof(gua_agent_policy_v1_t),
+        GUA_AGENT_EXPOSURE_AUTO, 0, 0, &fractional_integer_rule, 1 };
+    const gua_node_descriptor_v4_t fractional_integer_node {
+        sizeof(gua_node_descriptor_v4_t), exact_integer_detail, fractional_integer_policy };
+    gua_begin_frame(projected_ui, "fractional-integer-policy");
+    assert(gua_register_node_v4(projected_ui, &fractional_integer_node) == 1);
+    gua_end_frame(projected_ui);
+    ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    ui_json.resize(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    assert(std::string(ui_json.data()).find(
+        "\"selectedIndex\":" + std::to_string(std::numeric_limits<int64_t>::max() - 1)) != std::string::npos);
+
+    auto sentinel_integer_rule = exact_integer_rule;
+    sentinel_integer_rule.quantum = 2;
+    const gua_agent_policy_v1_t sentinel_integer_policy { sizeof(gua_agent_policy_v1_t),
+        GUA_AGENT_EXPOSURE_AUTO, 0, 0, &sentinel_integer_rule, 1 };
+    auto sentinel_integer_detail = exact_integer_detail;
+    sentinel_integer_detail.selected_index = -1;
+    const gua_node_descriptor_v4_t sentinel_integer_node {
+        sizeof(gua_node_descriptor_v4_t), sentinel_integer_detail, sentinel_integer_policy };
+    gua_begin_frame(projected_ui, "sentinel-integer-policy");
+    assert(gua_register_node_v4(projected_ui, &sentinel_integer_node) == 1);
+    gua_end_frame(projected_ui);
+    ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    ui_json.resize(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    assert(std::string(ui_json.data()).find("\"selectedIndex\":-1") != std::string::npos);
+
+    const auto expect_rejected_state_replacement = [&](const char* path, double replacement) {
+        const gua_agent_field_rule_v1_t rule { sizeof(gua_agent_field_rule_v1_t), path,
+            GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NUMBER, nullptr, replacement, 0, 0 };
+        const gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+            0, &rule, 1 };
+        const gua_node_descriptor_v4_t node { sizeof(gua_node_descriptor_v4_t), projected_detail, policy };
+        gua_begin_frame(projected_ui, path);
+        assert(gua_register_node_v4(projected_ui, &node) == 0);
+        gua_end_frame(projected_ui);
+    };
+    expect_rejected_state_replacement("state.caretPosition", -1);
+    expect_rejected_state_replacement("state.caretPosition", 1.5);
+    expect_rejected_state_replacement("state.selectionStart", 2.25);
+    expect_rejected_state_replacement("state.selectionEnd", 3.75);
+    expect_rejected_state_replacement("state.scrollMaxX", -1);
+    expect_rejected_state_replacement("state.selectedIndex", -2);
+    expect_rejected_state_replacement("state.selectedIndex", 4.5);
+
+    const gua_agent_field_rule_v1_t unknown_state_rules[] {
+        { sizeof(gua_agent_field_rule_v1_t), "state.checked", GUA_AGENT_FIELD_REPLACE,
+            GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.selectionStart", GUA_AGENT_FIELD_REPLACE,
+            GUA_WORLD_VALUE_NUMBER, nullptr, 7, 0, 0 },
+    };
+    const gua_agent_policy_v1_t unknown_state_policy { sizeof(gua_agent_policy_v1_t),
+        GUA_AGENT_EXPOSURE_AUTO, 0, 0, unknown_state_rules, 2 };
+    auto unknown_state_detail = projected_detail;
+    unknown_state_detail.base.known_mask = 0;
+    const gua_node_descriptor_v4_t unknown_state_node {
+        sizeof(gua_node_descriptor_v4_t), unknown_state_detail, unknown_state_policy };
+    gua_begin_frame(projected_ui, "unknown-state-replacement");
+    assert(gua_register_node_v4(projected_ui, &unknown_state_node) == 1);
+    gua_end_frame(projected_ui);
+    ui_size = gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    ui_json.resize(static_cast<std::size_t>(ui_size));
+    gua_copy_ui_tree_json_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, ui_json.data(), ui_size);
+    const std::string unknown_state_json = ui_json.data();
+    assert(unknown_state_json.find("\"checked\":true") != std::string::npos);
+    assert(unknown_state_json.find("\"selectionStart\":7") != std::string::npos);
+    assert(unknown_state_json.find("\"selectionEnd\"") == std::string::npos);
+    projected_state = gua_node_state_v2_t { sizeof(gua_node_state_v2_t) };
+    assert(gua_get_node_state_v2_for_profile(
+        projected_ui, "public", GUA_OBSERVATION_PROFILE_PLAYER, &projected_state) == 1);
+    assert((projected_state.known_mask & GUA_NODE_KNOWN_CHECKED) != 0U && projected_state.checked == 1);
+
+    gua_context_t* projected_focus = gua_create_context();
+    gua_begin_frame(projected_focus, "single-focus");
+    gua_register_node(projected_focus, "baseline", "textbox", "Baseline", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(projected_focus);
+    const gua_agent_field_rule_v1_t force_focus { sizeof(gua_agent_field_rule_v1_t), "state.focused",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1, 0 };
+    const gua_agent_policy_v1_t force_focus_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+        0, 0, &force_focus, 1 };
+    auto forced_focus_detail = projected_detail;
+    forced_focus_detail.base.known_mask = 0;
+    forced_focus_detail.base.focused = 0;
+    forced_focus_detail.base.role = "textbox";
+    forced_focus_detail.base.id = "forced-a";
+    const gua_node_descriptor_v4_t forced_focus_a {
+        sizeof(gua_node_descriptor_v4_t), forced_focus_detail, force_focus_policy };
+    forced_focus_detail.base.id = "forced-b";
+    const gua_node_descriptor_v4_t forced_focus_b {
+        sizeof(gua_node_descriptor_v4_t), forced_focus_detail, force_focus_policy };
+    gua_begin_frame(projected_focus, "invalid-projected-focus");
+    assert(gua_register_node_v4(projected_focus, &forced_focus_a) == 1);
+    assert(gua_register_node_v4(projected_focus, &forced_focus_b) == 1);
+    gua_end_frame(projected_focus);
+    assert(std::string(gua_get_ui_tree_json(projected_focus)).find("\"screen\":\"single-focus\"") != std::string::npos);
+    assert(std::string(gua_get_ui_tree_json(projected_focus)).find("forced-a") == std::string::npos);
+    gua_destroy_context(projected_focus);
+
+    auto focus_request = projected_click; focus_request.action = GUA_ACTION_FOCUS;
+    uint64_t focus_id = 0;
+    assert(gua_enqueue_action_for_profile(projected_ui, &focus_request, GUA_OBSERVATION_PROFILE_PLAYER, &focus_id) == GUA_ACTION_ACCEPTED);
+    gua_begin_frame(projected_ui, "policy");
+    assert(gua_register_node_v4(projected_ui, &private_node) == 1);
+    gua_end_frame(projected_ui);
+    gua_action_request_t consumed_focus { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(projected_ui, GUA_ACTION_FOCUS, "public", &consumed_focus) == 0);
+    gua_event_v2_t hidden_player_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request_and_profile(projected_ui, focus_id, GUA_OBSERVATION_PROFILE_PLAYER, &hidden_player_event) == 1);
+    assert(hidden_player_event.error_code == GUA_ACTION_ERROR_NODE_NOT_FOUND);
+    gua_event_v2_t denied_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request(projected_ui, focus_id, &denied_event) == 0);
+
+    gua_begin_frame(projected_ui, "policy");
+    assert(gua_register_node_v4(projected_ui, &projected_node) == 1);
+    gua_end_frame(projected_ui);
+    uint64_t navigation_id = 0;
+    assert(gua_enqueue_action_for_profile(projected_ui, &focus_request, GUA_OBSERVATION_PROFILE_PLAYER, &navigation_id) == GUA_ACTION_ACCEPTED);
+    consumed_focus = gua_action_request_t { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(projected_ui, GUA_ACTION_FOCUS, "public", &consumed_focus) == 1);
+    gua_begin_frame(projected_ui, "next-screen");
+    gua_end_frame(projected_ui);
+    const gua_action_result_t navigation_result { sizeof(gua_action_result_t), navigation_id, GUA_ACTION_FOCUS,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, "public", nullptr, 0 };
+    assert(gua_emit_action_result(projected_ui, &navigation_result) == 1);
+    gua_event_v2_t navigation_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, &navigation_event) == 1);
+    assert(navigation_event.request_id == navigation_id && navigation_event.status == GUA_ACTION_STATUS_SUCCEEDED);
+    gua_destroy_context(projected_ui);
+
+    gua_context_t* omitted_query = gua_create_context();
+    const gua_agent_field_rule_v1_t omitted_query_label { sizeof(gua_agent_field_rule_v1_t), "label",
+        GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL };
+    const gua_agent_policy_v1_t omitted_query_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+        0, 0, &omitted_query_label, 1 };
+    const gua_node_descriptor_v2_t omitted_query_base { sizeof(gua_node_descriptor_v2_t), 0,
+        "omitted-query", nullptr, "button", "Secret query label", nullptr, nullptr,
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t omitted_query_detail { sizeof(gua_node_descriptor_v3_t), omitted_query_base };
+    const gua_node_descriptor_v4_t omitted_query_node {
+        sizeof(gua_node_descriptor_v4_t), omitted_query_detail, omitted_query_policy };
+    gua_begin_frame(omitted_query, "omitted-query");
+    assert(gua_register_node_v4(omitted_query, &omitted_query_node) == 1);
+    gua_end_frame(omitted_query);
+    const gua_selector_v1_t omitted_query_selector { sizeof(gua_selector_v1_t), "omitted-query" };
+    int omitted_query_size = gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> omitted_query_json(static_cast<std::size_t>(omitted_query_size));
+    gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_PLAYER, omitted_query_json.data(), omitted_query_size);
+    assert(std::string(omitted_query_json.data()).find("\"id\":\"omitted-query\"") != std::string::npos);
+    assert(std::string(omitted_query_json.data()).find("\"label\"") == std::string::npos);
+    omitted_query_size = gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    omitted_query_json.resize(static_cast<std::size_t>(omitted_query_size));
+    gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_DEBUG, omitted_query_json.data(), omitted_query_size);
+    assert(std::string(omitted_query_json.data()).find("\"label\":\"Secret query label\"") != std::string::npos);
+    gua_destroy_context(omitted_query);
+
+    gua_context_t* player_history = gua_create_context();
+    assert(gua_set_diagnostics_history_limit(player_history, 16) == 1);
+    const gua_agent_field_rule_v1_t history_value_rule { sizeof(gua_agent_field_rule_v1_t), "value",
+        GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "public-value" };
+    const gua_agent_policy_v1_t history_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+        0, 0, &history_value_rule, 1 };
+    const gua_node_descriptor_v2_t history_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_VALUE,
+        "history-target", nullptr, "textbox", "History target", nullptr, "raw-before",
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t history_detail { sizeof(gua_node_descriptor_v3_t), history_base };
+    const gua_node_descriptor_v4_t history_node {
+        sizeof(gua_node_descriptor_v4_t), history_detail, history_policy };
+    const gua_node_descriptor_v2_t history_check_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_CHECKED,
+        "history-check", nullptr, "checkbox", "History check", nullptr, nullptr,
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t history_check_detail { sizeof(gua_node_descriptor_v3_t), history_check_base };
+    gua_begin_frame(player_history, "history");
+    assert(gua_register_node_v4(player_history, &history_node) == 1);
+    assert(gua_register_node_v3(player_history, &history_check_detail) == 1);
+    gua_end_frame(player_history);
+    const auto complete_history_value = [&](int profile, const char* requested, const char* observed, uint64_t& request_id) {
+        const gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t),
+            GUA_ACTION_SET_VALUE, "history-target", requested };
+        assert(gua_enqueue_action_for_profile(player_history, &descriptor, profile, &request_id) == GUA_ACTION_ACCEPTED);
+        gua_action_request_t request { sizeof(gua_action_request_t) };
+        assert(gua_consume_action_request(player_history, GUA_ACTION_SET_VALUE, "history-target", &request) == 1);
+        const gua_action_result_t result { sizeof(gua_action_result_t), request_id, GUA_ACTION_SET_VALUE,
+            GUA_ACTION_STATUS_SUCCEEDED, 0, "history-target", observed, 0 };
+        assert(gua_emit_action_result(player_history, &result) == 1);
+    };
+    uint64_t debug_history_id = 0;
+    uint64_t player_history_id = 0;
+    complete_history_value(GUA_OBSERVATION_PROFILE_DEBUG, "debug-request", "debug-result", debug_history_id);
+    complete_history_value(GUA_OBSERVATION_PROFILE_PLAYER, "player-request", "player-result", player_history_id);
+    const gua_action_request_descriptor_t sensitive_history_value { sizeof(gua_action_request_descriptor_t),
+        GUA_ACTION_SET_VALUE, "history-target", "sensitive-request", 0, 0, 0, nullptr, 0, 1, 0 };
+    uint64_t sensitive_history_id = 0;
+    assert(gua_enqueue_action_for_profile(player_history, &sensitive_history_value,
+        GUA_OBSERVATION_PROFILE_PLAYER, &sensitive_history_id) == GUA_ACTION_ACCEPTED);
+    gua_action_request_t sensitive_history_request { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(player_history, GUA_ACTION_SET_VALUE,
+        "history-target", &sensitive_history_request) == 1);
+    const gua_action_result_t sensitive_history_result { sizeof(gua_action_result_t), sensitive_history_id,
+        GUA_ACTION_SET_VALUE, GUA_ACTION_STATUS_SUCCEEDED, 0, "history-target", "sensitive-result", 0 };
+    assert(gua_emit_action_result(player_history, &sensitive_history_result) == 1);
+    gua_event_v2_t sensitive_history_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request_and_profile(player_history, sensitive_history_id,
+        GUA_OBSERVATION_PROFILE_PLAYER, &sensitive_history_event) == 1);
+    assert(sensitive_history_event.sensitive == 1 && sensitive_history_event.value[0] == '\0');
+    const gua_action_request_descriptor_t sensitive_history_check { sizeof(gua_action_request_descriptor_t),
+        GUA_ACTION_SET_CHECKED, "history-check", nullptr, 0, 0, 1, nullptr, 0, 1, 0 };
+    uint64_t sensitive_history_check_id = 0;
+    assert(gua_enqueue_action_for_profile(player_history, &sensitive_history_check,
+        GUA_OBSERVATION_PROFILE_PLAYER, &sensitive_history_check_id) == GUA_ACTION_ACCEPTED);
+    gua_action_request_t sensitive_history_check_request { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(player_history, GUA_ACTION_SET_CHECKED,
+        "history-check", &sensitive_history_check_request) == 1);
+    const gua_action_request_descriptor_t pending_history_value { sizeof(gua_action_request_descriptor_t),
+        GUA_ACTION_SET_VALUE, "history-target", "pending-player-value" };
+    uint64_t pending_history_id = 0;
+    assert(gua_enqueue_action_for_profile(player_history, &pending_history_value,
+        GUA_OBSERVATION_PROFILE_PLAYER, &pending_history_id) == GUA_ACTION_ACCEPTED);
+    int public_history_size = gua_copy_diagnostics_json_for_profile(
+        player_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> public_history_buffer(static_cast<std::size_t>(public_history_size));
+    gua_copy_diagnostics_json_for_profile(player_history, GUA_OBSERVATION_PROFILE_PLAYER,
+        public_history_buffer.data(), public_history_size);
+    const std::string public_history_json = public_history_buffer.data();
+    assert(public_history_json.find("\"value\":\"public-value\"") != std::string::npos);
+    assert(public_history_json.find("player-request") == std::string::npos);
+    assert(public_history_json.find("player-result") == std::string::npos);
+    assert(public_history_json.find("sensitive-request") == std::string::npos);
+    assert(public_history_json.find("sensitive-result") == std::string::npos);
+    assert(public_history_json.find("pending-player-value") == std::string::npos);
+    const auto sensitive_check_offset = public_history_json.find(
+        "\"nodeId\":\"history-check\"", public_history_json.find("\"operations\":"));
+    assert(sensitive_check_offset != std::string::npos);
+    const auto sensitive_check_end = public_history_json.find('}', sensitive_check_offset);
+    const auto sensitive_check_json = public_history_json.substr(
+        sensitive_check_offset, sensitive_check_end - sensitive_check_offset);
+    assert(sensitive_check_json.find("\"sensitive\":true") != std::string::npos);
+    assert(sensitive_check_json.find("\"boolValue\":false") != std::string::npos);
+    assert(gua_cancel_action_request(player_history, pending_history_id) == GUA_ACTION_CANCELLED);
+    const gua_node_descriptor_v2_t private_history_base { sizeof(gua_node_descriptor_v2_t), 0,
+        "history-target", nullptr, "textbox", "History target", nullptr, nullptr,
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t private_history_detail {
+        sizeof(gua_node_descriptor_v3_t), private_history_base };
+    const gua_agent_policy_v1_t private_history_policy {
+        sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE };
+    const gua_node_descriptor_v4_t private_history_node {
+        sizeof(gua_node_descriptor_v4_t), private_history_detail, private_history_policy };
+    gua_begin_frame(player_history, "history-private");
+    assert(gua_register_node_v4(player_history, &private_history_node) == 1);
+    gua_end_frame(player_history);
+    int player_history_size = gua_copy_diagnostics_json_for_profile(
+        player_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> player_history_buffer(static_cast<std::size_t>(player_history_size));
+    gua_copy_diagnostics_json_for_profile(player_history, GUA_OBSERVATION_PROFILE_PLAYER,
+        player_history_buffer.data(), player_history_size);
+    const std::string player_history_json = player_history_buffer.data();
+    assert(player_history_json.find("\"operations\":[]") == std::string::npos);
+    assert(player_history_json.find("\"events\":[]") == std::string::npos);
+    assert(player_history_json.find("\"requestId\":" + std::to_string(player_history_id)) != std::string::npos);
+    assert(player_history_json.find("\"requestId\":" + std::to_string(debug_history_id) + ",") == std::string::npos);
+    assert(player_history_json.find("player-request") == std::string::npos);
+    assert(player_history_json.find("player-result") == std::string::npos);
+    gua_destroy_context(player_history);
+
+    struct SliderHistoryCase { int mode; double replacement; double quantum; const char* expected; };
+    const SliderHistoryCase slider_history_cases[] {
+        { GUA_AGENT_FIELD_OMIT, 0, 0, "" },
+        { GUA_AGENT_FIELD_REDACT, 0, 0, "" },
+        { GUA_AGENT_FIELD_REPLACE, 42.5, 0, "42.5" },
+        { GUA_AGENT_FIELD_QUANTIZE, 0, 100, "987600" },
+    };
+    for (const auto& history_case : slider_history_cases) {
+        gua_context_t* slider_history = gua_create_context();
+        assert(gua_set_diagnostics_history_limit(slider_history, 8) == 1);
+        const gua_agent_field_rule_v1_t range_rule { sizeof(gua_agent_field_rule_v1_t), "state.rangeValue",
+            history_case.mode, GUA_WORLD_VALUE_NUMBER, nullptr, history_case.replacement, 0, history_case.quantum };
+        const gua_agent_policy_v1_t range_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+            0, 0, &range_rule, 1 };
+        auto range_detail = projected_detail;
+        range_detail.base.id = "projected-slider";
+        range_detail.base.role = "slider";
+        range_detail.base.known_mask = GUA_NODE_KNOWN_RANGE_VALUE;
+        range_detail.range_value = 17;
+        const gua_node_descriptor_v4_t range_node {
+            sizeof(gua_node_descriptor_v4_t), range_detail, range_policy };
+        gua_begin_frame(slider_history, "slider-history");
+        assert(gua_register_node_v4(slider_history, &range_node) == 1);
+        gua_end_frame(slider_history);
+        const gua_action_request_descriptor_t set_range { sizeof(gua_action_request_descriptor_t),
+            GUA_ACTION_SET_VALUE, "projected-slider", "987654" };
+        uint64_t range_request_id = 0;
+        assert(gua_enqueue_action_for_profile(slider_history, &set_range,
+            GUA_OBSERVATION_PROFILE_PLAYER, &range_request_id) == GUA_ACTION_ACCEPTED);
+        int range_diagnostics_size = gua_copy_diagnostics_json_for_profile(
+            slider_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        std::vector<char> range_diagnostics_buffer(static_cast<std::size_t>(range_diagnostics_size));
+        gua_copy_diagnostics_json_for_profile(slider_history, GUA_OBSERVATION_PROFILE_PLAYER,
+            range_diagnostics_buffer.data(), range_diagnostics_size);
+        std::string range_diagnostics = range_diagnostics_buffer.data();
+        assert(range_diagnostics.find("987654") == std::string::npos);
+        assert(range_diagnostics.find("\"value\":\"" + std::string(history_case.expected) + "\"") != std::string::npos);
+        gua_action_request_t range_request { sizeof(gua_action_request_t) };
+        assert(gua_consume_action_request(slider_history, GUA_ACTION_SET_VALUE,
+            "projected-slider", &range_request) == 1);
+        const gua_action_result_t range_result { sizeof(gua_action_result_t), range_request_id,
+            GUA_ACTION_SET_VALUE, GUA_ACTION_STATUS_SUCCEEDED, 0, "projected-slider", "987654", 0 };
+        assert(gua_emit_action_result(slider_history, &range_result) == 1);
+        gua_event_v2_t range_event { sizeof(gua_event_v2_t) };
+        assert(gua_poll_event_v2_for_request_and_profile(slider_history, range_request_id,
+            GUA_OBSERVATION_PROFILE_PLAYER, &range_event) == 1);
+        assert(std::string(range_event.value) == history_case.expected);
+        range_diagnostics_size = gua_copy_diagnostics_json_for_profile(
+            slider_history, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+        range_diagnostics_buffer.resize(static_cast<std::size_t>(range_diagnostics_size));
+        gua_copy_diagnostics_json_for_profile(slider_history, GUA_OBSERVATION_PROFILE_PLAYER,
+            range_diagnostics_buffer.data(), range_diagnostics_size);
+        range_diagnostics = range_diagnostics_buffer.data();
+        assert(range_diagnostics.find("987654") == std::string::npos);
+        gua_destroy_context(slider_history);
+    }
+
+    gua_context_t* focused_keys = gua_create_context();
+    const gua_node_descriptor_v2_t focused_key_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_FOCUSED,
+        "focused-key-target", nullptr, "textbox", "Focused target", nullptr, nullptr,
+        { 0, 0, 100, 20 }, 1, 1, 1, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t focused_key_detail { sizeof(gua_node_descriptor_v3_t), focused_key_base };
+    const gua_agent_policy_v1_t public_key_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO };
+    const gua_agent_policy_v1_t private_key_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE };
+    const gua_node_descriptor_v4_t public_key_node { sizeof(gua_node_descriptor_v4_t), focused_key_detail, public_key_policy };
+    const gua_node_descriptor_v4_t private_key_node { sizeof(gua_node_descriptor_v4_t), focused_key_detail, private_key_policy };
+    const gua_action_request_descriptor_t targetless_key {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_PRESS_KEY, nullptr, nullptr, 0, 0, 0, "Enter" };
+    gua_begin_frame(focused_keys, "private-focus");
+    assert(gua_register_node_v4(focused_keys, &private_key_node) == 1);
+    gua_end_frame(focused_keys);
+    assert(gua_enqueue_action_for_profile(
+        focused_keys, &targetless_key, GUA_OBSERVATION_PROFILE_PLAYER, nullptr) == GUA_ACTION_ERROR_NODE_NOT_FOUND);
+    uint64_t debug_key_id = 0;
+    assert(gua_enqueue_action(focused_keys, &targetless_key, &debug_key_id) == GUA_ACTION_ACCEPTED);
+    assert(gua_cancel_action_request(focused_keys, debug_key_id) == GUA_ACTION_CANCELLED);
+
+    gua_begin_frame(focused_keys, "public-focus");
+    assert(gua_register_node_v4(focused_keys, &public_key_node) == 1);
+    gua_end_frame(focused_keys);
+    uint64_t player_key_id = 0;
+    assert(gua_enqueue_action_for_profile(
+        focused_keys, &targetless_key, GUA_OBSERVATION_PROFILE_PLAYER, &player_key_id) == GUA_ACTION_ACCEPTED);
+    gua_begin_frame(focused_keys, "private-focus");
+    assert(gua_register_node_v4(focused_keys, &private_key_node) == 1);
+    gua_end_frame(focused_keys);
+    gua_action_request_t consumed_key { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(focused_keys, GUA_ACTION_PRESS_KEY, nullptr, &consumed_key) == 0);
+    gua_event_v2_t rejected_key_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request_and_profile(
+        focused_keys, player_key_id, GUA_OBSERVATION_PROFILE_PLAYER, &rejected_key_event) == 1);
+    assert(rejected_key_event.error_code == GUA_ACTION_ERROR_NODE_NOT_FOUND);
+    gua_destroy_context(focused_keys);
+
+    gua_context_t* revalidation = gua_create_context();
+    const auto publish_revalidation_target = [&](const char* role, int visible, int enabled) {
+        gua_begin_frame(revalidation, "revalidation");
+        gua_register_node(revalidation, "target", role, "Target", { 0, 0, 10, 10 }, visible, enabled);
+        gua_end_frame(revalidation);
+    };
+    const gua_action_request_descriptor_t revalidated_click { sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "target" };
+    const auto expect_revalidation_error = [&](int expected_error) {
+        uint64_t request_id = 0;
+        publish_revalidation_target("button", 1, 1);
+        assert(gua_enqueue_action(revalidation, &revalidated_click, &request_id) == GUA_ACTION_ACCEPTED);
+        if (expected_error == GUA_ACTION_ERROR_HIDDEN) publish_revalidation_target("button", 0, 1);
+        else if (expected_error == GUA_ACTION_ERROR_DISABLED) publish_revalidation_target("button", 1, 0);
+        else publish_revalidation_target("text", 1, 1);
+        gua_action_request_t consumed { sizeof(gua_action_request_t) };
+        assert(gua_consume_action_request(revalidation, GUA_ACTION_CLICK, "target", &consumed) == 0);
+        gua_event_v2_t event { sizeof(gua_event_v2_t) };
+        assert(gua_poll_event_v2_for_request(revalidation, request_id, &event) == 1);
+        assert(event.status == GUA_ACTION_STATUS_FAILED);
+        assert(event.error_code == expected_error);
+    };
+    expect_revalidation_error(GUA_ACTION_ERROR_HIDDEN);
+    expect_revalidation_error(GUA_ACTION_ERROR_DISABLED);
+    expect_revalidation_error(GUA_ACTION_ERROR_UNSUPPORTED);
+    gua_destroy_context(revalidation);
 
     gua_context_t* world = gua_create_context();
     const gua_world_state_value_v1_t door_state[] {
         { sizeof(gua_world_state_value_v1_t), "open", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 0 },
         { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 },
+        { sizeof(gua_world_state_value_v1_t), "hp", GUA_WORLD_VALUE_NUMBER, nullptr, 37, 0 },
     };
     const char* door_tags[] { "east-corridor", "mission-critical" };
     assert(gua_begin_world_frame(world, "corridor") == 1);
-    const gua_world_object_descriptor_v1_t door { sizeof(gua_world_object_descriptor_v1_t), "door-a", nullptr, "door", "Door A", nullptr,
-        GUA_WORLD_SPACE_2D, 640, 180, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, "door-status", door_tags, 2, door_state, 2 };
-    assert(gua_register_world_object_v1(world, &door) == 1);
+    const gua_world_object_descriptor_v1_t door { sizeof(gua_world_object_descriptor_v1_t), "door-a", nullptr, "door", "Door A", "Secret description",
+        GUA_WORLD_SPACE_2D, 640, 180, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, nullptr, "door-status", door_tags, 2, door_state, 3 };
+    const gua_agent_field_rule_v1_t world_rules[] {
+        { sizeof(gua_agent_field_rule_v1_t), "position.x", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 100 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.hp", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "injured", 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "description", GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "tags", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.locked", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "state.missing", GUA_AGENT_FIELD_QUANTIZE, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 10 },
+    };
+    const gua_agent_policy_v1_t world_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0, 0, world_rules, 6 };
+    const gua_world_object_descriptor_v2_t projected_door { sizeof(gua_world_object_descriptor_v2_t), door, world_policy };
+    assert(gua_register_world_object_v2(world, &projected_door) == 1);
+    const gua_agent_field_rule_v1_t empty_string_rules[] {
+        { sizeof(gua_agent_field_rule_v1_t), "description", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "", 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "domainId", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "", 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "relatedUiNodeId", GUA_AGENT_FIELD_REPLACE, GUA_WORLD_VALUE_STRING, "", 0, 0, 0 },
+        { sizeof(gua_agent_field_rule_v1_t), "tags", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL, nullptr, 0, 0, 0 },
+    };
+    const gua_agent_policy_v1_t empty_string_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0,
+        0, empty_string_rules, 4 };
+    const gua_world_object_descriptor_v1_t empty_string_object { sizeof(gua_world_object_descriptor_v1_t),
+        "empty-replacements", nullptr, "item", "Empty replacements", "description", GUA_WORLD_SPACE_2D,
+        0, 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO, "domain", "related", nullptr, 0, nullptr, 0 };
+    const gua_world_object_descriptor_v2_t projected_empty_string_object {
+        sizeof(gua_world_object_descriptor_v2_t), empty_string_object, empty_string_policy };
+    assert(gua_register_world_object_v2(world, &projected_empty_string_object) == 1);
     const gua_world_object_descriptor_v1_t private_object { sizeof(gua_world_object_descriptor_v1_t), "secret", "door-a", "item", "Secret", nullptr,
         GUA_WORLD_SPACE_3D, 1, 2, 3, 1, 1, GUA_AGENT_EXPOSURE_PRIVATE, nullptr, nullptr, nullptr, 0, nullptr, 0 };
     assert(gua_register_world_object_v1(world, &private_object) == 1);
@@ -81,6 +607,21 @@ int main()
     gua_copy_world_object_tree_json(world, GUA_OBSERVATION_PROFILE_PLAYER, world_json.data(), world_size);
     assert(std::string(world_json.data()).find("\"door-a\"") != std::string::npos);
     assert(std::string(world_json.data()).find("\"secret\"") == std::string::npos);
+    assert(std::string(world_json.data()).find("\"x\":600") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"hp\":\"injured\"") != std::string::npos);
+    assert(std::string(world_json.data()).find("Secret description") == std::string::npos);
+    assert(std::string(world_json.data()).find("[redacted]") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"tags\"") == std::string::npos);
+    assert(std::string(world_json.data()).find("\"locked\":null") != std::string::npos);
+    assert(std::string(world_json.data()).find("\"missing\"") == std::string::npos);
+    const std::string player_world_json = world_json.data();
+    const std::size_t empty_object_start = player_world_json.find("\"id\":\"empty-replacements\"");
+    assert(empty_object_start != std::string::npos);
+    const std::size_t empty_object_end = player_world_json.find("},{\"id\"", empty_object_start);
+    const std::string empty_object_json = player_world_json.substr(empty_object_start, empty_object_end - empty_object_start);
+    assert(empty_object_json.find("\"description\":\"\"") != std::string::npos);
+    assert(empty_object_json.find("\"domainId\":\"\"") != std::string::npos);
+    assert(empty_object_json.find("\"relatedUiNodeId\":\"\"") != std::string::npos);
     const gua_world_selector_v1_t private_query { sizeof(gua_world_selector_v1_t), "secret", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, nullptr };
     char query[512] {};
     gua_query_world_objects_json(world, &private_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
@@ -88,7 +629,15 @@ int main()
     const gua_world_state_value_v1_t locked { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_BOOLEAN, nullptr, 0, 1 };
     const gua_world_selector_v1_t locked_query { sizeof(gua_world_selector_v1_t), nullptr, 0, "door", GUA_MATCH_EXACT, nullptr, 0, nullptr, 0, nullptr, 0, 0, 0, &locked };
     gua_query_world_objects_json(world, &locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"matches\":[]") != std::string::npos);
+    const gua_world_state_value_v1_t projected_locked { sizeof(gua_world_state_value_v1_t), "locked", GUA_WORLD_VALUE_NULL };
+    auto projected_locked_query = locked_query; projected_locked_query.state = &projected_locked;
+    gua_query_world_objects_json(world, &projected_locked_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
     assert(std::string(query).find("\"door-a\"") != std::string::npos);
+    const gua_world_state_value_v1_t projected_missing { sizeof(gua_world_state_value_v1_t), "missing", GUA_WORLD_VALUE_NULL };
+    auto projected_missing_query = locked_query; projected_missing_query.state = &projected_missing;
+    gua_query_world_objects_json(world, &projected_missing_query, GUA_OBSERVATION_PROFILE_PLAYER, query, sizeof(query));
+    assert(std::string(query).find("\"matches\":[]") != std::string::npos);
 
     // Player projection must be independent of registration order while still requiring every ancestor to be public.
     assert(gua_begin_world_frame(world, "reverse-order") == 1);
@@ -190,6 +739,76 @@ int main()
         assert(std::string(query).find("\"valid\":false") != std::string::npos);
     }
     gua_destroy_context(atomic_world);
+
+    // Versioned descriptors must attach each policy to the node/object registered by the same call.
+    gua_context_t* concurrent_policy = gua_create_context();
+    constexpr int concurrent_policy_count = 64;
+    std::vector<int> registration_results(concurrent_policy_count);
+    std::atomic<int> registration_ready { 0 };
+    std::atomic<bool> registration_start { false };
+    std::vector<std::thread> registration_threads;
+    gua_begin_frame(concurrent_policy, "concurrent-policy");
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        registration_threads.emplace_back([&, index] {
+            const std::string id = "ui-policy-" + std::to_string(index);
+            const gua_node_descriptor_v2_t base { sizeof(gua_node_descriptor_v2_t), 0, id.c_str(), nullptr,
+                "button", id.c_str(), nullptr, nullptr, { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+            const gua_node_descriptor_v3_t detail { sizeof(gua_node_descriptor_v3_t), base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+            const gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t),
+                index % 2 == 0 ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO, 0, 0, nullptr, 0 };
+            const gua_node_descriptor_v4_t descriptor { sizeof(gua_node_descriptor_v4_t), detail, policy };
+            ++registration_ready;
+            while (!registration_start.load()) std::this_thread::yield();
+            registration_results[index] = gua_register_node_v4(concurrent_policy, &descriptor);
+        });
+    }
+    while (registration_ready.load() != concurrent_policy_count) std::this_thread::yield();
+    registration_start = true;
+    for (auto& thread : registration_threads) thread.join();
+    for (const int result : registration_results) assert(result == 1);
+    gua_end_frame(concurrent_policy);
+    int concurrent_size = gua_copy_ui_tree_json_for_profile(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> concurrent_json(static_cast<std::size_t>(concurrent_size));
+    gua_copy_ui_tree_json_for_profile(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, concurrent_json.data(), concurrent_size);
+    const std::string concurrent_ui_json = concurrent_json.data();
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        const std::string id = "\"id\":\"ui-policy-" + std::to_string(index) + "\"";
+        assert((concurrent_ui_json.find(id) != std::string::npos) == (index % 2 != 0));
+    }
+
+    registration_results.assign(concurrent_policy_count, 0);
+    registration_ready = 0;
+    registration_start = false;
+    registration_threads.clear();
+    assert(gua_begin_world_frame(concurrent_policy, "concurrent-policy") == 1);
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        registration_threads.emplace_back([&, index] {
+            const std::string id = "world-policy-" + std::to_string(index);
+            const gua_world_object_descriptor_v1_t base { sizeof(gua_world_object_descriptor_v1_t), id.c_str(), nullptr,
+                "item", id.c_str(), nullptr, GUA_WORLD_SPACE_2D, static_cast<double>(index), 0, 0, 1, 1, GUA_AGENT_EXPOSURE_AUTO,
+                nullptr, nullptr, nullptr, 0, nullptr, 0 };
+            const gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t),
+                index % 2 == 0 ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO, 0, 0, nullptr, 0 };
+            const gua_world_object_descriptor_v2_t descriptor { sizeof(gua_world_object_descriptor_v2_t), base, policy };
+            ++registration_ready;
+            while (!registration_start.load()) std::this_thread::yield();
+            registration_results[index] = gua_register_world_object_v2(concurrent_policy, &descriptor);
+        });
+    }
+    while (registration_ready.load() != concurrent_policy_count) std::this_thread::yield();
+    registration_start = true;
+    for (auto& thread : registration_threads) thread.join();
+    for (const int result : registration_results) assert(result == 1);
+    assert(gua_end_world_frame(concurrent_policy) == 1);
+    concurrent_size = gua_copy_world_object_tree_json(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    concurrent_json.resize(static_cast<std::size_t>(concurrent_size));
+    gua_copy_world_object_tree_json(concurrent_policy, GUA_OBSERVATION_PROFILE_PLAYER, concurrent_json.data(), concurrent_size);
+    const std::string concurrent_world_json = concurrent_json.data();
+    for (int index = 0; index < concurrent_policy_count; ++index) {
+        const std::string id = "\"id\":\"world-policy-" + std::to_string(index) + "\"";
+        assert((concurrent_world_json.find(id) != std::string::npos) == (index % 2 != 0));
+    }
+    gua_destroy_context(concurrent_policy);
 
     // Deep parent chains validate in one graph traversal rather than repeatedly scanning every ancestor.
     gua_context_t* deep_world = gua_create_context();
@@ -522,6 +1141,36 @@ int main()
     assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::cancelled);
     assert(cpp_context.cancel_action(cpp_request_id) == gua::ActionCancelResult::not_found);
 
+    gua::Context empty_replacement_context;
+    gua::AgentPolicy empty_replacement_policy;
+    gua::AgentFieldRule empty_label_rule;
+    empty_label_rule.path = "label";
+    empty_label_rule.mode = gua::AgentFieldMode::replace;
+    empty_label_rule.replacement_type = GUA_WORLD_VALUE_STRING;
+    empty_replacement_policy.field_rules.push_back(empty_label_rule);
+    empty_replacement_context.begin_frame("empty-replacement");
+    empty_replacement_context.node_v2("empty", "button", "Secret", { 0, 0, 1, 1 }, {}, true, true, empty_replacement_policy);
+    empty_replacement_context.end_frame();
+    assert(empty_replacement_context.ui_tree_json(gua::ObservationProfile::player).find("\"label\":\"\"") != std::string::npos);
+
+    gua::Context duplicate_rule_context;
+    gua::AgentPolicy duplicate_rule_policy;
+    gua::AgentFieldRule first_label_rule;
+    first_label_rule.path = "label";
+    first_label_rule.mode = gua::AgentFieldMode::redact;
+    gua::AgentFieldRule later_label_rule;
+    later_label_rule.path = "label";
+    later_label_rule.mode = gua::AgentFieldMode::replace;
+    later_label_rule.replacement_type = GUA_WORLD_VALUE_STRING;
+    later_label_rule.string_value = "last-rule";
+    duplicate_rule_policy.field_rules = { first_label_rule, later_label_rule };
+    duplicate_rule_context.begin_frame("duplicate-rule");
+    duplicate_rule_context.node_v2("duplicate", "button", "Secret", { 0, 0, 1, 1 }, {}, true, true,
+        duplicate_rule_policy);
+    duplicate_rule_context.end_frame();
+    const auto duplicate_rule_tree = duplicate_rule_context.ui_tree_json(gua::ObservationProfile::player);
+    assert(duplicate_rule_tree.find("\"label\":\"last-rule\"") != std::string::npos);
+
     // A frame is private until end_frame atomically publishes it.
     gua_context_t* atomic_context = gua_create_context();
     gua_begin_frame(atomic_context, "initial-staging");
@@ -793,6 +1442,95 @@ int main()
     assert(preserved_event.action == GUA_ACTION_FOCUS);
 
     gua_destroy_context(other);
+
+    // Requestless host events are neutral: Debug sees all of them, while Player requires
+    // the target to be observable both when the event is emitted and when it is polled.
+    gua_context_t* observed_events = gua_create_context();
+    const gua_node_descriptor_v2_t private_event_base { sizeof(gua_node_descriptor_v2_t), 0,
+        "private-event", nullptr, "button", "Private", nullptr, nullptr, { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t private_event_detail { sizeof(gua_node_descriptor_v3_t), private_event_base };
+    const gua_agent_policy_v1_t private_event_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE };
+    const gua_node_descriptor_v4_t private_event_node { sizeof(gua_node_descriptor_v4_t), private_event_detail, private_event_policy };
+    gua_begin_frame(observed_events, "events");
+    gua_register_node(observed_events, "visible-event", "button", "Visible", { 0, 0, 1, 1 }, 1, 1);
+    const gua_agent_field_rule_v1_t event_value_rule { sizeof(gua_agent_field_rule_v1_t), "value",
+        GUA_AGENT_FIELD_REDACT, GUA_WORLD_VALUE_NULL };
+    const gua_agent_policy_v1_t event_value_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+        0, 0, &event_value_rule, 1 };
+    const gua_node_descriptor_v2_t value_event_base { sizeof(gua_node_descriptor_v2_t), GUA_NODE_KNOWN_VALUE,
+        "value-event", nullptr, "textbox", "Value", nullptr, "visible-before",
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t value_event_detail { sizeof(gua_node_descriptor_v3_t), value_event_base };
+    const gua_node_descriptor_v4_t value_event_node {
+        sizeof(gua_node_descriptor_v4_t), value_event_detail, event_value_policy };
+    assert(gua_register_node_v4(observed_events, &value_event_node) == 1);
+    assert(gua_register_node_v4(observed_events, &private_event_node) == 1);
+    gua_end_frame(observed_events);
+    assert(gua_emit_click(observed_events, "visible-event") == 1);
+    gua_event_v3_t observed_event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    gua_event_v2_t invalid_profile_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_profile(observed_events, 42, &invalid_profile_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, 42, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 1);
+    assert(observed_event.base.node_id != nullptr && std::strcmp(observed_event.base.node_id, "visible-event") == 0);
+    assert(observed_event.revision > 0);
+
+    const gua_action_result_t unsolicited_value { sizeof(gua_action_result_t), 0, GUA_ACTION_SET_VALUE,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, "value-event", "top-secret", 0 };
+    assert(gua_emit_action_result(observed_events, &unsolicited_value) == 1);
+    gua_event_v2_t projected_value_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER,
+        &projected_value_event) == 1);
+    assert(projected_value_event.value[0] == '\0');
+    assert(gua_emit_action_result(observed_events, &unsolicited_value) == 1);
+    projected_value_event = { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG,
+        &projected_value_event) == 1);
+    assert(std::strcmp(projected_value_event.value, "top-secret") == 0);
+
+    const gua_action_request_descriptor_t observed_click {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "visible-event" };
+    uint64_t observed_click_id = 0;
+    assert(gua_enqueue_action(observed_events, &observed_click, &observed_click_id) == GUA_ACTION_ACCEPTED);
+    gua_action_request_t consumed_observed_click { sizeof(gua_action_request_t) };
+    assert(gua_consume_action_request(
+        observed_events, GUA_ACTION_CLICK, "visible-event", &consumed_observed_click) == 1);
+    const gua_action_result_t observed_click_result { sizeof(gua_action_result_t), observed_click_id,
+        GUA_ACTION_CLICK, GUA_ACTION_STATUS_SUCCEEDED, 0, "visible-event", nullptr, 0 };
+    assert(gua_emit_action_result(observed_events, &observed_click_result) == 1);
+    invalid_profile_event = { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_request_and_profile(
+        observed_events, observed_click_id, 42, &invalid_profile_event) == 0);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_request_and_profile(
+        observed_events, observed_click_id, 42, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_request_and_profile(
+        observed_events, observed_click_id, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+    assert(observed_event.base.request_id == observed_click_id);
+
+    assert(gua_emit_click(observed_events, "private-event") == 1);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+    assert(observed_event.base.node_id != nullptr && std::strcmp(observed_event.base.node_id, "private-event") == 0);
+
+    assert(gua_emit_click(observed_events, "private-event") == 1);
+    gua_begin_frame(observed_events, "events");
+    gua_register_node(observed_events, "private-event", "button", "Now public", { 0, 0, 1, 1 }, 1, 1);
+    gua_register_node(observed_events, "visible-event", "button", "Visible", { 0, 0, 1, 1 }, 1, 1);
+    gua_end_frame(observed_events);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+
+    const gua_action_result_t targetless_observed { sizeof(gua_action_result_t), 0, GUA_ACTION_PRESS_KEY,
+        GUA_ACTION_STATUS_SUCCEEDED, 0, nullptr, "unscoped", 0 };
+    assert(gua_emit_action_result(observed_events, &targetless_observed) == 1);
+    observed_event = { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_PLAYER, &observed_event) == 0);
+    assert(gua_poll_event_v3_for_profile(observed_events, GUA_OBSERVATION_PROFILE_DEBUG, &observed_event) == 1);
+    assert(std::strcmp(observed_event.base.value, "unscoped") == 0);
+    gua_destroy_context(observed_events);
 
     // Readers may observe the old or new complete frame, never a partial node count.
     gua_context_t* concurrent = gua_create_context();

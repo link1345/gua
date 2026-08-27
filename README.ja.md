@@ -165,7 +165,9 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 
 Guaは、明示的にopt-inしたゲーム世界のobjectをSemantic UI Treeとは別に公開できる。各objectはstable ID、意味的なkind、2Dまたは3D座標、hostが決めるplayer可視性、tag、flatなprimitive stateを持つ。Godotでは`gua_world_object` groupと`gua_world_*` metadata、Unityでは`GuaWorldObject` componentを使う。全scene nodeやGameObjectを自動公開することはない。
 
-native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_PROFILE=player`を設定すると、playerから見えるprivateでないobjectだけを公開する。client入力からdebugへ昇格することはできない。World v1は観測専用であり、MCPは`get_world_object_tree`、`find_world_objects`、`wait_for_world_object`を提供し、Inspectorは独立したWorld Object Tree panelへ表示する。
+native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_PROFILE=player`を設定すると、UIとWorldの双方へancestor visibility、`private`除外、field ruleを適用してから公開する。client入力からdebugへ昇格することはできない。World v1は観測専用であり、MCPは`get_world_object_tree`、`find_world_objects`、`wait_for_world_object`を提供し、Inspectorは独立したWorld Object Tree panelへ表示する。
+
+`GuaAgentPolicy`は公開fieldのomit、redact、同型replace、数値quantizeとUI action allowlistを定義する。Debug snapshotは完全なtreeを維持し、Playerではsnapshot、query、wait、diagnostics、action認可に同じ投影を使う。debug logは公開せず、screenshotも既定で拒否する。hostが必要性を判断した場合に限り、bridge開始前に明示的に許可できる。
 
 Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_label`、`gua_world_visible_to_player`、`gua_world_active`、`gua_world_agent_exposure`、`gua_world_tags`、`gua_world_state`を使う。state値は文字列、有限数値、真偽値、nullだけを許可し、秘密情報を含めてはならない。整数値はv1 C ABIの`double`表現を正確に往復できる必要があり、JavaScript selector clientはsafe integer範囲外の整数を拒否する。
 

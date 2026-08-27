@@ -1,6 +1,8 @@
 #include "gua/runtime.h"
 
+#include <array>
 #include <cassert>
+#include <cstdint>
 #include <thread>
 #include <string>
 #include <vector>
@@ -32,12 +34,22 @@ std::string diagnostics(gua_runtime_t* runtime)
     return buffer.data();
 }
 
+std::string ui_tree(gua_runtime_t* runtime, bool player)
+{
+    const auto copy = player ? gua_runtime_copy_player_ui_tree_json : gua_runtime_copy_ui_tree_json;
+    const int size = copy(runtime, nullptr, 0);
+    std::vector<char> buffer(static_cast<std::size_t>(size));
+    assert(copy(runtime, buffer.data(), size) == size);
+    return buffer.data();
+}
+
 } // namespace
 
 int main()
 {
     gua_runtime_t* runtime = gua_runtime_create();
     assert(runtime != nullptr);
+    assert(gua_runtime_get_observation_profile(runtime) == GUA_OBSERVATION_PROFILE_DEBUG);
     assert(version(runtime).find("virtual_clock_v1") == std::string::npos);
     assert(gua_runtime_set_diagnostics_environment_json(
         runtime, "{\"tags\":[\"test\",\"virtual_clock_v1\"]}") == 1);
@@ -84,8 +96,42 @@ int main()
     world_capability_writer.join();
     world_capability_reader.join();
     gua_runtime_set_world_object_tree_enabled(runtime, 0);
+    const gua_agent_policy_v1_t browser_public_policy {
+        sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 1,
+        1ULL << GUA_ACTION_FOCUS, nullptr, 0 };
+    const gua_agent_policy_v1_t browser_private_policy {
+        sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE, 0, 0, nullptr, 0 };
+    const gua_node_descriptor_v2_t browser_public_base {
+        sizeof(gua_node_descriptor_v2_t), 0, "public", nullptr, "button", "Public", nullptr, nullptr,
+        { 0, 0, 10, 10 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v2_t browser_private_base {
+        sizeof(gua_node_descriptor_v2_t), 0, "private", nullptr, "button", "Private", nullptr, nullptr,
+        { 0, 0, 10, 10 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t browser_public_detail {
+        sizeof(gua_node_descriptor_v3_t), browser_public_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+    const gua_node_descriptor_v3_t browser_private_detail {
+        sizeof(gua_node_descriptor_v3_t), browser_private_base, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1 };
+    const gua_node_descriptor_v4_t browser_public_node {
+        sizeof(gua_node_descriptor_v4_t), browser_public_detail, browser_public_policy };
+    const gua_node_descriptor_v4_t browser_private_node {
+        sizeof(gua_node_descriptor_v4_t), browser_private_detail, browser_private_policy };
     gua_runtime_begin_frame(runtime, "title");
+    assert(gua_runtime_register_node_v4(runtime, &browser_public_node) == 1);
+    assert(gua_runtime_register_node_v4(runtime, &browser_private_node) == 1);
     gua_runtime_end_frame(runtime);
+    assert(ui_tree(runtime, false).find("Private") != std::string::npos);
+    assert(ui_tree(runtime, true).find("Private") == std::string::npos);
+    const gua_action_request_descriptor_t click {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "public" };
+    uint64_t debug_action = 0;
+    assert(gua_runtime_enqueue_action(runtime, &click, &debug_action) == GUA_ACTION_ACCEPTED);
+    assert(gua_runtime_get_action_request_observation_profile(runtime, debug_action) == GUA_OBSERVATION_PROFILE_DEBUG);
+    assert(gua_runtime_cancel_action_request(runtime, debug_action) == GUA_ACTION_CANCELLED);
+    assert(gua_runtime_get_action_request_observation_profile(runtime, debug_action) == -1);
+    assert(gua_runtime_enqueue_player_action(runtime, &click, nullptr) == GUA_ACTION_ERROR_UNSUPPORTED);
+    const gua_action_request_descriptor_t private_click {
+        sizeof(gua_action_request_descriptor_t), GUA_ACTION_CLICK, "private" };
+    assert(gua_runtime_enqueue_player_action(runtime, &private_click, nullptr) == GUA_ACTION_ERROR_NODE_NOT_FOUND);
 
     assert(gua_runtime_clock_install(runtime, 0.0, 10.0) == GUA_CLOCK_OK);
     assert(gua_runtime_clock_pause(runtime) == GUA_CLOCK_OK);
@@ -206,6 +252,10 @@ int main()
             { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 },
         0, 0, 0, 0, 0, 0, 0, 1, 0, 10, 0
     };
+    gua_runtime_begin_frame(runtime, "legacy-state");
+    assert(gua_runtime_register_node_v3(runtime, &concurrent_node) == 1);
+    gua_runtime_end_frame(runtime);
+    assert(gua_runtime_get_node_state(runtime, "concurrent", nullptr) == 0);
     std::thread node_writer([runtime, &concurrent_node] {
         for (int index = 0; index < 20'000; ++index) {
             gua_runtime_begin_frame(runtime, "concurrent");
@@ -223,6 +273,44 @@ int main()
     node_writer.join();
     context_resetter.join();
 
+    gua_runtime_destroy(runtime);
+
+    runtime = gua_runtime_create();
+    assert(gua_runtime_set_observation_profile(runtime, GUA_OBSERVATION_PROFILE_PLAYER) == 1);
+    assert(gua_runtime_get_observation_profile(runtime) == GUA_OBSERVATION_PROFILE_PLAYER);
+    uint64_t player_request = 0;
+    assert(gua_runtime_enqueue_screenshot_request(runtime, 0, &player_request) == 0);
+    assert(gua_runtime_set_player_screenshot_enabled(runtime, 1) == 1);
+    assert(gua_runtime_enqueue_screenshot_request(runtime, 0, &player_request) == 1);
+    const gua_node_descriptor_v2_t private_base { sizeof(gua_node_descriptor_v2_t), 0, "private", nullptr, "button", "Secret", nullptr, nullptr,
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t private_detail { sizeof(gua_node_descriptor_v3_t), private_base };
+    const gua_agent_policy_v1_t private_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_PRIVATE };
+    const gua_node_descriptor_v4_t private_node { sizeof(gua_node_descriptor_v4_t), private_detail, private_policy };
+    gua_runtime_begin_frame(runtime, "player");
+    gua_runtime_register_node(runtime, "visible", "button", "Visible", { 0, 0, 1, 1 }, 1, 1);
+    assert(gua_runtime_register_node_v4(runtime, &private_node) == 1);
+    gua_runtime_end_frame(runtime);
+    char found[128] {};
+    assert(gua_runtime_find_node_by_id(runtime, "private", found, sizeof(found)) == 0);
+    gua_context_status_t player_status { sizeof(gua_context_status_t) };
+    assert(gua_runtime_get_context_status(runtime, &player_status) == 1 && player_status.node_count == 1);
+    assert(gua_runtime_emit_click(runtime, "visible") == 1);
+    gua_event_t observed {};
+    assert(gua_runtime_poll_event(runtime, &observed) == 1 && std::string(observed.node_id) == "visible");
+    assert(gua_runtime_emit_click(runtime, "private") == 1);
+    observed = {};
+    assert(gua_runtime_poll_event(runtime, &observed) == 0);
+    alignas(gua_reset_report_t) std::array<unsigned char, sizeof(gua_reset_report_t)> undersized_report_storage;
+    undersized_report_storage.fill(0xA5);
+    auto* undersized_report = reinterpret_cast<gua_reset_report_t*>(undersized_report_storage.data());
+    undersized_report->struct_size = sizeof(uint32_t);
+    const gua_reset_options_t player_reset {
+        sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT };
+    assert(gua_runtime_reset_context(runtime, &player_reset, undersized_report) == GUA_RESET_ERROR_INVALID_ARGUMENT);
+    for (std::size_t index = sizeof(uint32_t); index < undersized_report_storage.size(); ++index) {
+        assert(undersized_report_storage[index] == 0xA5);
+    }
     gua_runtime_destroy(runtime);
     return 0;
 }

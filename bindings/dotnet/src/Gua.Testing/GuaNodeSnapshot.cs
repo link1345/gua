@@ -2,6 +2,17 @@ using Gua.Core;
 
 namespace Gua.Testing;
 
+[Flags]
+public enum GuaBoundsKnownState
+{
+    None = 0,
+    X = 1 << 0,
+    Y = 1 << 1,
+    Width = 1 << 2,
+    Height = 1 << 3,
+    All = X | Y | Width | Height,
+}
+
 public sealed record GuaNodeSnapshot(
     string Id,
     string Role,
@@ -32,4 +43,6 @@ public sealed record GuaNodeSnapshot(
     double? RangeValue = null,
     double? RangeMin = null,
     double? RangeMax = null,
-    long? SelectedIndex = null);
+    long? SelectedIndex = null,
+    GuaBoundsKnownState KnownBounds = GuaBoundsKnownState.All,
+    bool HasLabel = true);

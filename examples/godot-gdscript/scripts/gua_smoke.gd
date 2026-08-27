@@ -96,6 +96,7 @@ func _run() -> void:
 	for index in range(20):
 		item_list.add_item("Server %d" % index)
 	item_list.select(0)
+	item_list.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(item_list)
 
 	var tabs := TabContainer.new()
@@ -107,6 +108,7 @@ func _run() -> void:
 	audio_tab.name = "Audio"
 	tabs.add_child(audio_tab)
 	tabs.current_tab = 1
+	tabs.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.name = "scroll"
@@ -124,12 +126,31 @@ func _run() -> void:
 			or bare_context.get_version_json().contains("world_object_tree_v1"):
 		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
 		return
+	if not bare_context.has_method("get_observation_profile") or bare_context.get_observation_profile() != 0 \
+			or not bare_context.get_version_json().contains("agent_projection_v1"):
+		_fail("GuaContext did not expose the agent projection ABI required by the adapter.")
+		return
+	bare_context.begin_frame("player-request")
+	bare_context.register_node_v2({
+		"id": "player-target", "role": "button", "label": "Player target",
+		"bounds": Rect2(0, 0, 10, 10), "visible": true, "enabled": true,
+		"agent_allowed_actions": ["focus"], "agent_allowed_actions_set": true,
+	})
+	bare_context.end_frame()
+	var player_action: Dictionary = bare_context.enqueue_player_action({"action": "focus", "node_id": "player-target"})
+	var player_request: Dictionary = bare_context.consume_action_request("focus", "player-target")
+	if player_action.get("error_code", -1) != 0 or player_request.get("observation_profile", -1) != 1:
+		_fail("GuaContext did not preserve the Player profile on a browser action request: %s / %s" % [player_action, player_request])
+		return
+	bare_context.emit_action_result({
+		"request_id": player_request.get("request_id", 0), "action": "focus", "node_id": "player-target", "succeeded": true,
+	})
 	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
 	adapter = ui
 	var missing_methods := ui._missing_context_methods(RefCounted.new())
-	if not missing_methods.has("consume_click_request"):
+	if not missing_methods.has("consume_click_request") or not missing_methods.has("get_observation_profile"):
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
 		return
 
@@ -226,6 +247,20 @@ func _run() -> void:
 		return
 	if not tree_json.contains("servers$item:0") or not tree_json.contains("tabs$tab:1"):
 		_fail("Gua smoke did not publish stable ItemList/TabContainer semantic children: %s" % tree_json)
+		return
+	var player_tree = JSON.parse_string(ui.get_player_ui_tree_json())
+	var player_list_item = _find_node(player_tree, "servers$item:1")
+	var player_tab_item = _find_node(player_tree, "tabs$tab:0")
+	if player_list_item == null or player_list_item.get("actions", []).has("select") \
+			or player_tab_item == null or player_tab_item.get("actions", []).has("select"):
+		_fail("Gua smoke did not propagate parent action policy to derived items: %s" % player_tree)
+		return
+	var rejected_player_list_select := ui.enqueue_player_action({"action": "select", "node_id": "servers$item:1"})
+	var rejected_player_tab_select := ui.enqueue_player_action({"action": "select", "node_id": "tabs$tab:0"})
+	if rejected_player_list_select.get("error_code", 0) != -5 \
+			or rejected_player_tab_select.get("error_code", 0) != -5 \
+			or not item_list.is_selected(0) or tabs.current_tab != 1:
+		_fail("Gua smoke accepted a derived Player select excluded by the parent allowlist: %s / %s" % [rejected_player_list_select, rejected_player_tab_select])
 		return
 	var locked_spin_node = _find_node(tree, "locked_count")
 	if locked_spin_node == null or locked_spin_node.get("enabled", true):

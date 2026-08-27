@@ -6,6 +6,7 @@ import {
   createUnityWebGlBridge,
   GuaWebError,
   registerGuaWebMcp,
+  guaWebMcpToolDefinitions,
   type GuaBrowserBridge,
   type GuaWorldObject,
   type GuaWorldObjectTree,
@@ -55,6 +56,18 @@ function worldTree(objects: GuaWorldObject[] = []): GuaWorldObjectTree {
 }
 
 describe("registerGuaWebMcp", () => {
+  test("does not expose profile selection and accepts projected field omission", async () => {
+    expect(guaWebMcpToolDefinitions.every((tool) => {
+      const properties = (tool.inputSchema.properties ?? {}) as Record<string, unknown>;
+      return !("profile" in properties) && !("observationProfile" in properties);
+    })).toBe(true);
+    const projected = button();
+    delete projected.label;
+    projected.bounds = { x: 0, h: 10 };
+    const bridge = createGuaInPageBridge({ invoke: async () => JSON.stringify(tree([projected])) });
+    expect((await bridge.getUiTree()).nodes).toEqual([projected]);
+  });
+
   test("feature detects WebMCP without breaking the page", async () => {
     const bridge = bridgeWithTree(tree());
     const registration = await registerGuaWebMcp(bridge, { document: {} as Document });

@@ -57,7 +57,7 @@ public sealed record GuaLocatorQuery
         if (result.Matches.Count > 1)
         {
             var candidates = string.Join("; ", result.Matches.Select(match =>
-                $"{match.Id} ({match.Role}, '{match.Label}', parentId='{match.ParentId ?? "<root>"}')"));
+                $"{match.Id} ({match.Role}, '{match.Label ?? "<unknown>"}', parentId='{match.ParentId ?? "<root>"}')"));
             GuaAssertions.Fail(_context, $"Strict Gua selector matched {result.Matches.Count} nodes: {Describe()}. Candidates: {candidates}. Narrow the scope with Within(...) or add stable id/state filters.");
         }
         return new GuaNodeExpectation(_context, result.Matches[0].Id, Describe());

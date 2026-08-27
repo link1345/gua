@@ -190,7 +190,7 @@ func _get_tree(_arguments: Array) -> String:
 	var adapter := _adapter()
 	if adapter == null:
 		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	return adapter.get_ui_tree_json()
+	return adapter.get_player_ui_tree_json()
 
 
 func _get_world_tree(_arguments: Array) -> String:
@@ -245,7 +245,7 @@ func _enqueue_action(arguments: Array) -> String:
 		"modifiers": request.get("modifiers", 0),
 		"sensitive": request.get("sensitive", false),
 	}
-	var receipt: Dictionary = adapter.enqueue_action(native_request)
+	var receipt: Dictionary = adapter.enqueue_player_action(native_request)
 	if receipt.get("error_code", -1) != 0:
 		var error_code := int(receipt.get("error_code", -1))
 		return JSON.stringify({"code": _web_error_code(error_code), "message": "Godot rejected the Gua action.", "hostError": error_code})

@@ -18,7 +18,7 @@ import {
   type GuaWorldSelector,
 } from "gua-world-tools";
 
-export interface GuaBounds { x: number; y: number; w: number; h: number }
+export interface GuaBounds { x?: number; y?: number; w?: number; h?: number }
 export interface GuaNodeState {
   focused?: boolean;
   hovered?: boolean;

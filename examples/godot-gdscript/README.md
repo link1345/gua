@@ -59,6 +59,12 @@ const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 var ui := GuaAutoAdapterScript.new()
 ```
 
+For Player-profile exposure, controls accept `gua_agent_exposure`,
+`gua_agent_field_rules`, and `gua_agent_allowed_actions` metadata. World objects
+use the corresponding `gua_world_agent_*` keys. Rules are dictionaries such as
+`{"path": "text", "mode": "redact"}` or
+`{"path": "position.x", "mode": "quantize", "quantum": 100.0}`.
+
 ## Virtual clock integration
 
 Only game logic that uses the adapter's clock can be paused or advanced by Gua.
