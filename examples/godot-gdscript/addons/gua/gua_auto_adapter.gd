@@ -1048,11 +1048,12 @@ func _apply_game_input(request: Dictionary) -> int:
 			Input.parse_input_event(motion)
 			return 0
 		if operation == 8:
-			var wheel := InputEventMouseButton.new()
-			wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN if float(request.get("y", 0.0)) > 0 else MOUSE_BUTTON_WHEEL_UP
-			wheel.pressed = true
-			wheel.factor = absf(float(request.get("y", 0.0)))
-			Input.parse_input_event(wheel)
+			var horizontal := float(request.get("x", 0.0))
+			var vertical := float(request.get("y", 0.0))
+			if horizontal != 0.0:
+				_inject_wheel(MOUSE_BUTTON_WHEEL_RIGHT if horizontal > 0.0 else MOUSE_BUTTON_WHEEL_LEFT, absf(horizontal))
+			if vertical != 0.0:
+				_inject_wheel(MOUSE_BUTTON_WHEEL_DOWN if vertical > 0.0 else MOUSE_BUTTON_WHEEL_UP, absf(vertical))
 			return 0
 		var button := _mouse_button(target)
 		if button == MOUSE_BUTTON_NONE:
@@ -1076,20 +1077,21 @@ func _apply_game_input(request: Dictionary) -> int:
 			return 0
 		if operation == 2:
 			var axis := _gamepad_axis(target)
-			if axis < 0:
+			if axis < 0 or target in ["left_trigger", "right_trigger"]:
 				return -6
 			var value := clampf(float(JSON.parse_string(str(request.get("value_json", "0")))), -1.0, 1.0)
-			game_input_sequence += 1
-			var axis_key := "%d:%d:%s" % [owner_id, device, target]
-			held_gamepad_axes[axis_key] = {"owner": owner_id, "device": device, "target": target, "axis": axis, "value": value, "sequence": game_input_sequence}
-			var motion := InputEventJoypadMotion.new()
-			motion.device = device
-			motion.axis = axis
-			motion.axis_value = value
-			Input.parse_input_event(motion)
+			_set_owner_gamepad_axis(owner_id, device, target, axis, value)
 			return 0
 		if operation == 3 and _gamepad_axis(target) >= 0:
 			_release_owner_gamepad_axis(owner_id, device, target)
+			return 0
+		if target in ["left_trigger", "right_trigger"]:
+			if operation == 4:
+				_set_owner_gamepad_axis(owner_id, device, target, _gamepad_axis(target), 1.0)
+			elif operation == 5:
+				_release_owner_gamepad_axis(owner_id, device, target)
+			else:
+				return -4
 			return 0
 		var button_index := _gamepad_button(target)
 		if button_index < 0:
@@ -1231,16 +1233,42 @@ func _mouse_button(name: String) -> MouseButton:
 	}.get(name, MOUSE_BUTTON_NONE)
 
 
+func _inject_wheel(button: MouseButton, factor: float) -> void:
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = button
+	wheel.pressed = true
+	wheel.factor = factor
+	Input.parse_input_event(wheel)
+
+
 func _gamepad_button(name: String) -> int:
-	var names := [
-		"south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger", "right_trigger",
-		"back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right", "guide",
-	]
-	return names.find(name)
+	return {
+		"south": JOY_BUTTON_A, "east": JOY_BUTTON_B, "west": JOY_BUTTON_X, "north": JOY_BUTTON_Y,
+		"back": JOY_BUTTON_BACK, "start": JOY_BUTTON_START,
+		"left_stick": JOY_BUTTON_LEFT_STICK, "right_stick": JOY_BUTTON_RIGHT_STICK,
+		"left_shoulder": JOY_BUTTON_LEFT_SHOULDER, "right_shoulder": JOY_BUTTON_RIGHT_SHOULDER,
+		"dpad_up": JOY_BUTTON_DPAD_UP, "dpad_down": JOY_BUTTON_DPAD_DOWN,
+		"dpad_left": JOY_BUTTON_DPAD_LEFT, "dpad_right": JOY_BUTTON_DPAD_RIGHT,
+	}.get(name, -1)
 
 
 func _gamepad_axis(name: String) -> int:
-	return ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"].find(name)
+	return {
+		"left_stick_x": JOY_AXIS_LEFT_X, "left_stick_y": JOY_AXIS_LEFT_Y,
+		"right_stick_x": JOY_AXIS_RIGHT_X, "right_stick_y": JOY_AXIS_RIGHT_Y,
+		"left_trigger": JOY_AXIS_TRIGGER_LEFT, "right_trigger": JOY_AXIS_TRIGGER_RIGHT,
+	}.get(name, -1)
+
+
+func _set_owner_gamepad_axis(owner_id: int, device: int, target: String, axis: int, value: float) -> void:
+	game_input_sequence += 1
+	var axis_key := "%d:%d:%s" % [owner_id, device, target]
+	held_gamepad_axes[axis_key] = {"owner": owner_id, "device": device, "target": target, "axis": axis, "value": value, "sequence": game_input_sequence}
+	var motion := InputEventJoypadMotion.new()
+	motion.device = device
+	motion.axis = axis
+	motion.axis_value = value
+	Input.parse_input_event(motion)
 
 
 func _release_gamepad(device: int) -> void:

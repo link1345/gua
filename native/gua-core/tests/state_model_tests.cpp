@@ -964,6 +964,10 @@ int main()
     invalid_text_operation.target = "text";
     invalid_text_operation.value_json = "\"hello\"";
     assert(gua_enqueue_game_input(context, &invalid_text_operation, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
+    auto invalid_text_value = invalid_text_operation;
+    invalid_text_value.operation = GUA_GAME_INPUT_SET;
+    invalid_text_value.value_json = "123";
+    assert(gua_enqueue_game_input(context, &invalid_text_value, nullptr) == GUA_GAME_INPUT_ERROR_INVALID_VALUE);
     auto invalid_cleanup_operation = invalid_text_operation;
     invalid_cleanup_operation.kind = GUA_GAME_INPUT_CLEANUP;
     invalid_cleanup_operation.target = "all";

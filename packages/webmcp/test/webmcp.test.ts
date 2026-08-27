@@ -150,6 +150,41 @@ describe("registerGuaWebMcp", () => {
     expect(requests).toContainEqual({ type: "press_game_input_action", actionId: "jump", confirmed: false });
   });
 
+  test("exposes release-all even when a custom bridge omits held-state reads", async () => {
+    const page = modelDocument();
+    const requests: unknown[] = [];
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getGameInputCapabilities: async () => ["raw_keyboard_input_v1", "game_input_lease_v1"],
+      performGameInput: async (request) => { requests.push(request); return { completed: true, requestId: 24, succeeded: true, errorCode: 0 }; },
+    };
+    const registration = await registerGuaWebMcp(bridge, { document: page.document });
+    expect(registration.registeredTools).toContain("release_all_game_inputs");
+    expect(registration.registeredTools).not.toContain("get_game_input_state");
+    await page.tools.get("release_all_game_inputs")!.execute({});
+    expect(requests).toEqual([{ type: "release_all_game_inputs" }]);
+  });
+
+  test("redacts sensitive text input from engine failure messages and details", async () => {
+    const page = modelDocument();
+    const secret = 'alpha"beta';
+    const escapedSecret = JSON.stringify(secret);
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getGameInputCapabilities: async () => ["text_input_v1"],
+      performGameInput: async () => { throw new GuaWebError("action_failed", `Host rejected ${escapedSecret}`, { echoed: escapedSecret }); },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("text_input")!.execute({ text: secret, sensitive: true });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(escapedSecret);
+    expect(serialized).toContain("[REDACTED]");
+    expect(JSON.parse(result.content[0]!.text).error.details).toBeUndefined();
+  });
+
   test("revalidates protected semantic actions and releases page-owned input on unregister", async () => {
     const page = modelDocument();
     const requests: unknown[] = [];
@@ -680,16 +715,32 @@ describe("Gua same-page engine port", () => {
     const bridge = createGuaInPageBridge({ invoke: async (command) => {
       commands.push(command);
       if (command.type === "get_game_input_capabilities") return ["semantic_game_input_v1", "game_input_lease_v1"];
-      if (command.type === "get_game_input_actions") return { schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "play", actions: [] };
+      if (command.type === "get_game_input_actions") return { schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "play", actions: [{
+        id: "move", description: "Move", valueType: "axis1d", range: { minimum: -1, maximum: 1 },
+        holdable: true, active: true, bindings: [], risk: "safe", requiresConfirmation: false,
+      }] };
       if (command.type === "get_game_input_state") return { schemaVersion: 1, held: [] };
       if (command.type === "perform_game_input") return { completed: true, requestId: 9, succeeded: true, errorCode: 0 };
       throw new Error("unsupported");
     } }, { gameInput: true });
     expect(await bridge.getGameInputCapabilities!()).toEqual(["semantic_game_input_v1", "game_input_lease_v1"]);
-    expect((await bridge.getGameInputActions!()).context).toBe("play");
+    expect((await bridge.getGameInputActions!()).actions[0]?.range).toEqual({ minimum: -1, maximum: 1 });
     expect((await bridge.getGameInputState!()).held).toEqual([]);
     expect(await bridge.performGameInput!({ type: "release_all_game_inputs" })).toMatchObject({ requestId: 9, succeeded: true });
     expect(JSON.stringify(commands)).not.toContain("ownerId");
+  });
+
+  test("rejects malformed nested game-input ranges from engine ports", async () => {
+    for (const invalidRange of [{ range: { minimum: -1 } }, { minimum: -1, maximum: 1 }]) {
+      const bridge = createGuaInPageBridge({ invoke: async (command) => {
+        if (command.type === "get_game_input_actions") return { schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "play", actions: [{
+          id: "move", description: "Move", valueType: "axis1d", ...invalidRange,
+          holdable: true, active: true, bindings: [], risk: "safe", requiresConfirmation: false,
+        }] };
+        throw new Error("unsupported");
+      } }, { gameInput: true });
+      await expect(bridge.getGameInputActions!()).rejects.toMatchObject({ code: "invalid_request" });
+    }
   });
 
   test("maps world reads and queries to the engine-owned port", async () => {

@@ -24,6 +24,9 @@ public sealed partial class GuaUnityRuntime
     private readonly Dictionary<string, Dictionary<ulong, OwnedSemanticValue>> semanticValuesByOwner = new(StringComparer.Ordinal);
     private long gameInputSequence;
     private GuaGameInputCapabilities gameInputCapabilities;
+    private GuaGameInputMap? publishedGameInputMap;
+    private bool hasPublishedGameInputMap;
+    private bool gameInputMapRefreshPending = true;
     public static event Action<string, object?>? GameInputChanged;
 
 #if ENABLE_INPUT_SYSTEM
@@ -40,8 +43,19 @@ public sealed partial class GuaUnityRuntime
     private void InitializeGameInput()
     {
         if (runtime == null) return;
-        var map = FindFirstObjectByType<GuaGameInputMap>(FindObjectsInactive.Include);
-        if (map == null) return;
+        var map = FindGameInputMapInActiveScene();
+        if (hasPublishedGameInputMap && ReferenceEquals(map, publishedGameInputMap)) { gameInputMapRefreshPending = false; return; }
+        ReleaseWebGameInputSession();
+        DisposeGameInput();
+        if (map == null)
+        {
+            runtime.PublishGameInputActions("unavailable", Array.Empty<GuaGameInputActionDescriptor>());
+            runtime.EnableGameInput(GuaGameInputCapabilities.None, DisposeGameInput);
+            publishedGameInputMap = null;
+            hasPublishedGameInputMap = true;
+            gameInputMapRefreshPending = false;
+            return;
+        }
         runtime.PublishGameInputActions(map.Context, map.Descriptors());
         var capabilities = GuaGameInputCapabilities.Semantic;
 #if ENABLE_INPUT_SYSTEM
@@ -57,6 +71,21 @@ public sealed partial class GuaUnityRuntime
 #endif
         runtime.EnableGameInput(capabilities, DisposeGameInput);
         gameInputCapabilities = capabilities;
+        publishedGameInputMap = map;
+        hasPublishedGameInputMap = true;
+        gameInputMapRefreshPending = false;
+    }
+
+    private static GuaGameInputMap? FindGameInputMapInActiveScene()
+    {
+        var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+        if (!activeScene.IsValid() || !activeScene.isLoaded) return null;
+        foreach (var root in activeScene.GetRootGameObjects())
+        {
+            var maps = root.GetComponentsInChildren<GuaGameInputMap>(true);
+            if (maps.Length > 0) return maps[0];
+        }
+        return null;
     }
 
     private void PumpGameInput()

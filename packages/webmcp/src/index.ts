@@ -68,7 +68,7 @@ export const guaGameInputCapabilities = [
 export type GuaGameInputCapability = (typeof guaGameInputCapabilities)[number];
 export type GuaGameInputValueType = "button" | "axis1d" | "vector2" | "text";
 export interface GuaGameInputAction {
-  id: string; description: string; valueType: GuaGameInputValueType; minimum?: number; maximum?: number;
+  id: string; description: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number };
   holdable: boolean; active: boolean; bindings: string[]; risk: string; requiresConfirmation: boolean;
 }
 export interface GuaGameInputActionMap {
@@ -236,9 +236,8 @@ function gameInputDefinitions(capabilities: GuaGameInputCapability[], bridge: Gu
   if (capabilities.includes("semantic_game_input_v1") && bridge.getGameInputActions) {
     for (const name of ["get_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action"]) enabled.add(name);
   }
-  if (capabilities.length > 0 && bridge.getGameInputState) {
-    enabled.add("get_game_input_state"); enabled.add("release_all_game_inputs");
-  }
+  if (capabilities.length > 0) enabled.add("release_all_game_inputs");
+  if (capabilities.length > 0 && bridge.getGameInputState) enabled.add("get_game_input_state");
   if (capabilities.includes("raw_keyboard_input_v1")) for (const name of ["key_down", "key_up", "press_physical_key"]) enabled.add(name);
   if (capabilities.includes("raw_pointer_input_v1")) for (const name of ["pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel"]) enabled.add(name);
   if (capabilities.includes("raw_gamepad_input_v1")) for (const name of ["gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad"]) enabled.add(name);
@@ -363,7 +362,15 @@ async function executeTool(
       : completion;
     return toolResult(safeCompletion);
   } catch (error) {
-    const normalized = normalizeError(error, input.sensitive === undefined || input.sensitive === false ? undefined : String(input.value ?? ""));
+    if (name === "text_input" && input.sensitive === true) {
+      const code = error instanceof GuaWebError ? error.code : "action_failed";
+      const normalized = new GuaWebError(code, "Sensitive text input failed; engine details were [REDACTED].");
+      return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
+    }
+    const secret = input.sensitive === true
+      ? String(name === "text_input" ? input.text ?? "" : input.value ?? "")
+      : undefined;
+    const normalized = normalizeError(error, secret);
     return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
   }
 }

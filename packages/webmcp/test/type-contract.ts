@@ -1,4 +1,4 @@
-import type { GuaNode, GuaUiTree, GuaWebActionRequest } from "../src/index.js";
+import type { GuaGameInputAction, GuaNode, GuaUiTree, GuaWebActionRequest } from "../src/index.js";
 
 const tree: GuaUiTree = {
   schemaVersion: 2,
@@ -45,6 +45,13 @@ const validActions: GuaWebActionRequest[] = [
   { action: "press_key", key: "Escape" },
 ];
 
+const rangedGameInput: GuaGameInputAction = {
+  id: "move", description: "Move", valueType: "axis1d", range: { minimum: -1, maximum: 1 },
+  holdable: true, active: true, bindings: [], risk: "safe", requiresConfirmation: false,
+};
+// @ts-expect-error action ranges follow the protocol's nested range object.
+const flatGameInputRange: GuaGameInputAction = { ...rangedGameInput, range: undefined, minimum: -1, maximum: 1 };
+
 // @ts-expect-error set_value must include value.
 const missingValue: GuaWebActionRequest = { action: "set_value", nodeId: "name" };
 // @ts-expect-error set_checked must include checked.
@@ -54,4 +61,4 @@ const missingDelta: GuaWebActionRequest = { action: "scroll", nodeId: "list", de
 // @ts-expect-error press_key must include key.
 const missingKey: GuaWebActionRequest = { action: "press_key" };
 
-void [tree, missingTreeMetadata, node, validActions, missingValue, missingChecked, missingDelta, missingKey];
+void [tree, missingTreeMetadata, node, validActions, rangedGameInput, flatGameInputRange, missingValue, missingChecked, missingDelta, missingKey];

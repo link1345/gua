@@ -26,6 +26,7 @@ import {
   type GuaRecording,
   type SemanticActionInput,
   compareImages,
+  prepareManualGameInput,
   replayRecording,
   validateRecording,
 } from "./automation";
@@ -296,8 +297,14 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
           actions={gameInputActions}
           state={gameInputState}
           onInput={async (command) => {
-            const receipt = await inspectorClient.performGameInput(command);
-            recorder.current.recordGameInput(command, receipt.requestId);
+            const currentCommand = await prepareManualGameInput(
+              command,
+              () => inspectorClient.getGameInputActions(),
+              (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
+            );
+            if (currentCommand === null) return;
+            const receipt = await inspectorClient.performGameInput(currentCommand);
+            recorder.current.recordGameInput(currentCommand, receipt.requestId);
             setGameInputState(await inspectorClient.getGameInputState());
           }}
           onError={(message) => setError(message)}
@@ -337,20 +344,18 @@ function GameInputPanel({ actions, state, onInput, onError }: {
   onInput(command: GameInputCommandInput): Promise<void>; onError(message: string): void;
 }) {
   const [rawCode, setRawCode] = useState("Space");
-  const run = (command: GameInputCommandInput, confirm = false) => {
-    if (confirm && !window.confirm("This action requires confirmation. Continue?")) return;
-    const confirmedCommand = confirm ? { ...command, confirmed: true } as GameInputCommandInput : command;
-    void onInput(confirmedCommand).catch((caught) => onError((caught as Error).message));
+  const run = (command: GameInputCommandInput) => {
+    void onInput(command).catch((caught) => onError((caught as Error).message));
   };
   return <section className="gua-panel gua-game-input-panel">
     <PanelHeader title="Game Input" detail={actions === null ? "unsupported" : `${actions.context} · r${actions.revision}`} />
     {actions?.actions.map((action) => <div className="gua-game-action" key={action.id}>
       <span><strong>{action.id}</strong><small>{action.valueType} · {action.active ? "active" : "inactive"} · {action.risk}</small></span>
       {action.valueType === "button" ? <>
-        <button type="button" disabled={!action.active} onClick={() => run({ type: "press_game_input_action", actionId: action.id }, action.requiresConfirmation)}>Press</button>
-        {action.holdable ? <button type="button" disabled={!action.active} onClick={() => run({ type: "set_game_input_action", actionId: action.id, value: true }, action.requiresConfirmation)}>Hold</button> : null}
+        <button type="button" disabled={!action.active} onClick={() => run({ type: "press_game_input_action", actionId: action.id })}>Press</button>
+        {action.holdable ? <button type="button" disabled={!action.active} onClick={() => run({ type: "set_game_input_action", actionId: action.id, value: true })}>Hold</button> : null}
         <button type="button" onClick={() => run({ type: "release_game_input_action", actionId: action.id })}>Release</button>
-      </> : <GameInputValueControl action={action} onRun={(value) => run({ type: "set_game_input_action", actionId: action.id, value }, action.requiresConfirmation)} />}
+      </> : <GameInputValueControl action={action} onRun={(value) => run({ type: "set_game_input_action", actionId: action.id, value })} />}
     </div>)}
     <div className="gua-game-raw">
       <input aria-label="W3C physical key code" value={rawCode} onChange={(event) => setRawCode(event.currentTarget.value)} />

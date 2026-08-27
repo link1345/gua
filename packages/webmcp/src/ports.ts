@@ -341,8 +341,12 @@ function isGameInputAction(value: unknown): boolean {
       typeof action.holdable !== "boolean" || typeof action.active !== "boolean" ||
       !Array.isArray(action.bindings) || !action.bindings.every(isNonEmptyString) ||
       typeof action.risk !== "string" || typeof action.requiresConfirmation !== "boolean") return false;
-  const hasMinimum = action.minimum !== undefined, hasMaximum = action.maximum !== undefined;
-  return hasMinimum === hasMaximum && (!hasMinimum || (isFiniteNumber(action.minimum) && isFiniteNumber(action.maximum) && action.minimum <= action.maximum));
+  if (action.minimum !== undefined || action.maximum !== undefined) return false;
+  if (action.range === undefined) return true;
+  const range = asRecord(action.range);
+  if (range === undefined) return false;
+  return Object.keys(range).every((key) => key === "minimum" || key === "maximum") &&
+    isFiniteNumber(range.minimum) && isFiniteNumber(range.maximum) && range.minimum <= range.maximum;
 }
 
 function parseGameInputState(value: unknown): GuaGameInputState {

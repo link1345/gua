@@ -786,6 +786,15 @@ bool valid_json_value(std::string_view value)
     return index == value.size();
 }
 
+bool valid_json_string_value(std::string_view value)
+{
+    if (value.empty() || value.size() >= 512) return false;
+    std::size_t index = 0;
+    if (!parse_json_string(value, index)) return false;
+    skip_json_whitespace(value, index);
+    return index == value.size();
+}
+
 bool valid_json_string_array(std::string_view value)
 {
     std::size_t index = 0;
@@ -2550,7 +2559,8 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
                 return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         }
     } else if (descriptor->kind == GUA_GAME_INPUT_TEXT_INPUT) {
-        if (descriptor->operation != GUA_GAME_INPUT_SET) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        if (descriptor->operation != GUA_GAME_INPUT_SET || !valid_json_string_value(value))
+            return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     } else if (descriptor->kind == GUA_GAME_INPUT_CLEANUP) {
         if (descriptor->operation != GUA_GAME_INPUT_RELEASE_ALL) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     }

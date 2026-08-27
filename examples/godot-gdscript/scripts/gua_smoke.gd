@@ -8,10 +8,16 @@ var expected_click_request_id := 0
 var click_completed_before_handler := false
 var smoke_root: Control
 var finishing := false
+var observed_wheel_buttons: Array[int] = []
 
 
 func _ready() -> void:
 	call_deferred("_run")
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT, MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		observed_wheel_buttons.append(event.button_index)
 
 
 func _run() -> void:
@@ -188,6 +194,26 @@ func _run() -> void:
 		if ui._keycode_from_w3c(code) == KEY_NONE:
 			_fail("Gua raw-keyboard capability did not implement protocol-valid code %s." % code)
 			return
+	if ui._gamepad_button("left_shoulder") != JOY_BUTTON_LEFT_SHOULDER \
+			or ui._gamepad_button("start") != JOY_BUTTON_START \
+			or ui._gamepad_button("dpad_right") != JOY_BUTTON_DPAD_RIGHT:
+		_fail("Gua Standard Gamepad buttons do not map to Godot JoyButton constants.")
+		return
+	observed_wheel_buttons.clear()
+	ui._apply_game_input({"kind": 3, "operation": 8, "owner_id": 303, "target": "pixels", "x": 20.0, "y": 0.0})
+	await get_tree().process_frame
+	if not observed_wheel_buttons.has(MOUSE_BUTTON_WHEEL_RIGHT):
+		_fail("Gua raw pointer input lost a horizontal-only wheel event: %s" % observed_wheel_buttons)
+		return
+	ui._apply_game_input({"kind": 4, "operation": 4, "owner_id": 303, "target": "left_trigger", "device_index": 0})
+	var trigger_state: Dictionary = ui.held_gamepad_axes.get("303:0:left_trigger", {})
+	if int(trigger_state.get("axis", -1)) != JOY_AXIS_TRIGGER_LEFT or float(trigger_state.get("value", 0.0)) != 1.0:
+		_fail("Gua Standard Gamepad trigger was not injected through the Godot trigger axis.")
+		return
+	ui._apply_game_input({"kind": 4, "operation": 5, "owner_id": 303, "target": "left_trigger", "device_index": 0})
+	if ui.held_gamepad_axes.has("303:0:left_trigger"):
+		_fail("Gua Standard Gamepad trigger remained held after button up.")
+		return
 	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 101, "target": "move", "value_json": "{\"x\":1,\"y\":0}"}) != 0:
 		_fail("Gua smoke could not inject the first owner-scoped semantic value.")
 		return

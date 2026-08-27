@@ -1,9 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
-import { InspectorRecorder, replayRecording, validateRecording } from "../src/automation";
+import { InspectorRecorder, prepareManualGameInput, replayRecording, validateRecording } from "../src/automation";
 import { MockInspectorClient, createCoalescedAsyncRunner, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
+  test("re-resolves confirmation immediately before manual game input", async () => {
+    const prompts: string[] = [];
+    const command = await prepareManualGameInput(
+      { type: "press_game_input_action", actionId: "launch" },
+      async () => ({ schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "combat", actions: [{
+        id: "launch", valueType: "button", holdable: false, active: true, bindings: [], risk: "dangerous", requiresConfirmation: true,
+      }] }),
+      (action) => { prompts.push(action.id); return true; },
+    );
+    expect(command).toEqual({ type: "press_game_input_action", actionId: "launch", confirmed: true });
+    expect(prompts).toEqual(["launch"]);
+  });
   test("computes every level of the world object hierarchy", () => {
     const object = (id: string, parentId?: string): GuaWorldObject => ({ id, parentId, kind: "object", label: id,
       space: "world2d", position: { x: 0, y: 0 }, visibleToPlayer: true, active: true,

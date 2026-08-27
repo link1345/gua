@@ -121,17 +121,15 @@ export async function replayRecording(
       if (performGameInput === undefined || step.operation === undefined || step.arguments === undefined) throw new Error("Game input replay is unavailable.");
       const argumentsValue = { ...step.arguments, type: step.operation } as Record<string, unknown>;
       if (step.operation === "press_game_input_action" || step.operation === "set_game_input_action") {
-        delete argumentsValue.confirmed;
         if (getGameInputActions === undefined) throw new Error("Current game input actions are unavailable for replay.");
-        const actionId = argumentsValue.actionId as string;
-        const action = (await getGameInputActions()).actions.find((candidate) => candidate.id === actionId);
-        if (action === undefined) throw new Error(`Game input action '${actionId}' is not currently published.`);
-        if (action.requiresConfirmation) {
-          if (confirmGameInputAction === undefined || !await confirmGameInputAction(action)) {
-            throw new Error(`Confirmation was declined for game input action '${actionId}'.`);
-          }
-          argumentsValue.confirmed = true;
-        }
+        const confirmed = await prepareManualGameInput(
+          argumentsValue as GameInputCommandInput,
+          getGameInputActions,
+          confirmGameInputAction,
+        );
+        if (confirmed === null) throw new Error(`Confirmation was declined for game input action '${argumentsValue.actionId as string}'.`);
+        delete argumentsValue.confirmed;
+        Object.assign(argumentsValue, confirmed);
       }
       if (step.sensitive) {
         const secret = secrets[step.secretKey as string];
@@ -160,6 +158,21 @@ export async function replayRecording(
       catch (cleanupError) { if (replaySucceeded) throw cleanupError; }
     }
   }
+}
+
+export async function prepareManualGameInput(
+  command: GameInputCommandInput,
+  getGameInputActions: () => Promise<GuaGameInputActions>,
+  confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
+): Promise<GameInputCommandInput | null> {
+  if (command.type !== "press_game_input_action" && command.type !== "set_game_input_action") return command;
+  const current = { ...command } as GameInputCommandInput & { confirmed?: boolean };
+  delete current.confirmed;
+  const action = (await getGameInputActions()).actions.find((candidate) => candidate.id === command.actionId);
+  if (action === undefined) throw new Error(`Game input action '${command.actionId}' is not currently published.`);
+  if (!action.requiresConfirmation) return current;
+  if (confirmGameInputAction === undefined || !await confirmGameInputAction(action)) return null;
+  return { ...current, confirmed: true } as GameInputCommandInput;
 }
 
 export interface BrowserVisualResult {

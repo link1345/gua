@@ -63,6 +63,9 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
+            SceneManager.sceneLoaded += HandleGameInputSceneLoaded;
+            SceneManager.sceneUnloaded += HandleGameInputSceneUnloaded;
+            SceneManager.activeSceneChanged += HandleGameInputActiveSceneChanged;
             InitializeGameInput();
             runtime.EnableWorldObjectTreeAdapter();
             if (Application.platform == RuntimePlatform.WebGLPlayer)
@@ -83,6 +86,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         }
         catch (Exception error)
         {
+            UnsubscribeGameInputSceneEvents();
             Debug.LogError("Failed to initialize the Gua Unity adapter: " + error);
             try { runtime?.Dispose(); }
             catch (Exception cleanupError) { Debug.LogError("Failed to dispose the partially initialized Gua Unity runtime: " + cleanupError); }
@@ -97,7 +101,19 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     {
         // Scene fixtures and user maps may be created by AfterSceneLoad hooks.
         yield return null;
+        gameInputMapRefreshPending = true;
         InitializeGameInput();
+    }
+
+    private void HandleGameInputSceneLoaded(Scene _scene, LoadSceneMode _mode) => gameInputMapRefreshPending = true;
+    private void HandleGameInputSceneUnloaded(Scene _scene) => gameInputMapRefreshPending = true;
+    private void HandleGameInputActiveSceneChanged(Scene _previous, Scene _next) => gameInputMapRefreshPending = true;
+
+    private void UnsubscribeGameInputSceneEvents()
+    {
+        SceneManager.sceneLoaded -= HandleGameInputSceneLoaded;
+        SceneManager.sceneUnloaded -= HandleGameInputSceneUnloaded;
+        SceneManager.activeSceneChanged -= HandleGameInputActiveSceneChanged;
     }
 
     public static void RunFrame() { if (activeRuntime != null && activeRuntime.enabled) activeRuntime.Tick(); }
@@ -114,6 +130,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         if (runtime == null) return;
         try
         {
+            if (gameInputMapRefreshPending) InitializeGameInput();
             runtime.Clock.AdvanceMilliseconds((double)Time.unscaledDeltaTime * 1000.0);
             targets.Clear();
             ids.Clear();
@@ -468,6 +485,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
 
     private void OnDestroy()
     {
+        UnsubscribeGameInputSceneEvents();
         if (activeRuntime == this) activeRuntime = null;
         if (webInstalled)
         {
