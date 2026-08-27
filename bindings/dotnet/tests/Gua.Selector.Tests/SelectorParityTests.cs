@@ -18,6 +18,17 @@ namespace Gua.Selector.Tests;
 public sealed class SelectorParityTests
 {
     [Test]
+    public void ProjectedQueryLabelsAreDeclaredNullable()
+    {
+        var label = typeof(GuaNodeQueryMatch).GetProperty(nameof(GuaNodeQueryMatch.Label))!;
+        Assert.That(new NullabilityInfoContext().Create(label).ReadState, Is.EqualTo(NullabilityState.Nullable));
+        var result = JsonSerializer.Deserialize<GuaQueryResult>(
+            """{"valid":true,"matches":[{"id":"public","role":"button","parentId":null}]}""",
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.That(result!.Matches.Single().Label, Is.Null);
+    }
+
+    [Test]
     public void ProjectedWorldLabelsAreDeclaredNullable()
     {
         var label = typeof(GuaWorldObject).GetProperty(nameof(GuaWorldObject.Label))!;

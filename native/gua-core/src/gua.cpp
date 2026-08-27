@@ -697,6 +697,7 @@ int action_authorization_error(
 bool event_observable_for_profile(const std::vector<Node>& nodes, const Event& event, int profile)
 {
     if (profile == GUA_OBSERVATION_PROFILE_DEBUG) return true;
+    if (event.observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && event.request_id != 0) return true;
     if (event.node_id.empty()) return event.observation_profile == GUA_OBSERVATION_PROFILE_PLAYER;
     const auto visible = project_nodes(nodes, profile);
     return std::any_of(visible.begin(), visible.end(), [&](const Node& node) { return node.id == event.node_id; });
@@ -757,8 +758,9 @@ std::string build_query_json(const std::vector<Node>& nodes, const gua_selector_
     for (std::size_t i = 0; i < matches.size(); ++i) {
         if (i > 0) json += ",";
         const Node& node = *matches[i];
-        json += "{\"id\":\"" + escape_json(node.id) + "\",\"role\":\"" + escape_json(node.role) +
-            "\",\"label\":\"" + escape_json(node.label) + "\",\"parentId\":";
+        json += "{\"id\":\"" + escape_json(node.id) + "\",\"role\":\"" + escape_json(node.role) + "\"";
+        if (!node.omitted_fields.contains("label")) json += ",\"label\":\"" + escape_json(node.label) + "\"";
+        json += ",\"parentId\":";
         json += (node.known_mask & GUA_NODE_KNOWN_PARENT_ID) != 0U
             ? "\"" + escape_json(node.parent_id) + "\""
             : "null";

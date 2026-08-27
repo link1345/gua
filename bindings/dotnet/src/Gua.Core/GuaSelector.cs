@@ -28,6 +28,6 @@ public sealed record GuaSelector(
     GuaStateFilter Visible = GuaStateFilter.Any,
     GuaStateFilter Enabled = GuaStateFilter.Any);
 
-public sealed record GuaNodeQueryMatch(string Id, string Role, string Label, string? ParentId);
+public sealed record GuaNodeQueryMatch(string Id, string Role, string? Label, string? ParentId);
 
 public sealed record GuaQueryResult(bool Valid, IReadOnlyList<GuaNodeQueryMatch> Matches, string? Error = null);

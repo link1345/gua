@@ -294,10 +294,40 @@ int main()
     const gua_action_result_t navigation_result { sizeof(gua_action_result_t), navigation_id, GUA_ACTION_FOCUS,
         GUA_ACTION_STATUS_SUCCEEDED, 0, "public", nullptr, 0 };
     assert(gua_emit_action_result(projected_ui, &navigation_result) == 1);
-    gua_event_v3_t navigation_event { sizeof(gua_event_v3_t), { sizeof(gua_event_v2_t) } };
-    assert(gua_poll_event_v3_for_request_and_profile(projected_ui, navigation_id, GUA_OBSERVATION_PROFILE_PLAYER, &navigation_event) == 1);
-    assert(navigation_event.base.status == GUA_ACTION_STATUS_SUCCEEDED);
+    gua_event_v2_t navigation_event { sizeof(gua_event_v2_t) };
+    assert(gua_poll_event_v2_for_profile(projected_ui, GUA_OBSERVATION_PROFILE_PLAYER, &navigation_event) == 1);
+    assert(navigation_event.request_id == navigation_id && navigation_event.status == GUA_ACTION_STATUS_SUCCEEDED);
     gua_destroy_context(projected_ui);
+
+    gua_context_t* omitted_query = gua_create_context();
+    const gua_agent_field_rule_v1_t omitted_query_label { sizeof(gua_agent_field_rule_v1_t), "label",
+        GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL };
+    const gua_agent_policy_v1_t omitted_query_policy { sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO,
+        0, 0, &omitted_query_label, 1 };
+    const gua_node_descriptor_v2_t omitted_query_base { sizeof(gua_node_descriptor_v2_t), 0,
+        "omitted-query", nullptr, "button", "Secret query label", nullptr, nullptr,
+        { 0, 0, 1, 1 }, 1, 1, 0, 0, 0, 0, 0 };
+    const gua_node_descriptor_v3_t omitted_query_detail { sizeof(gua_node_descriptor_v3_t), omitted_query_base };
+    const gua_node_descriptor_v4_t omitted_query_node {
+        sizeof(gua_node_descriptor_v4_t), omitted_query_detail, omitted_query_policy };
+    gua_begin_frame(omitted_query, "omitted-query");
+    assert(gua_register_node_v4(omitted_query, &omitted_query_node) == 1);
+    gua_end_frame(omitted_query);
+    const gua_selector_v1_t omitted_query_selector { sizeof(gua_selector_v1_t), "omitted-query" };
+    int omitted_query_size = gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::vector<char> omitted_query_json(static_cast<std::size_t>(omitted_query_size));
+    gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_PLAYER, omitted_query_json.data(), omitted_query_size);
+    assert(std::string(omitted_query_json.data()).find("\"id\":\"omitted-query\"") != std::string::npos);
+    assert(std::string(omitted_query_json.data()).find("\"label\"") == std::string::npos);
+    omitted_query_size = gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    omitted_query_json.resize(static_cast<std::size_t>(omitted_query_size));
+    gua_query_nodes_json_for_profile(omitted_query, &omitted_query_selector,
+        GUA_OBSERVATION_PROFILE_DEBUG, omitted_query_json.data(), omitted_query_size);
+    assert(std::string(omitted_query_json.data()).find("\"label\":\"Secret query label\"") != std::string::npos);
+    gua_destroy_context(omitted_query);
 
     gua_context_t* player_history = gua_create_context();
     assert(gua_set_diagnostics_history_limit(player_history, 16) == 1);
