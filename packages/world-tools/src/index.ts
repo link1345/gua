@@ -60,7 +60,7 @@ function worldObject(value: unknown): value is GuaWorldObject {
       (object.space === "world3d" && !optionalFiniteNumber(position.z)) ||
       typeof object.visibleToPlayer !== "boolean" || typeof object.active !== "boolean" ||
       (object.agentExposure !== "auto" && object.agentExposure !== "private") ||
-      !optionalNonEmptyString(object.domainId) || !optionalNonEmptyString(object.relatedUiNodeId) ||
+      !optionalString(object.domainId) || !optionalString(object.relatedUiNodeId) ||
       (object.tags !== undefined && (!Array.isArray(object.tags) || !object.tags.every(nonEmptyString) || new Set(object.tags).size !== object.tags.length)) ||
       !state || Object.keys(state).some((key) => key.length === 0) || !Object.values(state).every(worldPrimitive)) return false;
   return true;
@@ -77,6 +77,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 function only(value: Record<string, unknown>, keys: Set<string>): boolean { return Object.keys(value).every((key) => keys.has(key)); }
 function nonEmptyString(value: unknown): value is string { return typeof value === "string" && value.length > 0; }
 function optionalNonEmptyString(value: unknown): boolean { return value === undefined || nonEmptyString(value); }
+function optionalString(value: unknown): boolean { return value === undefined || typeof value === "string"; }
 function finiteNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
 function optionalFiniteNumber(value: unknown): boolean { return value === undefined || finiteNumber(value); }
 function positiveInteger(value: unknown): boolean { return Number.isInteger(value) && (value as number) >= 1; }

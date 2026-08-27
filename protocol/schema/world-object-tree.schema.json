@@ -38,8 +38,8 @@
         "visibleToPlayer": { "type": "boolean" },
         "active": { "type": "boolean" },
         "agentExposure": { "enum": ["auto", "private"] },
-        "domainId": { "type": "string", "minLength": 1 },
-        "relatedUiNodeId": { "type": "string", "minLength": 1 },
+        "domainId": { "type": "string" },
+        "relatedUiNodeId": { "type": "string" },
         "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "state": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/stateValue" } }
       },

@@ -1,6 +1,8 @@
 #include "gua/runtime.h"
 
+#include <array>
 #include <cassert>
+#include <cstdint>
 #include <thread>
 #include <string>
 #include <vector>
@@ -299,6 +301,16 @@ int main()
     assert(gua_runtime_emit_click(runtime, "private") == 1);
     observed = {};
     assert(gua_runtime_poll_event(runtime, &observed) == 0);
+    alignas(gua_reset_report_t) std::array<unsigned char, sizeof(gua_reset_report_t)> undersized_report_storage;
+    undersized_report_storage.fill(0xA5);
+    auto* undersized_report = reinterpret_cast<gua_reset_report_t*>(undersized_report_storage.data());
+    undersized_report->struct_size = sizeof(uint32_t);
+    const gua_reset_options_t player_reset {
+        sizeof(gua_reset_options_t), GUA_RESET_DEFAULT_V2, 0, 0, GUA_RESET_FLAGS_VERSION_CURRENT };
+    assert(gua_runtime_reset_context(runtime, &player_reset, undersized_report) == GUA_RESET_ERROR_INVALID_ARGUMENT);
+    for (std::size_t index = sizeof(uint32_t); index < undersized_report_storage.size(); ++index) {
+        assert(undersized_report_storage[index] == 0xA5);
+    }
     gua_runtime_destroy(runtime);
     return 0;
 }

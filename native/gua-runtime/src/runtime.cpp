@@ -1200,7 +1200,7 @@ extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset
     }
     const uint32_t output_size = out_report == nullptr ? 0 : out_report->struct_size;
     const int result = gua_reset_context(runtime->context, options, out_report);
-    if (player && out_report != nullptr) {
+    if (player && out_report != nullptr && result != GUA_RESET_ERROR_INVALID_ARGUMENT) {
         out_report->pending_request_count = summary.pending_count; out_report->in_flight_request_count = summary.in_flight_count;
         out_report->unconsumed_event_count = summary.event_count;
         if (out_report->discarded_node_count != 0) out_report->discarded_node_count = summary.ui_node_count;

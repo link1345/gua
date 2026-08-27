@@ -64,7 +64,7 @@ describe("World WebMCP tools", () => {
     const tree = { schemaVersion: 1, sessionEpoch: 1, frameSequence: 2, revision: 3, scene: "level", objects: [object] };
     expect(parseWorldObjectTree(JSON.stringify(tree))).toEqual(tree);
     expect(parseWorldQueryResult({ valid: true, matches: [object] })).toEqual({ valid: true, matches: [object] });
-    const projected = { ...object, label: undefined, tags: undefined, position: { x: 1 } };
+    const projected = { ...object, label: undefined, tags: undefined, position: { x: 1 }, domainId: "", relatedUiNodeId: "" };
     expect(parseWorldObjectTree({ ...tree, objects: [projected] }).objects).toEqual([projected]);
     for (const invalid of [
       { ...tree, sessionEpoch: 0 },

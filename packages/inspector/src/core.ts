@@ -1,8 +1,21 @@
 export interface GuaBounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}
+
+export function formatBounds(bounds: GuaBounds): string {
+  return [bounds.x, bounds.y, bounds.w, bounds.h]
+    .map((value) => value === undefined ? "unknown" : String(value))
+    .join(", ");
+}
+
+export function hasCompleteBounds(bounds: GuaBounds): bounds is Required<GuaBounds> {
+  return typeof bounds.x === "number" && Number.isFinite(bounds.x) &&
+    typeof bounds.y === "number" && Number.isFinite(bounds.y) &&
+    typeof bounds.w === "number" && Number.isFinite(bounds.w) && bounds.w >= 0 &&
+    typeof bounds.h === "number" && Number.isFinite(bounds.h) && bounds.h >= 0;
 }
 
 export interface GuaNodeState {
@@ -33,7 +46,7 @@ export interface GuaUiTree {
   screen: string;
   nodes: GuaNode[];
 }
-export interface GuaWorldObject { id: string; parentId?: string; kind: string; label: string; space: "world2d" | "world3d"; position: { x: number; y: number; z?: number }; visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private"; tags?: string[]; state: Record<string, string | number | boolean | null> }
+export interface GuaWorldObject { id: string; parentId?: string; kind: string; label?: string; space: "world2d" | "world3d"; position: { x?: number; y?: number; z?: number }; visibleToPlayer: boolean; active: boolean; agentExposure: "auto" | "private"; tags?: string[]; state: Record<string, string | number | boolean | null> }
 export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
 
 export interface GuaLogEntry {
