@@ -61,6 +61,16 @@ bool valid_runtime(gua_runtime_t* runtime)
     return runtime != nullptr && runtime->context != nullptr;
 }
 
+bool inspector_bridge_running_unlocked(gua_runtime_t* runtime)
+{
+#if GUA_RUNTIME_WITH_WS
+    return runtime->bridge != nullptr && runtime->bridge->running();
+#else
+    (void)runtime;
+    return false;
+#endif
+}
+
 int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 {
     const int required_size = static_cast<int>(json.size() + 1U);
@@ -925,7 +935,7 @@ extern "C" int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int p
     if (!valid_runtime(runtime) || (profile != GUA_OBSERVATION_PROFILE_DEBUG && profile != GUA_OBSERVATION_PROFILE_PLAYER)) return 0;
     const std::lock_guard bridge_lock(runtime->bridge_mutex);
     const std::lock_guard context_lock(runtime->context_mutex);
-    if ((runtime->bridge != nullptr && runtime->bridge->running() && runtime->observation_profile != profile) ||
+    if ((inspector_bridge_running_unlocked(runtime) && runtime->observation_profile != profile) ||
         (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && profile == GUA_OBSERVATION_PROFILE_DEBUG)) return 0;
     runtime->observation_profile = profile;
     return 1;
@@ -943,7 +953,7 @@ extern "C" int gua_runtime_set_player_screenshot_enabled(gua_runtime_t* runtime,
     if (!valid_runtime(runtime)) return 0;
     const std::lock_guard bridge_lock(runtime->bridge_mutex);
     const std::lock_guard context_lock(runtime->context_mutex);
-    if (runtime->bridge != nullptr && runtime->bridge->running()) return 0;
+    if (inspector_bridge_running_unlocked(runtime)) return 0;
     runtime->player_screenshot_enabled = enabled != 0;
     return 1;
 }
@@ -1556,7 +1566,7 @@ extern "C" int gua_runtime_inspector_bridge_running(gua_runtime_t* runtime)
     }
 
     const std::lock_guard bridge_lock(runtime->bridge_mutex);
-    return runtime->bridge != nullptr && runtime->bridge->running() ? 1 : 0;
+    return inspector_bridge_running_unlocked(runtime) ? 1 : 0;
 #endif
 }
 
