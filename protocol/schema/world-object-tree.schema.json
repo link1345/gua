@@ -16,16 +16,16 @@
   "$defs": {
     "stateValue": { "type": ["string", "number", "boolean", "null"] },
     "position2d": {
-      "type": "object", "required": ["x", "y"], "additionalProperties": false,
+      "type": "object", "required": [], "additionalProperties": false,
       "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
     },
     "position3d": {
-      "type": "object", "required": ["x", "y", "z"], "additionalProperties": false,
+      "type": "object", "required": [], "additionalProperties": false,
       "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }
     },
     "object": {
       "type": "object",
-      "required": ["id", "kind", "label", "space", "position", "visibleToPlayer", "active", "agentExposure", "tags", "state"],
+      "required": ["id", "kind", "space", "position", "visibleToPlayer", "active", "agentExposure", "state"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },
@@ -34,12 +34,12 @@
         "label": { "type": "string" },
         "description": { "type": "string" },
         "space": { "enum": ["world2d", "world3d"] },
-        "position": { "oneOf": [{ "$ref": "#/$defs/position2d" }, { "$ref": "#/$defs/position3d" }] },
+        "position": { "anyOf": [{ "$ref": "#/$defs/position2d" }, { "$ref": "#/$defs/position3d" }] },
         "visibleToPlayer": { "type": "boolean" },
         "active": { "type": "boolean" },
         "agentExposure": { "enum": ["auto", "private"] },
-        "domainId": { "type": "string", "minLength": 1 },
-        "relatedUiNodeId": { "type": "string", "minLength": 1 },
+        "domainId": { "type": "string" },
+        "relatedUiNodeId": { "type": "string" },
         "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "state": { "type": "object", "propertyNames": { "minLength": 1 }, "additionalProperties": { "$ref": "#/$defs/stateValue" } }
       },

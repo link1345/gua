@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, prepareManualGameInput, replayRecording, validateRecording } from "../src/automation";
-import { MockInspectorClient, createCoalescedAsyncRunner, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
+import { MockInspectorClient, createCoalescedAsyncRunner, formatBounds, hasCompleteBounds, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
   test("re-resolves confirmation immediately before manual game input", async () => {
@@ -15,6 +15,13 @@ describe("InspectorRecorder", () => {
     );
     expect(command).toEqual({ type: "press_game_input_action", actionId: "launch", confirmed: true });
     expect(prompts).toEqual(["launch"]);
+  });
+
+  test("represents omitted Player bounds without producing overlay coordinates", () => {
+    const projected = { y: 20, h: 40 };
+    expect(formatBounds(projected)).toBe("unknown, 20, unknown, 40");
+    expect(hasCompleteBounds(projected)).toBe(false);
+    expect(hasCompleteBounds({ x: 10, y: 20, w: 30, h: 40 })).toBe(true);
   });
   test("computes every level of the world object hierarchy", () => {
     const object = (id: string, parentId?: string): GuaWorldObject => ({ id, parentId, kind: "object", label: id,

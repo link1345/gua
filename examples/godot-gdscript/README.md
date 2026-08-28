@@ -23,6 +23,10 @@ adapter's main-thread pump is active. The adapter emits
 `game_input_action_changed`, exposes `get_game_input_action_value(id)`, injects
 raw events through `Input.parse_input_event`, and releases held values when the
 lease or session ends.
+Both methods deny Player/Public Agent transports by default. Pass
+`allow_player_agents=true` only for the Semantic and Raw capability groups that
+the game intentionally exposes to WebMCP; Debug Inspector access remains a
+separate host opt-in.
 In a Web export, the page-local WebMCP bridge advertises only those initialized
 capabilities. It creates a private game-input owner and releases all input on
 abort, timeout, bridge replacement, adapter disposal, or tool unregister.
@@ -68,6 +72,12 @@ const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 
 var ui := GuaAutoAdapterScript.new()
 ```
+
+For Player-profile exposure, controls accept `gua_agent_exposure`,
+`gua_agent_field_rules`, and `gua_agent_allowed_actions` metadata. World objects
+use the corresponding `gua_world_agent_*` keys. Rules are dictionaries such as
+`{"path": "text", "mode": "redact"}` or
+`{"path": "position.x", "mode": "quantize", "quantum": 100.0}`.
 
 ## Virtual clock integration
 

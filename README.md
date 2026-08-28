@@ -74,6 +74,10 @@ Game input is owned by the current page, waits for request-correlated host
 completion, and is released on timeout, cancellation, unregister, or engine
 shutdown. Raw tools remain absent until the host explicitly initializes their
 input pump and cleanup path.
+Player/Public Agent game input is denied separately by default: enabling a
+Debug Inspector input path does not expose it to WebMCP. Godot hosts opt in with
+the `allow_player_agents` argument and Unity hosts use the corresponding
+`AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput` map flags.
 The current Godot Web addon supports debug Web exports only; release export
 support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
 
@@ -130,9 +134,11 @@ workflows and diagrams.
 
 Gua publishes explicitly opted-in game-world objects separately from the Semantic UI Tree. Each object has a stable ID, semantic kind, 2D or 3D position, host-defined player visibility, tags, and flat primitive state. Godot objects opt in through the `gua_world_object` group plus `gua_world_*` metadata; Unity objects use `GuaWorldObject`. Gua never dumps every scene node or GameObject automatically.
 
-The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=player` in the host process to expose only player-visible, non-private objects. Clients cannot elevate that profile. World v1 is observation-only; MCP exposes `get_world_object_tree`, `find_world_objects`, and `wait_for_world_object`, while Inspector displays a separate World Object Tree panel.
+The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=player` in the host process to project both UI and World trees before any transport sees them. Player UI requires effective ancestor visibility; World objects require host-defined semantic visibility and active ancestors. `private` removes a complete subtree. Clients cannot elevate that profile. World v1 is observation-only; MCP exposes `get_world_object_tree`, `find_world_objects`, and `wait_for_world_object`, while Inspector displays a separate World Object Tree panel.
 
-Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
+`GuaAgentPolicy` can omit, redact, replace, or quantize public fields and restrict UI actions. Debug snapshots remain complete. In player mode the same projection is used by snapshots, queries, waits, diagnostics, and action authorization. Debug logs are unavailable, and screenshots are denied by default because semantic projection cannot safely redact rendered pixels; a host may explicitly opt in before starting the bridge.
+
+Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. UI controls use `gua_agent_exposure`, `gua_agent_field_rules`, and `gua_agent_allowed_actions`; World objects accept the corresponding `gua_world_agent_*` keys. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
 
 ### Deterministic virtual time
 

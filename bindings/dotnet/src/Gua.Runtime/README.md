@@ -41,3 +41,8 @@ call `TryConsumeGameInput`, inject the request on the host thread, and then call
 unscaled elapsed time. Enqueue acceptance and host completion are deliberately
 separate; local callers use `GuaGameInputSession.PollResult(requestId)` for the
 correlated completion. Lease timing never uses `GuaRuntime.Clock`.
+The optional third `EnableGameInput` argument is the Player/Public Agent
+capability ceiling and defaults to `None`. Trusted engine bridges create a
+Player session with `CreateGameInputSession(GuaObservationProfile.Player)`;
+the runtime intersects that authorization with initialized adapter capabilities
+at enqueue and again immediately before host consumption.

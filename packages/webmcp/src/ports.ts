@@ -176,8 +176,8 @@ function isProtocolNode(value: unknown): boolean {
       !isOptionalString(node.label) || !isOptionalString(node.text) || !isOptionalProtocolValue(node.value) ||
       typeof node.visible !== "boolean" || typeof node.enabled !== "boolean" ||
       !bounds || !hasOnlyProperties(bounds, boundProperties) ||
-      !isFiniteNumber(bounds.x) || !isFiniteNumber(bounds.y) ||
-      !isNonNegativeNumber(bounds.w) || !isNonNegativeNumber(bounds.h) ||
+      !isOptionalFiniteNumber(bounds.x) || !isOptionalFiniteNumber(bounds.y) ||
+      !isOptionalNonNegativeNumber(bounds.w) || !isOptionalNonNegativeNumber(bounds.h) ||
       !isProtocolState(node.state) || !Array.isArray(node.actions) ||
       !node.actions.every(action => typeof action === "string" && nodeActions.has(action)) ||
       new Set(node.actions).size !== node.actions.length) {
@@ -229,6 +229,14 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isNonNegativeNumber(value: unknown): boolean {
   return isFiniteNumber(value) && value >= 0;
+}
+
+function isOptionalFiniteNumber(value: unknown): boolean {
+  return value === undefined || isFiniteNumber(value);
+}
+
+function isOptionalNonNegativeNumber(value: unknown): boolean {
+  return value === undefined || isNonNegativeNumber(value);
 }
 
 function isOptionalProtocolValue(value: unknown): boolean {

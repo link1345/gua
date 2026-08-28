@@ -10,6 +10,7 @@ var smoke_root: Control
 var finishing := false
 var observed_wheel_buttons: Array[int] = []
 var observed_shift_locations: Array[int] = []
+var observed_pointer_button_positions: Array[Vector2] = []
 
 
 func _ready() -> void:
@@ -19,6 +20,8 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT, MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		observed_wheel_buttons.append(event.button_index)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		observed_pointer_button_positions.append(event.position)
 	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_SHIFT:
 		observed_shift_locations.append(event.location)
 
@@ -108,6 +111,7 @@ func _run() -> void:
 	for index in range(20):
 		item_list.add_item("Server %d" % index)
 	item_list.select(0)
+	item_list.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(item_list)
 
 	var tabs := TabContainer.new()
@@ -119,6 +123,7 @@ func _run() -> void:
 	audio_tab.name = "Audio"
 	tabs.add_child(audio_tab)
 	tabs.current_tab = 1
+	tabs.set_meta(&"gua_agent_allowed_actions", ["focus"])
 	screen.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.name = "scroll"
@@ -141,12 +146,31 @@ func _run() -> void:
 	}]):
 		_fail("GuaContext accepted an unknown game input action value_type.")
 		return
+	if not bare_context.has_method("get_observation_profile") or bare_context.get_observation_profile() != 0 \
+			or not bare_context.get_version_json().contains("agent_projection_v1"):
+		_fail("GuaContext did not expose the agent projection ABI required by the adapter.")
+		return
+	bare_context.begin_frame("player-request")
+	bare_context.register_node_v2({
+		"id": "player-target", "role": "button", "label": "Player target",
+		"bounds": Rect2(0, 0, 10, 10), "visible": true, "enabled": true,
+		"agent_allowed_actions": ["focus"], "agent_allowed_actions_set": true,
+	})
+	bare_context.end_frame()
+	var player_action: Dictionary = bare_context.enqueue_player_action({"action": "focus", "node_id": "player-target"})
+	var player_request: Dictionary = bare_context.consume_action_request("focus", "player-target")
+	if player_action.get("error_code", -1) != 0 or player_request.get("observation_profile", -1) != 1:
+		_fail("GuaContext did not preserve the Player profile on a browser action request: %s / %s" % [player_action, player_request])
+		return
+	bare_context.emit_action_result({
+		"request_id": player_request.get("request_id", 0), "action": "focus", "node_id": "player-target", "succeeded": true,
+	})
 	bare_context = null
 
 	var ui := GuaAutoAdapterScript.new()
 	adapter = ui
 	var missing_methods := ui._missing_context_methods(RefCounted.new())
-	if not missing_methods.has("consume_click_request"):
+	if not missing_methods.has("consume_click_request") or not missing_methods.has("get_observation_profile"):
 		_fail("Gua smoke did not detect missing consume_click_request on an incompatible context.")
 		return
 
@@ -163,13 +187,19 @@ func _run() -> void:
 	screen.add_child(door)
 
 	ui.attach(screen)
+	if ui.get_game_input_capabilities(1) != 0:
+		_fail("Gua Player game input must be denied before explicit host opt-in.")
+		return
 	if not ui.configure_game_input_actions("gameplay", [
 		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"]},
 		{"id": "throttle", "description": "Throttle", "value_type": "axis1d", "minimum": -1.0, "maximum": 1.0, "holdable": true},
 		{"id": "move", "description": "Move", "value_type": "vector2", "minimum": -1.0, "maximum": 1.0, "holdable": true},
 		{"id": "chat", "description": "Chat", "value_type": "text"},
-	]) or not ui.enable_raw_input():
+	], true) or not ui.enable_raw_input(true):
 		_fail("Gua smoke failed to initialize game input capabilities.")
+		return
+	if ui.get_game_input_capabilities(1) != 31:
+		_fail("Gua Player game input did not expose only the explicitly allowed capabilities.")
 		return
 	ui.update("title")
 	var game_input_actions: String = ui.context.get_game_input_actions_json()
@@ -223,6 +253,14 @@ func _run() -> void:
 	if not observed_wheel_buttons.has(MOUSE_BUTTON_WHEEL_RIGHT):
 		_fail("Gua raw pointer input lost a horizontal-only wheel event: %s" % observed_wheel_buttons)
 		return
+	observed_pointer_button_positions.clear()
+	ui._apply_game_input({"kind": 3, "operation": 6, "owner_id": 303, "target": "absolute:viewport_pixels", "x": 640.0, "y": 360.0})
+	ui._apply_game_input({"kind": 3, "operation": 4, "owner_id": 303, "target": "primary"})
+	await get_tree().process_frame
+	if observed_pointer_button_positions.is_empty() or observed_pointer_button_positions.back() != Vector2(640.0, 360.0):
+		_fail("Gua raw pointer button lost the synthetic pointer position: %s" % observed_pointer_button_positions)
+		return
+	ui._apply_game_input({"kind": 3, "operation": 5, "owner_id": 303, "target": "primary"})
 	ui._apply_game_input({"kind": 4, "operation": 4, "owner_id": 303, "target": "left_trigger", "device_index": 0})
 	var trigger_state: Dictionary = ui.held_gamepad_axes.get("303:0:left_trigger", {})
 	if int(trigger_state.get("axis", -1)) != JOY_AXIS_TRIGGER_LEFT or float(trigger_state.get("value", 0.0)) != 1.0:
@@ -327,6 +365,20 @@ func _run() -> void:
 		return
 	if not tree_json.contains("servers$item:0") or not tree_json.contains("tabs$tab:1"):
 		_fail("Gua smoke did not publish stable ItemList/TabContainer semantic children: %s" % tree_json)
+		return
+	var player_tree = JSON.parse_string(ui.get_player_ui_tree_json())
+	var player_list_item = _find_node(player_tree, "servers$item:1")
+	var player_tab_item = _find_node(player_tree, "tabs$tab:0")
+	if player_list_item == null or player_list_item.get("actions", []).has("select") \
+			or player_tab_item == null or player_tab_item.get("actions", []).has("select"):
+		_fail("Gua smoke did not propagate parent action policy to derived items: %s" % player_tree)
+		return
+	var rejected_player_list_select := ui.enqueue_player_action({"action": "select", "node_id": "servers$item:1"})
+	var rejected_player_tab_select := ui.enqueue_player_action({"action": "select", "node_id": "tabs$tab:0"})
+	if rejected_player_list_select.get("error_code", 0) != -5 \
+			or rejected_player_tab_select.get("error_code", 0) != -5 \
+			or not item_list.is_selected(0) or tabs.current_tab != 1:
+		_fail("Gua smoke accepted a derived Player select excluded by the parent allowlist: %s / %s" % [rejected_player_list_select, rejected_player_tab_select])
 		return
 	var locked_spin_node = _find_node(tree, "locked_count")
 	if locked_spin_node == null or locked_spin_node.get("enabled", true):

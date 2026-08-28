@@ -39,7 +39,9 @@ public:
     void enable_world_object_tree_adapter();
 
     String get_ui_tree_json() const;
+    String get_player_ui_tree_json() const;
     String get_version_json() const;
+    int get_observation_profile() const;
     void set_screenshot(const String& data_uri, int width, int height);
     String get_screenshot_json() const;
     Dictionary consume_screenshot_request();
@@ -49,6 +51,7 @@ public:
     bool emit_click(const String& node_id);
     Dictionary poll_event();
     Dictionary enqueue_action(const Dictionary& request);
+    Dictionary enqueue_player_action(const Dictionary& request);
     int cancel_action_request(uint64_t request_id);
     Dictionary consume_action_request(const String& action, const String& node_id);
     bool emit_action_result(const Dictionary& result);
@@ -67,7 +70,8 @@ public:
     void enable_virtual_clock_adapter();
     bool publish_game_input_actions(const String& input_context, const Array& actions);
     String get_game_input_actions_json() const;
-    void enable_game_input_adapter(int capabilities);
+    void enable_game_input_adapter(int capabilities, int player_capabilities = 0);
+    int get_game_input_capabilities(int observation_profile) const;
     uint64_t create_game_input_owner();
     bool release_game_input_owner(uint64_t owner_id);
     Dictionary enqueue_game_input(const Dictionary& request);

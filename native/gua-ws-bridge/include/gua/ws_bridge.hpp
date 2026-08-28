@@ -58,6 +58,7 @@ struct GameInputCommand {
     unsigned int lease_ms = 5000;
     int device_index = 0;
     bool sensitive = false;
+    bool confirmed = false;
 };
 
 struct CommandResult {

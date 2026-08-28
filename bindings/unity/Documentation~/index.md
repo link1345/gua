@@ -18,6 +18,8 @@ WebGL builds install a tab-local `__guaUnityWebPort` from
 `gua-webmcp` with `createUnityWebGlBridge()` and `registerGuaWebMcp()`. Calls
 remain in the page. Action promises resolve from request-correlated host
 completion after Unity applies the action, not when it is enqueued.
+UI reads and action enqueueing cross Player-only runtime entry points, so a
+local Debug Inspector does not make private nodes available to browser tools.
 The same bridge exposes the host-filtered World Object Tree through the
 read-only `get_world_object_tree`, `find_world_objects`, and
 `wait_for_world_object` tools. Shared browser-safe world contracts are provided
@@ -41,6 +43,9 @@ Enabling **Raw Input** creates virtual keyboard, mouse, and gamepad devices with
 Unity Input System 1.20.0. The adapter queues host-frame state events and
 neutralizes/removes the devices when it stops. Raw capabilities are omitted
 when Input System support or the opt-in map setting is unavailable.
+`AllowPlayerAgentSemanticInput` and `AllowPlayerAgentRawInput` are independent,
+default-off permissions for WebMCP/Public Agent callers. `EnableRawInput` alone
+only initializes the local Debug path and never grants browser input access.
 Physical keyboard tools accept the cross-adapter W3C code subset enumerated by
 `commands.schema.json`, including left/right modifiers and common numpad operators.
 When scenes change, the persistent runtime neutralizes the previous map and
@@ -65,3 +70,10 @@ door.SetState("locked", true);
 The adapter publishes global transform positions each frame and links the
 nearest opted-in ancestor. It does not expose ordinary GameObjects or UI objects
 automatically. Do not place secrets in labels, tags, or state.
+
+Add `GuaAgentPolicyComponent` to a uGUI or `GuaWorldObject` GameObject to mark it
+private, transform Player-visible fields, or override allowed UI actions. For UI
+Toolkit and custom adapters, call `GuaUnityAdapterRegistry.SetAgentPolicy` with
+the reflected target object. These policies affect Player profile only.
+Enable `Override Exposure` only when the component should replace the exposure
+already declared by `GuaWorldObject`; field-only policies inherit that setting.

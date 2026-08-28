@@ -38,6 +38,11 @@ interface JsonRpcError {
   data?: unknown;
 }
 
+interface McpRequestState {
+  active: Map<string, AbortController>;
+  tasks: Set<Promise<void>>;
+}
+
 interface GuaBounds {
   x: number;
   y: number;
@@ -328,23 +333,26 @@ export async function runGuaMcpServer(options: GuaMcpServerOptions = {}): Promis
 
   let pending = "";
   const decoder = new TextDecoder();
+  const requestState: McpRequestState = { active: new Map(), tasks: new Set() };
   try {
     for await (const chunk of Bun.stdin.stream()) {
       pending += decoder.decode(chunk, { stream: true });
-      pending = await drainPendingLines(pending, bridge, automation);
+      pending = await drainPendingLines(pending, bridge, automation, requestState);
     }
 
     pending += decoder.decode();
     const finalLine = pending.trim();
     if (finalLine.length > 0) {
-      await handleLine(finalLine, bridge, automation);
+      await handleLine(finalLine, bridge, automation, requestState);
     }
+    await Promise.allSettled([...requestState.tasks]);
   } finally {
     bridge.close();
   }
 }
 
-async function drainPendingLines(input: string, bridge: GuaBridgeClient, automation: GuaAutomationManager): Promise<string> {
+async function drainPendingLines(input: string, bridge: GuaBridgeClient, automation: GuaAutomationManager,
+  requestState: McpRequestState): Promise<string> {
   let pending = input;
   while (true) {
     const newlineIndex = pending.indexOf("\n");
@@ -359,11 +367,12 @@ async function drainPendingLines(input: string, bridge: GuaBridgeClient, automat
       continue;
     }
 
-    await handleLine(line, bridge, automation);
+    await handleLine(line, bridge, automation, requestState);
   }
 }
 
-async function handleLine(line: string, bridge: GuaBridgeClient, automation: GuaAutomationManager): Promise<void> {
+async function handleLine(line: string, bridge: GuaBridgeClient, automation: GuaAutomationManager,
+  requestState: McpRequestState): Promise<void> {
   let request: unknown;
   try {
     request = JSON.parse(line) as JsonRpcRequest;
@@ -386,27 +395,40 @@ async function handleLine(line: string, bridge: GuaBridgeClient, automation: Gua
   }
 
   if (request.id === undefined) {
-    await handleNotification(request);
+    await handleNotification(request, requestState.active);
     return;
   }
 
-  try {
-    writeResponse({
-      jsonrpc: "2.0",
-      id: request.id,
-      result: await handleRequest(request, bridge, automation),
-    });
-  } catch (error) {
-    writeResponse({
-      jsonrpc: "2.0",
-      id: request.id,
-      error: toJsonRpcError(error),
-    });
-  }
+  const key = jsonRpcIdKey(request.id);
+  const controller = new AbortController();
+  requestState.active.set(key, controller);
+  let task!: Promise<void>;
+  task = (async () => {
+    try {
+      writeResponse({
+        jsonrpc: "2.0",
+        id: request.id as JsonRpcId,
+        result: await handleRequest(request, bridge, automation, controller.signal),
+      });
+    } catch (error) {
+      writeResponse({
+        jsonrpc: "2.0",
+        id: request.id as JsonRpcId,
+        error: toJsonRpcError(error),
+      });
+    } finally {
+      if (requestState.active.get(key) === controller) requestState.active.delete(key);
+      requestState.tasks.delete(task);
+    }
+  })();
+  requestState.tasks.add(task);
 }
 
-async function handleNotification(request: JsonRpcRequest): Promise<void> {
+async function handleNotification(request: JsonRpcRequest, active: Map<string, AbortController>): Promise<void> {
   if (request.method === "notifications/cancelled") {
+    if (isRecord(request.params) && isJsonRpcId(request.params.requestId)) {
+      active.get(jsonRpcIdKey(request.params.requestId))?.abort(request.params.reason);
+    }
     return;
   }
 
@@ -415,7 +437,8 @@ async function handleNotification(request: JsonRpcRequest): Promise<void> {
   }
 }
 
-async function handleRequest(request: JsonRpcRequest, bridge: GuaBridgeClient, automation: GuaAutomationManager): Promise<unknown> {
+async function handleRequest(request: JsonRpcRequest, bridge: GuaBridgeClient, automation: GuaAutomationManager,
+  signal: AbortSignal): Promise<unknown> {
   switch (request.method) {
     case "initialize":
       return {
@@ -433,13 +456,14 @@ async function handleRequest(request: JsonRpcRequest, bridge: GuaBridgeClient, a
     case "tools/list":
       return { tools: guaMcpToolDefinitions };
     case "tools/call":
-      return callTool(request.params, bridge, automation);
+      return callTool(request.params, bridge, automation, signal);
     default:
       throw new RpcFailure(-32601, `Unsupported MCP method: ${request.method}`);
   }
 }
 
-async function callTool(params: unknown, bridge: GuaBridgeClient, automation: GuaAutomationManager): Promise<ToolResult> {
+async function callTool(params: unknown, bridge: GuaBridgeClient, automation: GuaAutomationManager,
+  signal: AbortSignal): Promise<ToolResult> {
   if (!isRecord(params) || typeof params.name !== "string") {
     throw new RpcFailure(-32602, "tools/call requires a tool name.");
   }
@@ -450,7 +474,7 @@ async function callTool(params: unknown, bridge: GuaBridgeClient, automation: Gu
   }
 
   try {
-    const result = await executeTool(name, isRecord(params.arguments) ? params.arguments : {}, bridge, automation);
+    const result = await executeTool(name, isRecord(params.arguments) ? params.arguments : {}, bridge, automation, signal);
     return textResult(result);
   } catch (error) {
     return textResult({ error: (error as Error).message }, true);
@@ -462,6 +486,7 @@ async function executeTool(
   args: Record<string, unknown>,
   bridge: GuaBridgeClient,
   automation: GuaAutomationManager,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   switch (name) {
     case "get_ui_tree":
@@ -603,6 +628,7 @@ async function executeTool(
         recording, bridge, secrets,
         args.timingMode === "preserve_delays" ? "preserve_delays" : "prefer_conditions",
         readIntegerArg(args, "timeoutMs", 10000),
+        signal,
       );
     }
     case "compare_screenshot":
@@ -665,6 +691,7 @@ async function performGameInput(
   automation: GuaAutomationManager | undefined,
   input: GameInputCommandInput,
   timeoutMs = 10000,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; requestId: number; completion: GameInputCompletion }> {
   if (input.type === "press_game_input_action" || input.type === "set_game_input_action") {
     const snapshot = await bridge.getGameInputActions();
@@ -674,6 +701,7 @@ async function performGameInput(
       throw new Error(`Game input action '${input.actionId}' requires confirmed=true.`);
     }
   }
+  throwIfAborted(signal);
   const receipt = await bridge.performGameInput(input);
   const completion = await bridge.waitForGameInput(receipt.requestId, timeoutMs);
   if (!completion.succeeded) throw new Error(`Gua game input ${input.type} failed with error ${completion.errorCode}.`);
@@ -713,8 +741,10 @@ async function performAndRecord(
   automation: GuaAutomationManager | undefined,
   input: SemanticActionInput,
   timeoutMs = 10000,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; requestId?: number; completion?: GuaActionEvent }> {
   const before = await bridge.getUiTree();
+  throwIfAborted(signal);
   const receipt = await bridge.performAction(input);
   const completion = receipt === null ? undefined : await bridge.waitForAction(receipt.requestId, timeoutMs);
   if (completion?.succeeded === false) {
@@ -739,12 +769,13 @@ async function performAndRecord(
   return compactResult({ ok: true as const, requestId: receipt?.requestId, completion });
 }
 
-async function replayRecording(
+export async function replayRecording(
   recording: GuaRecording,
   bridge: GuaBridgeClient,
   secrets: Record<string, unknown>,
   timingMode: "prefer_conditions" | "preserve_delays",
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; steps: Array<{ index: number; action: RecordedAction; requestId?: number }> }> {
   validateRecording(recording);
   const results: Array<{ index: number; action: RecordedAction; requestId?: number }> = [];
@@ -753,11 +784,13 @@ async function replayRecording(
   let replaySucceeded = false;
   try {
   for (const [index, step] of recording.steps.entries()) {
+    throwIfAborted(signal);
     if (timingMode === "prefer_conditions" && step.waitCondition !== undefined) {
-      await waitForCondition(bridge, step.waitCondition, timeoutMs);
+      await waitForCondition(bridge, step.waitCondition, timeoutMs, signal);
     } else if (step.relativeMilliseconds > previous) {
-      await sleep(step.relativeMilliseconds - previous);
+      await sleep(step.relativeMilliseconds - previous, signal);
     }
+    throwIfAborted(signal);
     previous = step.relativeMilliseconds;
     if (step.action === "game_input") {
       const argumentsValue = { ...(step.arguments ?? {}) } as Record<string, unknown>;
@@ -767,12 +800,14 @@ async function replayRecording(
         if (step.operation === "text_input") argumentsValue.text = secret;
         else argumentsValue.value = secret;
       }
-      const result = await performGameInput(bridge, undefined, argumentsValue as GameInputCommandInput, timeoutMs);
+      throwIfAborted(signal);
+      const result = await performGameInput(bridge, undefined, argumentsValue as GameInputCommandInput, timeoutMs, signal);
       results.push({ index, action: step.action, requestId: result.requestId });
       continue;
     }
     const nodeId = await resolveTarget(bridge, step);
     const value = step.sensitive ? readSecret(secrets, step.secretKey as string) : step.value;
+    throwIfAborted(signal);
     const result = await performAndRecord(bridge, undefined, {
       action: step.action,
       nodeId,
@@ -785,7 +820,7 @@ async function replayRecording(
       scrollUnit: step.scrollUnit,
       sensitive: step.sensitive,
       secretKey: step.secretKey,
-    }, timeoutMs);
+    }, timeoutMs, signal);
     results.push(compactResult({ index, action: step.action, requestId: result.requestId }));
   }
   replaySucceeded = true;
@@ -827,13 +862,15 @@ function isDescendantOf(node: GuaNode, scopeId: string, nodes: GuaNode[]): boole
   return false;
 }
 
-async function waitForCondition(bridge: GuaBridgeClient, condition: string, timeoutMs: number): Promise<void> {
+async function waitForCondition(bridge: GuaBridgeClient, condition: string, timeoutMs: number,
+  signal?: AbortSignal): Promise<void> {
   const parts = condition.split(":");
   if (parts.length < 2) throw new Error(`Unsupported recording wait condition: ${condition}`);
   const id = decodeURIComponent(parts[1] as string);
   const expected = parts[2] === undefined ? undefined : decodeURIComponent(parts[2]);
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
+    throwIfAborted(signal);
     const node = (await bridge.getUiTree()).nodes.find((candidate) => candidate.id === id);
     const matched = parts[0] === "visible" ? node?.visible === true
       : parts[0] === "hidden" ? node === undefined || node.visible === false
@@ -847,7 +884,7 @@ async function waitForCondition(bridge: GuaBridgeClient, condition: string, time
       : parts[0] === "value" ? String(node?.state?.value ?? "") === expected
       : false;
     if (matched) return;
-    await sleep(50);
+    await sleep(50, signal);
   }
   throw new Error(`Timed out waiting for recording condition: ${condition}`);
 }
@@ -1421,6 +1458,25 @@ class RpcFailure extends Error {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function jsonRpcIdKey(id: JsonRpcId): string { return `${typeof id}:${String(id)}`; }
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new RpcFailure(-32800, "MCP request was cancelled.");
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new RpcFailure(-32800, "MCP request was cancelled."));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, ms);
+    const aborted = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      reject(new RpcFailure(-32800, "MCP request was cancelled."));
+    };
+    function finish() {
+      signal?.removeEventListener("abort", aborted);
+      resolve();
+    }
+    signal?.addEventListener("abort", aborted, { once: true });
+  });
 }

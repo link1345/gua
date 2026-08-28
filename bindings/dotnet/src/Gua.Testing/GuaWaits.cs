@@ -210,6 +210,15 @@ public static partial class GuaAssertions
     private static GuaNodeSnapshot ReadWaitNode(JsonElement node, JsonElement root)
     {
         var bounds = node.GetProperty("bounds");
+        float? Bound(string name) => bounds.TryGetProperty(name, out var value) ? value.GetSingle() : null;
+        var boundsX = Bound("x");
+        var boundsY = Bound("y");
+        var boundsWidth = Bound("w");
+        var boundsHeight = Bound("h");
+        var knownBounds = (boundsX.HasValue ? GuaBoundsKnownState.X : GuaBoundsKnownState.None) |
+            (boundsY.HasValue ? GuaBoundsKnownState.Y : GuaBoundsKnownState.None) |
+            (boundsWidth.HasValue ? GuaBoundsKnownState.Width : GuaBoundsKnownState.None) |
+            (boundsHeight.HasValue ? GuaBoundsKnownState.Height : GuaBoundsKnownState.None);
         var actions = node.TryGetProperty("actions", out var actionValues) && actionValues.ValueKind == JsonValueKind.Array
             ? actionValues.EnumerateArray().Select(action => action.GetString() ?? string.Empty).ToArray()
             : [];
@@ -221,8 +230,8 @@ public static partial class GuaAssertions
         return new GuaNodeSnapshot(
             node.GetProperty("id").GetString() ?? string.Empty,
             node.GetProperty("role").GetString() ?? string.Empty,
-            node.GetProperty("label").GetString() ?? string.Empty,
-            new GuaBounds(bounds.GetProperty("x").GetSingle(), bounds.GetProperty("y").GetSingle(), bounds.GetProperty("w").GetSingle(), bounds.GetProperty("h").GetSingle()),
+            NodeString("label") ?? string.Empty,
+            new GuaBounds(boundsX ?? 0, boundsY ?? 0, boundsWidth ?? 0, boundsHeight ?? 0),
             node.GetProperty("visible").GetBoolean(), node.GetProperty("enabled").GetBoolean(), actions,
             NodeString("parentId"), NodeString("text"), NodeString("value"), StateBoolean("focused"), StateBoolean("hovered"),
             StateBoolean("pressed"), StateBoolean("checked"), StateBoolean("selected"),
@@ -230,7 +239,8 @@ public static partial class GuaAssertions
             RootUInt64(root, "sessionEpoch"), RootUInt64(root, "frameSequence"), RootUInt64(root, "revision"),
             StateInt64("caretPosition"), StateInt64("selectionStart"), StateInt64("selectionEnd"),
             StateDouble("scrollX"), StateDouble("scrollY"), StateDouble("scrollMaxX"), StateDouble("scrollMaxY"),
-            StateDouble("rangeValue"), StateDouble("rangeMin"), StateDouble("rangeMax"), StateInt64("selectedIndex"));
+            StateDouble("rangeValue"), StateDouble("rangeMin"), StateDouble("rangeMax"), StateInt64("selectedIndex"),
+            knownBounds, node.TryGetProperty("label", out _));
     }
 
     private static ulong? RootUInt64(JsonElement root, string name) => root.TryGetProperty(name, out var value) ? value.GetUInt64() : null;

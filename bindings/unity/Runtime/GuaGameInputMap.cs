@@ -31,6 +31,10 @@ public sealed class GuaGameInputMap : MonoBehaviour
 {
     public string Context = "gameplay";
     public bool EnableRawInput;
+    [Tooltip("Allow Player/Public Agent transports such as WebMCP to invoke registered semantic actions.")]
+    public bool AllowPlayerAgentSemanticInput;
+    [Tooltip("Allow Player/Public Agent transports such as WebMCP to inject raw keyboard, pointer, gamepad, and text input.")]
+    public bool AllowPlayerAgentRawInput;
     public List<GuaGameInputAction> Actions = new();
     internal IReadOnlyList<GuaGameInputActionDescriptor> Descriptors() => Actions.Select(action => action.Descriptor()).ToArray();
 }

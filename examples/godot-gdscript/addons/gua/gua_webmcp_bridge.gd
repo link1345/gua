@@ -286,7 +286,7 @@ func _get_tree(_arguments: Array) -> String:
 	var adapter := _adapter()
 	if adapter == null:
 		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	return adapter.get_ui_tree_json()
+	return adapter.get_player_ui_tree_json()
 
 
 func _get_world_tree(_arguments: Array) -> String:
@@ -341,7 +341,7 @@ func _enqueue_action(arguments: Array) -> String:
 		"modifiers": request.get("modifiers", 0),
 		"sensitive": request.get("sensitive", false),
 	}
-	var receipt: Dictionary = adapter.enqueue_action(native_request)
+	var receipt: Dictionary = adapter.enqueue_player_action(native_request)
 	if receipt.get("error_code", -1) != 0:
 		var error_code := int(receipt.get("error_code", -1))
 		return JSON.stringify({"code": _web_error_code(error_code), "message": "Godot rejected the Gua action.", "hostError": error_code})
@@ -366,14 +366,14 @@ func _cancel_action(arguments: Array) -> int:
 
 
 func _game_input_capabilities(adapter: RefCounted) -> Array:
-	var version = JSON.parse_string(adapter.get_version_json())
-	if not version is Dictionary:
-		return []
-	var supported := ["semantic_game_input_v1", "raw_keyboard_input_v1", "raw_pointer_input_v1", "raw_gamepad_input_v1", "text_input_v1", "game_input_lease_v1"]
+	var mask := int(adapter.get_game_input_capabilities(1))
 	var result: Array = []
-	for capability in version.get("capabilities", []):
-		if capability in supported:
-			result.push_back(capability)
+	if mask & 1: result.push_back("semantic_game_input_v1")
+	if mask & 2: result.push_back("raw_keyboard_input_v1")
+	if mask & 4: result.push_back("raw_pointer_input_v1")
+	if mask & 8: result.push_back("raw_gamepad_input_v1")
+	if mask & 16: result.push_back("text_input_v1")
+	if mask != 0: result.push_back("game_input_lease_v1")
 	return result
 
 
@@ -384,11 +384,15 @@ func _get_game_input_capabilities(_arguments: Array) -> String:
 
 func _get_game_input_actions(_arguments: Array) -> String:
 	var adapter := _adapter()
-	return adapter.get_game_input_actions_json() if adapter != null else JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
+	if adapter == null or not "semantic_game_input_v1" in _game_input_capabilities(adapter):
+		return JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input is unavailable."})
+	return adapter.get_game_input_actions_json()
 
 
 func _get_game_input_state(_arguments: Array) -> String:
 	var adapter := _adapter()
+	if adapter != null and game_input_owner_id == 0 and not _game_input_capabilities(adapter).is_empty():
+		game_input_owner_id = adapter.create_game_input_owner()
 	if adapter == null or game_input_owner_id == 0:
 		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
 	return adapter.get_game_input_state_json(game_input_owner_id)
@@ -414,6 +418,7 @@ func _enqueue_game_input(arguments: Array) -> String:
 	if native_request.is_empty():
 		return JSON.stringify({"code": "invalid_request", "message": "Unknown game input request."})
 	native_request["owner_id"] = game_input_owner_id
+	native_request["observation_profile"] = 1
 	var receipt: Dictionary = adapter.enqueue_game_input(native_request)
 	if receipt.get("error_code", -1) != 0:
 		return JSON.stringify({"code": "invalid_request", "message": "Godot rejected the game input request.", "hostError": receipt.get("error_code", -1)})
@@ -423,7 +428,8 @@ func _enqueue_game_input(arguments: Array) -> String:
 func _native_game_input_request(request: Dictionary) -> Dictionary:
 	var type := str(request.get("type", ""))
 	var base := {"lease_ms": int(request.get("leaseMs", 5000)), "device_index": int(request.get("gamepadIndex", 0)),
-		"sensitive": bool(request.get("sensitive", false)), "x": float(request.get("x", 0.0)), "y": float(request.get("y", 0.0)), "value": null}
+		"sensitive": bool(request.get("sensitive", false)), "confirmed": bool(request.get("confirmed", false)),
+		"x": float(request.get("x", 0.0)), "y": float(request.get("y", 0.0)), "value": null}
 	match type:
 		"press_game_input_action": return _merge_game_input(base, 1, 1, str(request.get("actionId", "")), true)
 		"set_game_input_action": return _merge_game_input(base, 1, 2, str(request.get("actionId", "")), request.get("value"))

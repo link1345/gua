@@ -15,15 +15,18 @@ public sealed partial class GuaUnityRuntime
 {
     private readonly struct OwnedSemanticValue
     {
-        public OwnedSemanticValue(object? value, long sequence) { Value = value; Sequence = sequence; }
+        public OwnedSemanticValue(object? value, long sequence, bool sensitive) { Value = value; Sequence = sequence; Sensitive = sensitive; }
         public object? Value { get; }
         public long Sequence { get; }
+        public bool Sensitive { get; }
     }
 
     private readonly Dictionary<string, object?> gameInputValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> gameInputValueSensitivity = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<ulong, OwnedSemanticValue>> semanticValuesByOwner = new(StringComparer.Ordinal);
     private long gameInputSequence;
     private GuaGameInputCapabilities gameInputCapabilities;
+    private GuaGameInputCapabilities playerGameInputCapabilities;
     private GuaGameInputMap? publishedGameInputMap;
     private bool hasPublishedGameInputMap;
     private bool gameInputMapRefreshPending = true;
@@ -69,8 +72,14 @@ public sealed partial class GuaUnityRuntime
                 GuaGameInputCapabilities.Gamepad | GuaGameInputCapabilities.Text;
         }
 #endif
-        runtime.EnableGameInput(capabilities, DisposeGameInput);
+        var playerCapabilities = map.AllowPlayerAgentSemanticInput
+            ? GuaGameInputCapabilities.Semantic : GuaGameInputCapabilities.None;
+        if (map.AllowPlayerAgentRawInput)
+            playerCapabilities |= capabilities & (GuaGameInputCapabilities.Keyboard | GuaGameInputCapabilities.Pointer |
+                GuaGameInputCapabilities.Gamepad | GuaGameInputCapabilities.Text);
+        runtime.EnableGameInput(capabilities, DisposeGameInput, playerCapabilities);
         gameInputCapabilities = capabilities;
+        playerGameInputCapabilities = playerCapabilities;
         publishedGameInputMap = map;
         hasPublishedGameInputMap = true;
         gameInputMapRefreshPending = false;
@@ -121,7 +130,7 @@ public sealed partial class GuaUnityRuntime
         {
             if (request.Operation == GuaGameInputOperation.Press)
             {
-                PulseSemantic(request.Target, true);
+                PulseSemantic(request.Target, true, request.Sensitive);
                 return true;
             }
             if (request.Operation == GuaGameInputOperation.Release)
@@ -142,8 +151,8 @@ public sealed partial class GuaUnityRuntime
                     new Vector2(x.GetSingle(), y.GetSingle()),
                 _ => null,
             };
-            if (value is string) PulseSemantic(request.Target, value);
-            else SetSemantic(request.OwnerId, request.Target, value);
+            if (value is string) PulseSemantic(request.Target, value, request.Sensitive);
+            else SetSemantic(request.OwnerId, request.Target, value, request.Sensitive);
             return value != null;
         }
 #if ENABLE_INPUT_SYSTEM
@@ -232,9 +241,10 @@ public sealed partial class GuaUnityRuntime
 
     private static object? NeutralSemantic(object? value) => value is Vector2 ? Vector2.zero : value is double or float ? 0d : value is string ? "" : false;
 
-    private void PublishSemantic(string actionId, object? value)
+    private void PublishSemantic(string actionId, object? value, bool sensitive = false)
     {
         gameInputValues[actionId] = value;
+        gameInputValueSensitivity[actionId] = sensitive;
         var subscribers = GameInputChanged;
         if (subscribers == null) return;
         foreach (var subscriber in subscribers.GetInvocationList())
@@ -242,24 +252,27 @@ public sealed partial class GuaUnityRuntime
             try { ((Action<string, object?>)subscriber)(actionId, value); }
             catch (Exception error)
             {
-                Debug.LogError($"Gua GameInputChanged subscriber failed for '{actionId}': {error.Message}");
+                Debug.LogError(sensitive
+                    ? $"Gua GameInputChanged subscriber failed for sensitive action '{actionId}'; details were [REDACTED]."
+                    : $"Gua GameInputChanged subscriber failed for '{actionId}': {error.Message}");
             }
         }
     }
 
-    private void PulseSemantic(string actionId, object? value)
+    private void PulseSemantic(string actionId, object? value, bool sensitive)
     {
         gameInputValues.TryGetValue(actionId, out var previous);
-        PublishSemantic(actionId, value);
-        PublishSemantic(actionId, previous ?? NeutralSemantic(value));
+        var previousSensitive = gameInputValueSensitivity.TryGetValue(actionId, out var wasSensitive) && wasSensitive;
+        PublishSemantic(actionId, value, sensitive);
+        PublishSemantic(actionId, previous ?? NeutralSemantic(value), previous != null && previousSensitive);
     }
 
-    private void SetSemantic(ulong ownerId, string actionId, object? value)
+    private void SetSemantic(ulong ownerId, string actionId, object? value, bool sensitive)
     {
         if (!semanticValuesByOwner.TryGetValue(actionId, out var owners))
             semanticValuesByOwner[actionId] = owners = new();
-        owners[ownerId] = new OwnedSemanticValue(value, ++gameInputSequence);
-        PublishSemantic(actionId, value);
+        owners[ownerId] = new OwnedSemanticValue(value, ++gameInputSequence, sensitive);
+        PublishSemantic(actionId, value, sensitive);
     }
 
     private void ReleaseSemantic(ulong ownerId, string actionId)
@@ -267,20 +280,23 @@ public sealed partial class GuaUnityRuntime
         if (!semanticValuesByOwner.TryGetValue(actionId, out var owners)) return;
         owners.Remove(ownerId);
         object? value = null;
+        var sensitive = false;
         long sequence = long.MinValue;
         foreach (var owned in owners.Values)
-            if (owned.Sequence > sequence) { value = owned.Value; sequence = owned.Sequence; }
+            if (owned.Sequence > sequence) { value = owned.Value; sensitive = owned.Sensitive; sequence = owned.Sequence; }
         if (owners.Count == 0) semanticValuesByOwner.Remove(actionId);
         PublishSemantic(actionId, sequence == long.MinValue
             ? NeutralSemantic(gameInputValues.TryGetValue(actionId, out var current) ? current : null)
-            : value);
+            : value, sequence != long.MinValue && sensitive);
     }
 
     private void DisposeGameInput()
     {
         gameInputCapabilities = GuaGameInputCapabilities.None;
+        playerGameInputCapabilities = GuaGameInputCapabilities.None;
         ReleaseAllInjectedInput();
         gameInputValues.Clear();
+        gameInputValueSensitivity.Clear();
 #if ENABLE_INPUT_SYSTEM
         if (virtualKeyboard != null) InputSystem.RemoveDevice(virtualKeyboard);
         if (virtualMouse != null) InputSystem.RemoveDevice(virtualMouse);

@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Gua.Core;
 
 namespace Gua.Runtime;
 
@@ -34,13 +35,18 @@ public sealed record GuaGameInputResult(
 public sealed class GuaGameInputSession : IDisposable
 {
     private GuaRuntime? runtime;
-    internal GuaGameInputSession(GuaRuntime runtime, ulong ownerId) { this.runtime = runtime; OwnerId = ownerId; }
+    internal GuaGameInputSession(GuaRuntime runtime, ulong ownerId, GuaObservationProfile profile)
+    { this.runtime = runtime; OwnerId = ownerId; ObservationProfile = profile; }
     public ulong OwnerId { get; }
+    public GuaObservationProfile ObservationProfile { get; }
     public ulong Send(GuaGameInputKind kind, GuaGameInputOperation operation, string target,
-        object? value = null, TimeSpan? lease = null, double x = 0, double y = 0, int deviceIndex = 0, bool sensitive = false)
+        object? value = null, TimeSpan? lease = null, double x = 0, double y = 0, int deviceIndex = 0,
+        bool sensitive = false) => Send(kind, operation, target, value, lease, x, y, deviceIndex, sensitive, false);
+    public ulong Send(GuaGameInputKind kind, GuaGameInputOperation operation, string target,
+        object? value, TimeSpan? lease, double x, double y, int deviceIndex, bool sensitive, bool confirmed)
     {
         var owner = runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession));
-        return owner.EnqueueGameInput(OwnerId, kind, operation, target, value, lease, x, y, deviceIndex, sensitive);
+        return owner.EnqueueGameInput(OwnerId, ObservationProfile, kind, operation, target, value, lease, x, y, deviceIndex, sensitive, confirmed);
     }
     public string GetStateJson() => (runtime ?? throw new ObjectDisposedException(nameof(GuaGameInputSession))).GetGameInputStateJson(OwnerId);
     public GuaGameInputResult PollResult(ulong requestId) =>
@@ -53,12 +59,14 @@ public sealed partial class GuaRuntime
     private unsafe delegate int CopyGameInputJsonDelegate(byte* output, int size);
     private Action? gameInputShutdown;
 
-    public void EnableGameInput(GuaGameInputCapabilities capabilities, Action shutdown)
+    public void EnableGameInput(GuaGameInputCapabilities capabilities, Action shutdown,
+        GuaGameInputCapabilities playerCapabilities = GuaGameInputCapabilities.None)
     {
         ThrowIfDisposed();
         if (shutdown is null) throw new ArgumentNullException(nameof(shutdown));
         gameInputShutdown = shutdown;
         Native.gua_runtime_set_game_input_capabilities(_handle, (uint)capabilities);
+        Native.gua_runtime_set_player_game_input_capabilities(_handle, (uint)playerCapabilities);
     }
 
     internal void ShutdownGameInputHost()
@@ -106,12 +114,22 @@ public sealed partial class GuaRuntime
         }
     }
 
-    public GuaGameInputSession CreateGameInputSession()
+    public GuaGameInputSession CreateGameInputSession() => CreateGameInputSession(ObservationProfile);
+
+    public GuaGameInputSession CreateGameInputSession(GuaObservationProfile observationProfile)
     {
         ThrowIfDisposed();
+        if (observationProfile is not GuaObservationProfile.Debug and not GuaObservationProfile.Player)
+            throw new ArgumentOutOfRangeException(nameof(observationProfile));
         var ownerId = Native.gua_runtime_create_game_input_owner(_handle);
         if (ownerId == 0) throw new InvalidOperationException("Failed to create a game input session.");
-        return new(this, ownerId);
+        return new(this, ownerId, observationProfile);
+    }
+
+    public GuaGameInputCapabilities GetGameInputCapabilities(GuaObservationProfile observationProfile)
+    {
+        ThrowIfDisposed();
+        return (GuaGameInputCapabilities)Native.gua_runtime_get_game_input_capabilities(_handle, (int)observationProfile);
     }
 
     internal void ReleaseGameInputOwner(ulong ownerId)
@@ -119,8 +137,9 @@ public sealed partial class GuaRuntime
         if (_handle != 0) Native.gua_runtime_release_game_input_owner(_handle, ownerId);
     }
 
-    internal ulong EnqueueGameInput(ulong ownerId, GuaGameInputKind kind, GuaGameInputOperation operation,
-        string target, object? value, TimeSpan? lease, double x, double y, int deviceIndex, bool sensitive)
+    internal ulong EnqueueGameInput(ulong ownerId, GuaObservationProfile observationProfile,
+        GuaGameInputKind kind, GuaGameInputOperation operation,
+        string target, object? value, TimeSpan? lease, double x, double y, int deviceIndex, bool sensitive, bool confirmed)
     {
         ThrowIfDisposed();
         var leaseMs = lease is null ? 5000 : checked((uint)lease.Value.TotalMilliseconds);
@@ -132,13 +151,15 @@ public sealed partial class GuaRuntime
         var valuePointer = Marshal.StringToCoTaskMemUTF8(json);
         try
         {
-            var request = new Native.GameInputRequestDescriptor
+            var request = new Native.GameInputRequestDescriptorV2
             {
-                StructSize = (uint)Marshal.SizeOf<Native.GameInputRequestDescriptor>(), OwnerId = ownerId,
+                StructSize = (uint)Marshal.SizeOf<Native.GameInputRequestDescriptorV2>(), OwnerId = ownerId,
                 Kind = (int)kind, Operation = (int)operation, Target = targetPointer, ValueJson = valuePointer,
                 X = x, Y = y, LeaseMs = leaseMs, DeviceIndex = deviceIndex, Sensitive = sensitive ? 1 : 0,
+                Confirmed = confirmed ? 1 : 0,
             };
-            var result = Native.gua_runtime_enqueue_game_input(_handle, in request, out var requestId);
+            var result = Native.gua_runtime_enqueue_game_input_for_profile_v2(_handle, in request,
+                (int)observationProfile, out var requestId);
             if (result != 1) throw new InvalidOperationException($"Game input request was rejected ({result}).");
             return requestId;
         }

@@ -52,6 +52,65 @@ int action_type(const godot::String& name)
     return 0;
 }
 
+int field_mode(const godot::String& name)
+{
+    if (name == "keep") return GUA_AGENT_FIELD_KEEP;
+    if (name == "omit") return GUA_AGENT_FIELD_OMIT;
+    if (name == "redact") return GUA_AGENT_FIELD_REDACT;
+    if (name == "replace") return GUA_AGENT_FIELD_REPLACE;
+    if (name == "quantize") return GUA_AGENT_FIELD_QUANTIZE;
+    return -1;
+}
+
+struct AgentPolicyStorage {
+    std::vector<godot::CharString> paths, strings;
+    std::vector<gua_agent_field_rule_v1_t> rules;
+    gua_agent_policy_v1_t policy { sizeof(gua_agent_policy_v1_t) };
+};
+
+bool agent_policy(const godot::Dictionary& source, AgentPolicyStorage& storage)
+{
+    const godot::String exposure = source.get("agent_exposure", godot::String("auto"));
+    if (exposure != "auto" && exposure != "private") return false;
+    storage.policy.exposure = exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO;
+    const godot::Array rules = source.get("agent_field_rules", godot::Array());
+    storage.paths.reserve(rules.size()); storage.strings.reserve(rules.size()); storage.rules.reserve(rules.size());
+    for (int index = 0; index < rules.size(); ++index) {
+        if (static_cast<godot::Variant>(rules[index]).get_type() != godot::Variant::DICTIONARY) return false;
+        const godot::Dictionary rule = rules[index];
+        const godot::String path = rule.get("path", godot::String()), mode_name = rule.get("mode", godot::String("keep"));
+        const int mode = field_mode(mode_name);
+        if (path.is_empty() || mode < 0) return false;
+        const godot::Variant replacement = rule.get("replacement", godot::Variant());
+        int replacement_type = GUA_WORLD_VALUE_NULL;
+        if (replacement.get_type() == godot::Variant::STRING) replacement_type = GUA_WORLD_VALUE_STRING;
+        else if (replacement.get_type() == godot::Variant::INT || replacement.get_type() == godot::Variant::FLOAT) replacement_type = GUA_WORLD_VALUE_NUMBER;
+        else if (replacement.get_type() == godot::Variant::BOOL) replacement_type = GUA_WORLD_VALUE_BOOLEAN;
+        else if (replacement.get_type() != godot::Variant::NIL) return false;
+        storage.paths.push_back(path.utf8());
+        storage.strings.push_back(replacement_type == GUA_WORLD_VALUE_STRING ? godot::String(replacement).utf8() : godot::CharString());
+        storage.rules.push_back(gua_agent_field_rule_v1_t { sizeof(gua_agent_field_rule_v1_t), nullptr, mode, replacement_type, nullptr,
+            replacement_type == GUA_WORLD_VALUE_NUMBER ? static_cast<double>(replacement) : 0.0,
+            replacement_type == GUA_WORLD_VALUE_BOOLEAN && static_cast<bool>(replacement) ? 1 : 0,
+            static_cast<double>(rule.get("quantum", 0.0)) });
+    }
+    for (std::size_t index = 0; index < storage.rules.size(); ++index) {
+        storage.rules[index].path = storage.paths[index].get_data();
+        if (storage.rules[index].mode == GUA_AGENT_FIELD_REPLACE && storage.rules[index].replacement_type == GUA_WORLD_VALUE_STRING)
+            storage.rules[index].string_value = storage.strings[index].get_data();
+    }
+    const godot::Array actions = source.get("agent_allowed_actions", godot::Array());
+    storage.policy.has_allowed_actions = source.get("agent_allowed_actions_set", false) ? 1 : 0;
+    for (int index = 0; index < actions.size(); ++index) {
+        const int action = action_type(godot::String(actions[index]));
+        if (action == 0) return false;
+        storage.policy.allowed_actions |= 1ULL << static_cast<unsigned int>(action);
+    }
+    storage.policy.field_rules = storage.rules.data();
+    storage.policy.field_rule_count = static_cast<uint32_t>(storage.rules.size());
+    return true;
+}
+
 const char* action_name(int action)
 {
     switch (action) {
@@ -274,7 +333,10 @@ bool GuaContext::register_node_v2(const Dictionary& source)
         source.get("scroll_x", 0.0), source.get("scroll_y", 0.0), source.get("scroll_max_x", 0.0), source.get("scroll_max_y", 0.0),
         source.get("range_value", 0.0), source.get("range_min", 0.0), source.get("range_max", 0.0), source.get("selected_index", -1)
     };
-    return gua_runtime_register_node_v3(runtime_, &detailed) != 0;
+    AgentPolicyStorage policy;
+    if (!agent_policy(source, policy)) return false;
+    const gua_node_descriptor_v4_t secured { sizeof(gua_node_descriptor_v4_t), detailed, policy.policy };
+    return gua_runtime_register_node_v4(runtime_, &secured) != 0;
 }
 
 bool GuaContext::begin_world_frame(const String& scene)
@@ -326,7 +388,12 @@ bool GuaContext::register_world_object(const Dictionary& source)
         exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO,
         domain.is_empty() ? nullptr : domain8.get_data(), related.is_empty() ? nullptr : related8.get_data(),
         tag_pointers.data(), static_cast<uint32_t>(tag_pointers.size()), state_values.data(), static_cast<uint32_t>(state_values.size()) };
-    return gua_runtime_register_world_object_v1(runtime_, &descriptor) != 0;
+    AgentPolicyStorage policy;
+    Dictionary policy_source = source;
+    policy_source["agent_allowed_actions_set"] = source.has("agent_allowed_actions");
+    if (!agent_policy(policy_source, policy)) return reject();
+    const gua_world_object_descriptor_v2_t secured { sizeof(gua_world_object_descriptor_v2_t), descriptor, policy.policy };
+    return gua_runtime_register_world_object_v2(runtime_, &secured) != 0;
 }
 
 bool GuaContext::end_world_frame() { return gua_runtime_end_world_frame(runtime_) != 0; }
@@ -383,11 +450,21 @@ String GuaContext::get_ui_tree_json() const
     return copy_runtime_json(runtime_, gua_runtime_copy_ui_tree_json);
 }
 
+String GuaContext::get_player_ui_tree_json() const
+{
+    return copy_runtime_json(runtime_, gua_runtime_copy_player_ui_tree_json);
+}
+
 String GuaContext::get_version_json() const
 {
     char json[2048] {};
     gua_runtime_copy_version_json(runtime_, json, static_cast<int>(sizeof(json)));
     return String::utf8(json);
+}
+
+int GuaContext::get_observation_profile() const
+{
+    return gua_runtime_get_observation_profile(runtime_);
 }
 
 bool GuaContext::enqueue_click(const String& node_id)
@@ -445,6 +522,30 @@ Dictionary GuaContext::enqueue_action(const Dictionary& source)
     return result;
 }
 
+Dictionary GuaContext::enqueue_player_action(const Dictionary& source)
+{
+    const String action = source.get("action", String());
+    const String node_id = source.get("node_id", String());
+    const String value = source.get("value", String());
+    const String key = source.get("key", String());
+    const CharString node_utf8 = node_id.utf8();
+    const CharString value_utf8 = value.utf8();
+    const CharString key_utf8 = key.utf8();
+    const gua_action_request_descriptor_t request {
+        sizeof(gua_action_request_descriptor_t), action_type(action), node_id.is_empty() ? nullptr : node_utf8.get_data(),
+        value.is_empty() ? nullptr : value_utf8.get_data(), source.get("delta_x", 0.0), source.get("delta_y", 0.0),
+        source.get("bool_value", false) ? 1 : 0, key.is_empty() ? nullptr : key_utf8.get_data(),
+        static_cast<uint32_t>(static_cast<int64_t>(source.get("modifiers", 0))), source.get("sensitive", false) ? 1 : 0,
+        source.get("scroll_unit", 0)
+    };
+    uint64_t request_id = 0;
+    const int code = gua_runtime_enqueue_player_action(runtime_, &request, &request_id);
+    Dictionary result;
+    result["error_code"] = code == GUA_ACTION_ACCEPTED ? 0 : code;
+    result["request_id"] = request_id;
+    return result;
+}
+
 int GuaContext::cancel_action_request(uint64_t request_id)
 {
     if (request_id == 0) return GUA_ACTION_CANCEL_NOT_FOUND;
@@ -458,6 +559,7 @@ Dictionary GuaContext::consume_action_request(const String& action, const String
     if (gua_runtime_consume_action_request(runtime_, action_type(action), node_utf8.get_data(), &request) == 0) return Dictionary();
     Dictionary result;
     result["request_id"] = request.request_id;
+    result["observation_profile"] = gua_runtime_get_action_request_observation_profile(runtime_, request.request_id);
     result["action"] = action_name(request.action);
     result["node_id"] = String::utf8(request.node_id);
     result["value"] = String::utf8(request.value);
@@ -609,9 +711,15 @@ String GuaContext::get_game_input_actions_json() const
     return copy_runtime_json(runtime_, gua_runtime_copy_game_input_actions_json);
 }
 
-void GuaContext::enable_game_input_adapter(int capabilities)
+void GuaContext::enable_game_input_adapter(int capabilities, int player_capabilities)
 {
     gua_runtime_set_game_input_capabilities(runtime_, static_cast<uint32_t>(capabilities));
+    gua_runtime_set_player_game_input_capabilities(runtime_, static_cast<uint32_t>(player_capabilities));
+}
+
+int GuaContext::get_game_input_capabilities(int observation_profile) const
+{
+    return static_cast<int>(gua_runtime_get_game_input_capabilities(runtime_, observation_profile));
 }
 
 uint64_t GuaContext::create_game_input_owner()
@@ -629,16 +737,18 @@ Dictionary GuaContext::enqueue_game_input(const Dictionary& source)
     const String target = source.get("target", String());
     const String value_json = JSON::stringify(source.get("value", Variant()));
     const CharString target_utf8 = target.utf8(), value_utf8 = value_json.utf8();
-    const gua_game_input_request_descriptor_v1_t descriptor {
-        sizeof(gua_game_input_request_descriptor_v1_t),
+    const gua_game_input_request_descriptor_v2_t descriptor {
+        sizeof(gua_game_input_request_descriptor_v2_t),
         static_cast<uint64_t>(static_cast<int64_t>(source.get("owner_id", 0))),
         source.get("kind", 0), source.get("operation", 0), target_utf8.get_data(), value_utf8.get_data(),
         source.get("x", 0.0), source.get("y", 0.0),
         static_cast<uint32_t>(static_cast<int64_t>(source.get("lease_ms", 5000))),
-        source.get("device_index", 0), static_cast<bool>(source.get("sensitive", false)) ? 1 : 0
+        source.get("device_index", 0), static_cast<bool>(source.get("sensitive", false)) ? 1 : 0,
+        static_cast<bool>(source.get("confirmed", false)) ? 1 : 0
     };
     uint64_t request_id = 0;
-    const int code = gua_runtime_enqueue_game_input(runtime_, &descriptor, &request_id);
+    const int observation_profile = source.get("observation_profile", gua_runtime_get_observation_profile(runtime_));
+    const int code = gua_runtime_enqueue_game_input_for_profile_v2(runtime_, &descriptor, observation_profile, &request_id);
     Dictionary result;
     result["error_code"] = code == GUA_GAME_INPUT_OK ? 0 : code;
     result["request_id"] = request_id;
@@ -795,7 +905,9 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("query_player_world_objects_json", "selector"), &GuaContext::query_player_world_objects_json);
     ClassDB::bind_method(D_METHOD("enable_world_object_tree_adapter"), &GuaContext::enable_world_object_tree_adapter);
     ClassDB::bind_method(D_METHOD("get_ui_tree_json"), &GuaContext::get_ui_tree_json);
+    ClassDB::bind_method(D_METHOD("get_player_ui_tree_json"), &GuaContext::get_player_ui_tree_json);
     ClassDB::bind_method(D_METHOD("get_version_json"), &GuaContext::get_version_json);
+    ClassDB::bind_method(D_METHOD("get_observation_profile"), &GuaContext::get_observation_profile);
     ClassDB::bind_method(D_METHOD("set_screenshot", "data_uri", "width", "height"), &GuaContext::set_screenshot);
     ClassDB::bind_method(D_METHOD("get_screenshot_json"), &GuaContext::get_screenshot_json);
     ClassDB::bind_method(D_METHOD("consume_screenshot_request"), &GuaContext::consume_screenshot_request);
@@ -805,6 +917,7 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("emit_click", "node_id"), &GuaContext::emit_click);
     ClassDB::bind_method(D_METHOD("poll_event"), &GuaContext::poll_event);
     ClassDB::bind_method(D_METHOD("enqueue_action", "request"), &GuaContext::enqueue_action);
+    ClassDB::bind_method(D_METHOD("enqueue_player_action", "request"), &GuaContext::enqueue_player_action);
     ClassDB::bind_method(D_METHOD("cancel_action_request", "request_id"), &GuaContext::cancel_action_request);
     ClassDB::bind_method(D_METHOD("consume_action_request", "action", "node_id"), &GuaContext::consume_action_request);
     ClassDB::bind_method(D_METHOD("emit_action_result", "result"), &GuaContext::emit_action_result);
@@ -823,7 +936,10 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("enable_virtual_clock_adapter"), &GuaContext::enable_virtual_clock_adapter);
     ClassDB::bind_method(D_METHOD("publish_game_input_actions", "input_context", "actions"), &GuaContext::publish_game_input_actions);
     ClassDB::bind_method(D_METHOD("get_game_input_actions_json"), &GuaContext::get_game_input_actions_json);
-    ClassDB::bind_method(D_METHOD("enable_game_input_adapter", "capabilities"), &GuaContext::enable_game_input_adapter);
+    ClassDB::bind_method(D_METHOD("enable_game_input_adapter", "capabilities", "player_capabilities"),
+        &GuaContext::enable_game_input_adapter, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("get_game_input_capabilities", "observation_profile"),
+        &GuaContext::get_game_input_capabilities);
     ClassDB::bind_method(D_METHOD("create_game_input_owner"), &GuaContext::create_game_input_owner);
     ClassDB::bind_method(D_METHOD("release_game_input_owner", "owner_id"), &GuaContext::release_game_input_owner);
     ClassDB::bind_method(D_METHOD("enqueue_game_input", "request"), &GuaContext::enqueue_game_input);

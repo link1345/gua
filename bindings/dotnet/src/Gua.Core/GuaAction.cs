@@ -40,7 +40,8 @@ public readonly record struct GuaActionRequest(
     uint Modifiers = 0,
     bool Sensitive = false,
     int ScrollUnit = 0,
-    ulong RequestId = 0);
+    ulong RequestId = 0,
+    GuaObservationProfile ObservationProfile = GuaObservationProfile.Debug);
 
 public readonly record struct GuaActionEvent(
     ulong RequestId,

@@ -18,7 +18,9 @@ const REQUIRED_CONTEXT_METHODS := [
 	"register_node_v2",
 	"end_frame",
 	"get_ui_tree_json",
+	"get_player_ui_tree_json",
 	"get_version_json",
+	"get_observation_profile",
 	"set_screenshot",
 	"get_screenshot_json",
 	"consume_screenshot_request",
@@ -28,6 +30,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"emit_click",
 	"poll_event",
 	"enqueue_action",
+	"enqueue_player_action",
 	"cancel_action_request",
 	"consume_action_request",
 	"emit_action_result",
@@ -47,6 +50,7 @@ const REQUIRED_CONTEXT_METHODS := [
 	"publish_game_input_actions",
 	"get_game_input_actions_json",
 	"enable_game_input_adapter",
+	"get_game_input_capabilities",
 	"create_game_input_owner",
 	"release_game_input_owner",
 	"enqueue_game_input",
@@ -94,10 +98,14 @@ var game_input_values: Dictionary = {}
 var semantic_values_by_owner: Dictionary = {}
 var held_physical_keys: Dictionary = {}
 var held_pointer_buttons: Dictionary = {}
+var synthetic_pointer_position := Vector2.ZERO
 var held_gamepad_buttons: Dictionary = {}
 var held_gamepad_axes: Dictionary = {}
 var game_input_sequence := 0
 var raw_input_enabled := false
+var semantic_input_enabled := false
+var player_semantic_input_allowed := false
+var player_raw_input_allowed := false
 var last_game_input_ticks_ms := Time.get_ticks_msec()
 var disposed := false
 
@@ -215,21 +223,35 @@ func update(screen: String) -> void:
 	_schedule_screenshot_capture()
 
 
-func configure_game_input_actions(input_context: String, actions: Array[Dictionary]) -> bool:
+func configure_game_input_actions(input_context: String, actions: Array[Dictionary], allow_player_agents := false) -> bool:
 	if not _ensure_context():
 		return false
 	var published := bool(context.publish_game_input_actions(input_context, actions))
 	if published:
-		context.enable_game_input_adapter(1 | (30 if raw_input_enabled else 0))
+		semantic_input_enabled = true
+		player_semantic_input_allowed = allow_player_agents
+		_update_game_input_capabilities()
 	return published
 
 
-func enable_raw_input() -> bool:
+func enable_raw_input(allow_player_agents := false) -> bool:
 	if not _ensure_context():
 		return false
 	raw_input_enabled = true
-	context.enable_game_input_adapter(31)
+	player_raw_input_allowed = allow_player_agents
+	_update_game_input_capabilities()
 	return true
+
+
+func _update_game_input_capabilities() -> void:
+	var capabilities := (1 if semantic_input_enabled else 0) | (30 if raw_input_enabled else 0)
+	var player_capabilities := (1 if semantic_input_enabled and player_semantic_input_allowed else 0) | \
+		(30 if raw_input_enabled and player_raw_input_allowed else 0)
+	context.enable_game_input_adapter(capabilities, player_capabilities)
+
+
+func get_game_input_capabilities(observation_profile := 0) -> int:
+	return int(context.get_game_input_capabilities(observation_profile)) if _ensure_context() else 0
 
 
 func get_game_input_action_value(action_id: String, fallback: Variant = null) -> Variant:
@@ -286,7 +308,10 @@ func _publish_world_frame(scene: String, report_errors: bool = true) -> void:
 			"position": position,
 			"visible_to_player": visible_to_player,
 			"active": active,
-			"agent_exposure": str(node.get_meta(&"gua_world_agent_exposure", "auto")),
+			"agent_exposure": str(node.get_meta(&"gua_agent_exposure", node.get_meta(&"gua_world_agent_exposure", "auto"))),
+			"agent_field_rules": node.get_meta(&"gua_agent_field_rules", node.get_meta(&"gua_world_agent_field_rules", [])),
+			"agent_allowed_actions": node.get_meta(&"gua_agent_allowed_actions", node.get_meta(&"gua_world_agent_allowed_actions", [])),
+			"agent_allowed_actions_set": node.has_meta(&"gua_agent_allowed_actions") or node.has_meta(&"gua_world_agent_allowed_actions"),
 			"tags": node.get_meta(&"gua_world_tags", []),
 			"state": node.get_meta(&"gua_world_state", {}),
 			"domain_id": str(node.get_meta(&"gua_world_domain_id", "")),
@@ -445,6 +470,13 @@ func get_game_input_result_json(owner_id: int, request_id: int) -> String:
 	return context.get_game_input_result_json(owner_id, request_id) if _ensure_context() else "{}"
 
 
+func get_player_ui_tree_json() -> String:
+	if not _ensure_context():
+		return ""
+
+	return context.get_player_ui_tree_json()
+
+
 func get_world_object_tree_json() -> String:
 	if not _ensure_context():
 		return ""
@@ -487,6 +519,12 @@ func enqueue_action(request: Dictionary) -> Dictionary:
 	if not _ensure_context():
 		return {"error_code": -1, "request_id": 0}
 	return context.enqueue_action(request)
+
+
+func enqueue_player_action(request: Dictionary) -> Dictionary:
+	if not _ensure_context():
+		return {"error_code": -1, "request_id": 0}
+	return context.enqueue_player_action(request)
 
 
 func cancel_action_request(request_id: int) -> int:
@@ -697,6 +735,14 @@ func _ensure_context() -> bool:
 		)
 		return false
 
+	var version: Variant = JSON.parse_string(context.get_version_json())
+	if not version is Dictionary or not (version as Dictionary).get("capabilities", []).has("agent_projection_v1"):
+		_mark_unavailable(
+			"%s does not advertise agent_projection_v1. The vendored gua_godot Windows debug DLL is stale. Rebuild it with: %s"
+			% [CONTEXT_CLASS, REBUILD_COMMAND]
+		)
+		return false
+
 	context.enable_virtual_clock_adapter()
 	context.enable_world_object_tree_adapter()
 
@@ -729,6 +775,10 @@ func _collect_control(control: Control, parent_id: String) -> void:
 		"visible": control.is_visible_in_tree(),
 		"enabled": _control_enabled(control),
 		"focused": _control_focused(control),
+		"agent_exposure": str(control.get_meta(&"gua_agent_exposure", "auto")),
+		"agent_field_rules": control.get_meta(&"gua_agent_field_rules", []),
+		"agent_allowed_actions": control.get_meta(&"gua_agent_allowed_actions", []),
+		"agent_allowed_actions_set": control.has_meta(&"gua_agent_allowed_actions"),
 	}
 	if not parent_id.is_empty():
 		descriptor["parent_id"] = parent_id
@@ -800,6 +850,10 @@ func _collect_item_list_items(item_list: ItemList, parent_id: String) -> void:
 			"visible": item_list.is_visible_in_tree(),
 			"enabled": not item_list.is_item_disabled(index),
 			"selected": item_list.is_selected(index),
+			"agent_exposure": str(item_list.get_meta(&"gua_agent_exposure", "auto")),
+			"agent_field_rules": item_list.get_meta(&"gua_agent_field_rules", []),
+			"agent_allowed_actions": item_list.get_meta(&"gua_agent_allowed_actions", []),
+			"agent_allowed_actions_set": item_list.has_meta(&"gua_agent_allowed_actions"),
 		})
 
 
@@ -818,6 +872,10 @@ func _collect_tab_items(tab_container: TabContainer, parent_id: String) -> void:
 			"visible": tab_container.is_visible_in_tree(),
 			"enabled": not tab_container.is_tab_disabled(index),
 			"selected": tab_container.current_tab == index,
+			"agent_exposure": str(tab_container.get_meta(&"gua_agent_exposure", "auto")),
+			"agent_field_rules": tab_container.get_meta(&"gua_agent_field_rules", []),
+			"agent_allowed_actions": tab_container.get_meta(&"gua_agent_allowed_actions", []),
+			"agent_allowed_actions_set": tab_container.has_meta(&"gua_agent_allowed_actions"),
 		})
 
 
@@ -828,7 +886,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0)
+			var error_code := -2 if not _agent_action_allowed(button, "click", request) else (-3 if not button.is_visible_in_tree() else (-4 if button.disabled else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -848,7 +906,7 @@ func _dispatch_click_requests() -> void:
 			var request: Dictionary = context.consume_action_request("click", id)
 			if request.is_empty():
 				break
-			var error_code := -3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0)
+			var error_code := -2 if not _agent_action_allowed(tab_container, "click", request) else (-3 if not tab_container.is_visible_in_tree() else (-4 if tab_container.is_tab_disabled(index) else 0))
 			if error_code != 0:
 				_emit_click_result(request, id, error_code)
 				continue
@@ -901,7 +959,26 @@ func _dispatch_action_requests() -> void:
 		})
 
 
+func _agent_action_allowed(target: Node, action: String, request: Dictionary = {}) -> bool:
+	if int(request.get("observation_profile", context.get_observation_profile())) != 1:
+		return true
+	var current: Node = target
+	var target_node := true
+	while current != null:
+		if str(current.get_meta(&"gua_agent_exposure", "auto")) == "private":
+			return false
+		if target_node and current.has_meta(&"gua_agent_allowed_actions"):
+			var allowed: Array = current.get_meta(&"gua_agent_allowed_actions", [])
+			if not allowed.has(action):
+				return false
+		target_node = false
+		current = current.get_parent()
+	return true
+
+
 func _apply_action(control: Control, action: String, request: Dictionary) -> int:
+	if not _agent_action_allowed(control, action, request):
+		return -2
 	if not control.is_visible_in_tree():
 		return -3
 	if not _control_enabled(control):
@@ -1043,9 +1120,12 @@ func _apply_game_input(request: Dictionary) -> int:
 			if operation == 6:
 				if coordinates.size() > 1 and coordinates[1] == "viewport_normalized" and root != null:
 					point *= root.get_viewport().get_visible_rect().size
-				motion.position = point
+				synthetic_pointer_position = point
 			else:
 				motion.relative = point
+				synthetic_pointer_position += point
+			motion.position = synthetic_pointer_position
+			motion.global_position = synthetic_pointer_position
 			Input.parse_input_event(motion)
 			return 0
 		if operation == 8:
@@ -1069,6 +1149,8 @@ func _apply_game_input(request: Dictionary) -> int:
 		var mouse := InputEventMouseButton.new()
 		mouse.button_index = button
 		mouse.pressed = _has_pointer_button_holder(target)
+		mouse.position = synthetic_pointer_position
+		mouse.global_position = synthetic_pointer_position
 		Input.parse_input_event(mouse)
 		return 0
 	if kind == 4:
@@ -1250,6 +1332,8 @@ func _inject_wheel(button: MouseButton, factor: float) -> void:
 	wheel.button_index = button
 	wheel.pressed = true
 	wheel.factor = factor
+	wheel.position = synthetic_pointer_position
+	wheel.global_position = synthetic_pointer_position
 	Input.parse_input_event(wheel)
 
 
@@ -1363,6 +1447,8 @@ func _release_owner_injected_inputs(owner_id: int) -> void:
 		var event := InputEventMouseButton.new()
 		event.button_index = button
 		event.pressed = _has_pointer_button_holder(target)
+		event.position = synthetic_pointer_position
+		event.global_position = synthetic_pointer_position
 		Input.parse_input_event(event)
 	for device in range(4):
 		_release_owner_gamepad(owner_id, device)
@@ -1381,6 +1467,8 @@ func _release_all_injected_inputs() -> void:
 		var button: MouseButton = int(held.get("button", MOUSE_BUTTON_NONE))
 		event.button_index = button
 		event.pressed = false
+		event.position = synthetic_pointer_position
+		event.global_position = synthetic_pointer_position
 		Input.parse_input_event(event)
 	held_pointer_buttons.clear()
 	for device in range(4):
@@ -1418,7 +1506,7 @@ func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
 		var request: Dictionary = context.consume_action_request("select", id)
 		if request.is_empty():
 			break
-		var error_code := _select_derived_item(target)
+		var error_code := _select_derived_item(target, request)
 		context.emit_action_result({
 			"request_id": request.get("request_id", 0),
 			"action": "select",
@@ -1428,10 +1516,12 @@ func _dispatch_derived_select_requests(id: String, target: Dictionary) -> void:
 		})
 
 
-func _select_derived_item(target: Dictionary) -> int:
+func _select_derived_item(target: Dictionary, request: Dictionary) -> int:
 	var index := int(target["index"])
 	if target.has("list"):
 		var item_list := target["list"] as ItemList
+		if not _agent_action_allowed(item_list, "select", request):
+			return -2
 		if not item_list.is_visible_in_tree():
 			return -3
 		if item_list.is_item_disabled(index):
@@ -1440,6 +1530,8 @@ func _select_derived_item(target: Dictionary) -> int:
 		item_list.item_selected.emit(index)
 		return 0
 	var tab_container := target["container"] as TabContainer
+	if not _agent_action_allowed(tab_container, "select", request):
+		return -2
 	if not tab_container.is_visible_in_tree():
 		return -3
 	if tab_container.is_tab_disabled(index):

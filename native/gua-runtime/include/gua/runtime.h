@@ -39,8 +39,10 @@ void gua_runtime_register_node(
 );
 int gua_runtime_register_node_v2(gua_runtime_t* runtime, const gua_node_descriptor_v2_t* descriptor);
 int gua_runtime_register_node_v3(gua_runtime_t* runtime, const gua_node_descriptor_v3_t* descriptor);
+int gua_runtime_register_node_v4(gua_runtime_t* runtime, const gua_node_descriptor_v4_t* descriptor);
 int gua_runtime_begin_world_frame(gua_runtime_t* runtime, const char* scene);
 int gua_runtime_register_world_object_v1(gua_runtime_t* runtime, const gua_world_object_descriptor_v1_t* descriptor);
+int gua_runtime_register_world_object_v2(gua_runtime_t* runtime, const gua_world_object_descriptor_v2_t* descriptor);
 int gua_runtime_end_world_frame(gua_runtime_t* runtime);
 int gua_runtime_abort_world_frame(gua_runtime_t* runtime);
 int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
@@ -52,6 +54,8 @@ int gua_runtime_query_player_world_objects_json(gua_runtime_t* runtime, const gu
 const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
 int gua_runtime_copy_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+/* Browser/public-agent projection. This call cannot elevate to the runtime's Debug profile. */
+int gua_runtime_copy_player_ui_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 void gua_runtime_add_log(gua_runtime_t* runtime, int level, const char* message);
 const char* gua_runtime_get_logs_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */
@@ -91,6 +95,9 @@ enum {
 };
 /* Adapters opt in only after their host-frame input pump and cleanup route exist. */
 void gua_runtime_set_game_input_capabilities(gua_runtime_t* runtime, uint32_t capabilities);
+/* Player/Public Agent input is denied by default and may only narrow the adapter capabilities above. */
+void gua_runtime_set_player_game_input_capabilities(gua_runtime_t* runtime, uint32_t capabilities);
+uint32_t gua_runtime_get_game_input_capabilities(gua_runtime_t* runtime, int observation_profile);
 int gua_runtime_begin_game_input_frame(gua_runtime_t* runtime, const char* input_context);
 int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v1_t* descriptor);
 int gua_runtime_end_game_input_frame(gua_runtime_t* runtime);
@@ -98,6 +105,10 @@ int gua_runtime_abort_game_input_frame(gua_runtime_t* runtime);
 uint64_t gua_runtime_create_game_input_owner(gua_runtime_t* runtime);
 int gua_runtime_release_game_input_owner(gua_runtime_t* runtime, uint64_t owner_id);
 int gua_runtime_enqueue_game_input(gua_runtime_t* runtime, const gua_game_input_request_descriptor_v1_t* descriptor, uint64_t* out_request_id);
+int gua_runtime_enqueue_game_input_v2(gua_runtime_t* runtime, const gua_game_input_request_descriptor_v2_t* descriptor, uint64_t* out_request_id);
+/* Trusted adapter entry point. A Player runtime may not elevate a request to Debug. */
+int gua_runtime_enqueue_game_input_for_profile_v2(gua_runtime_t* runtime, const gua_game_input_request_descriptor_v2_t* descriptor,
+    int observation_profile, uint64_t* out_request_id);
 int gua_runtime_consume_game_input_request(gua_runtime_t* runtime, gua_game_input_request_v1_t* out_request);
 int gua_runtime_complete_game_input_request(gua_runtime_t* runtime, uint64_t request_id, int succeeded, int error_code);
 int gua_runtime_tick_game_input_leases(gua_runtime_t* runtime, double elapsed_ms);
@@ -108,6 +119,9 @@ int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, uint64_t own
 void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled);
 /* Host-owned ceiling; transports cannot override this profile per request. */
 int gua_runtime_set_observation_profile(gua_runtime_t* runtime, int profile);
+int gua_runtime_get_observation_profile(gua_runtime_t* runtime);
+/* Player screenshots are denied unless the host opts in before the bridge starts. */
+int gua_runtime_set_player_screenshot_enabled(gua_runtime_t* runtime, int enabled);
 int gua_runtime_get_node_state(gua_runtime_t* runtime, const char* node_id, gua_node_state_t* out_state);
 int gua_runtime_get_node_state_v2(gua_runtime_t* runtime, const char* node_id, gua_node_state_v2_t* out_state);
 int gua_runtime_find_node_by_id(gua_runtime_t* runtime, const char* node_id, char* out_node_id, int out_node_id_size);
@@ -119,7 +133,10 @@ int gua_runtime_consume_click_request(gua_runtime_t* runtime, const char* node_i
 int gua_runtime_emit_click(gua_runtime_t* runtime, const char* node_id);
 int gua_runtime_poll_event(gua_runtime_t* runtime, gua_event_t* out_event);
 int gua_runtime_enqueue_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
+/* Browser/public-agent authorization. The captured request profile is always Player. */
+int gua_runtime_enqueue_player_action(gua_runtime_t* runtime, const gua_action_request_descriptor_t* descriptor, uint64_t* out_request_id);
 int gua_runtime_cancel_action_request(gua_runtime_t* runtime, uint64_t request_id);
+int gua_runtime_get_action_request_observation_profile(gua_runtime_t* runtime, uint64_t request_id);
 int gua_runtime_consume_action_request(gua_runtime_t* runtime, int action, const char* node_id, gua_action_request_t* out_request);
 int gua_runtime_emit_action_result(gua_runtime_t* runtime, const gua_action_result_t* result);
 int gua_runtime_poll_event_v2(gua_runtime_t* runtime, gua_event_v2_t* out_event);

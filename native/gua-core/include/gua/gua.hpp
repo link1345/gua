@@ -45,6 +45,28 @@ enum class ActionType {
     press_key = GUA_ACTION_PRESS_KEY,
 };
 
+enum class ObservationProfile { debug = GUA_OBSERVATION_PROFILE_DEBUG, player = GUA_OBSERVATION_PROFILE_PLAYER };
+enum class AgentExposure { automatic = GUA_AGENT_EXPOSURE_AUTO, private_ = GUA_AGENT_EXPOSURE_PRIVATE };
+enum class AgentFieldMode {
+    keep = GUA_AGENT_FIELD_KEEP, omit = GUA_AGENT_FIELD_OMIT, redact = GUA_AGENT_FIELD_REDACT,
+    replace = GUA_AGENT_FIELD_REPLACE, quantize = GUA_AGENT_FIELD_QUANTIZE,
+};
+
+struct AgentFieldRule {
+    std::string path;
+    AgentFieldMode mode = AgentFieldMode::keep;
+    int replacement_type = GUA_WORLD_VALUE_NULL;
+    std::string string_value;
+    double number_value = 0, quantum = 0;
+    bool bool_value = false;
+};
+
+struct AgentPolicy {
+    AgentExposure exposure = AgentExposure::automatic;
+    std::optional<std::uint64_t> allowed_actions;
+    std::vector<AgentFieldRule> field_rules;
+};
+
 enum class ActionCancelResult {
     in_flight = GUA_ACTION_CANCEL_IN_FLIGHT,
     not_found = GUA_ACTION_CANCEL_NOT_FOUND,
@@ -212,7 +234,8 @@ public:
         Rect bounds,
         const NodeProperties& properties = {},
         bool visible = true,
-        bool enabled = true)
+        bool enabled = true,
+        const AgentPolicy& policy = {})
     {
         id_buffer_.assign(id);
         role_buffer_.assign(role);
@@ -263,7 +286,18 @@ public:
             properties.scroll_x.value_or(0), properties.scroll_y.value_or(0), properties.scroll_max_x.value_or(0), properties.scroll_max_y.value_or(0),
             properties.range_value.value_or(0), properties.range_min.value_or(0), properties.range_max.value_or(0), properties.selected_index.value_or(-1)
         };
-        if (gua_register_node_v3(context_, &detailed) == 0) {
+        std::vector<gua_agent_field_rule_v1_t> native_rules;
+        native_rules.reserve(policy.field_rules.size());
+        for (const auto& rule : policy.field_rules) native_rules.push_back({ sizeof(gua_agent_field_rule_v1_t), rule.path.c_str(),
+            static_cast<int>(rule.mode), rule.replacement_type,
+            rule.mode == AgentFieldMode::replace && rule.replacement_type == GUA_WORLD_VALUE_STRING
+                ? rule.string_value.c_str() : (rule.string_value.empty() ? nullptr : rule.string_value.c_str()), rule.number_value,
+            rule.bool_value ? 1 : 0, rule.quantum });
+        const gua_agent_policy_v1_t native_policy { sizeof(gua_agent_policy_v1_t), static_cast<int>(policy.exposure),
+            policy.allowed_actions.has_value() ? 1 : 0, policy.allowed_actions.value_or(0),
+            native_rules.empty() ? nullptr : native_rules.data(), static_cast<std::uint32_t>(native_rules.size()) };
+        const gua_node_descriptor_v4_t secured { sizeof(gua_node_descriptor_v4_t), detailed, native_policy };
+        if (gua_register_node_v4(context_, &secured) == 0) {
             throw std::runtime_error("Failed to register Gua v2 node");
         }
     }
@@ -286,6 +320,13 @@ public:
     [[nodiscard]] std::string ui_tree_json() const
     {
         return copy_json(gua_copy_ui_tree_json);
+    }
+
+    [[nodiscard]] std::string ui_tree_json(ObservationProfile profile) const
+    {
+        return copy_json([profile](gua_context_t* context, char* output, int size) {
+            return gua_copy_ui_tree_json_for_profile(context, static_cast<int>(profile), output, size);
+        });
     }
 
     void log(LogLevel level, std::string_view message)
@@ -322,6 +363,13 @@ public:
     [[nodiscard]] std::string diagnostics_json() const
     {
         return copy_json(gua_copy_diagnostics_json);
+    }
+
+    [[nodiscard]] std::string diagnostics_json(ObservationProfile profile) const
+    {
+        return copy_json([profile](gua_context_t* context, char* output, int size) {
+            return gua_copy_diagnostics_json_for_profile(context, static_cast<int>(profile), output, size);
+        });
     }
 
     [[nodiscard]] bool enqueue_click(std::string_view node_id)
@@ -366,6 +414,16 @@ public:
             key_buffer_.empty() ? nullptr : key_buffer_.c_str(), request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit
         };
         return gua_enqueue_action(context_, &descriptor, &request_id);
+    }
+
+    [[nodiscard]] int enqueue_action(const ActionRequest& request, ObservationProfile profile, std::uint64_t& request_id)
+    {
+        id_buffer_.assign(request.node_id); value_buffer_.assign(request.value); key_buffer_.assign(request.key);
+        const gua_action_request_descriptor_t descriptor { sizeof(gua_action_request_descriptor_t), static_cast<int>(request.action),
+            id_buffer_.empty() ? nullptr : id_buffer_.c_str(), value_buffer_.empty() ? nullptr : value_buffer_.c_str(),
+            request.delta_x, request.delta_y, request.bool_value ? 1 : 0, key_buffer_.empty() ? nullptr : key_buffer_.c_str(),
+            request.modifiers, request.sensitive ? 1 : 0, request.scroll_unit };
+        return gua_enqueue_action_for_profile(context_, &descriptor, static_cast<int>(profile), &request_id);
     }
 
     [[nodiscard]] ActionCancelResult cancel_action(std::uint64_t request_id)
@@ -441,13 +499,13 @@ public:
     { return copy_json([owner_id, request_id](auto* context, char* output, int size) { return gua_copy_game_input_result_json(context, owner_id, request_id, output, size); }); }
     [[nodiscard]] std::uint64_t enqueue_game_input(std::uint64_t owner_id, int kind, int operation,
         std::string_view target, std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
-        double x = 0, double y = 0, int device_index = 0, bool sensitive = false)
+        double x = 0, double y = 0, int device_index = 0, bool sensitive = false, bool confirmed = false)
     {
         std::string target_value(target), json(value_json);
-        gua_game_input_request_descriptor_v1_t descriptor { sizeof(descriptor), owner_id, kind, operation,
-            target_value.c_str(), json.c_str(), x, y, lease_ms, device_index, sensitive ? 1 : 0 };
+        gua_game_input_request_descriptor_v2_t descriptor { sizeof(descriptor), owner_id, kind, operation,
+            target_value.c_str(), json.c_str(), x, y, lease_ms, device_index, sensitive ? 1 : 0, confirmed ? 1 : 0 };
         std::uint64_t request_id = 0;
-        const int result = gua_enqueue_game_input(context_, &descriptor, &request_id);
+        const int result = gua_enqueue_game_input_v2(context_, &descriptor, &request_id);
         if (result != GUA_GAME_INPUT_OK) throw std::runtime_error("Game input request rejected: " + std::to_string(result));
         return request_id;
     }
@@ -523,8 +581,8 @@ public:
     [[nodiscard]] std::uint64_t owner_id() const noexcept { return owner_id_; }
     [[nodiscard]] std::uint64_t send(int kind, int operation, std::string_view target,
         std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
-        double x = 0, double y = 0, int device_index = 0, bool sensitive = false)
-    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive); }
+        double x = 0, double y = 0, int device_index = 0, bool sensitive = false, bool confirmed = false)
+    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive, confirmed); }
     [[nodiscard]] std::string state_json() const
     { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->game_input_state_json(owner_id_); }
     [[nodiscard]] std::string result_json(std::uint64_t request_id) const

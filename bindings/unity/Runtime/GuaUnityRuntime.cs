@@ -160,7 +160,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         if (envelope == null || envelope.command == null) return;
         if (envelope.command.type == "get_ui_tree")
         {
-            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetUiTreeJson(), 0);
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetPlayerUiTreeJson(), 0);
             return;
         }
         if (envelope.command.type == "get_world_object_tree")
@@ -185,7 +185,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         }
         if (envelope.command.type == "get_game_input_actions")
         {
-            if (gameInputCapabilities == GuaGameInputCapabilities.None) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity game input is not initialized."); return; }
+            if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) == 0) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity Player game input is not authorized."); return; }
             GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetGameInputActionsJson(), 0);
             return;
         }
@@ -201,8 +201,14 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             var gameInputError = "Invalid game input request.";
             if (!EnsureWebGameInputSession() || !TryParseWebGameInput(json, out gameInput, out gameInputError))
             {
-                ResolveWebError(envelope.callId, gameInputCapabilities == GuaGameInputCapabilities.None ? "engine_unsupported" : "invalid_request",
-                    gameInputCapabilities == GuaGameInputCapabilities.None ? "Unity game input is not initialized." : gameInputError);
+                ResolveWebError(envelope.callId, playerGameInputCapabilities == GuaGameInputCapabilities.None ? "engine_unsupported" : "invalid_request",
+                    playerGameInputCapabilities == GuaGameInputCapabilities.None ? "Unity Player game input is not authorized." : gameInputError);
+                return;
+            }
+            var requiredCapability = RequiredGameInputCapability(gameInput.Kind);
+            if (gameInput.Kind != GuaGameInputKind.Cleanup && (playerGameInputCapabilities & requiredCapability) == 0)
+            {
+                ResolveWebError(envelope.callId, "engine_unsupported", "This Unity Player game input capability is not authorized.");
                 return;
             }
             if (gameInput.Kind == GuaGameInputKind.Semantic && gameInput.Operation is GuaGameInputOperation.Press or GuaGameInputOperation.Set &&
@@ -214,7 +220,8 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             try
             {
                 var gameInputRequestId = webGameInputSession!.Send(gameInput.Kind, gameInput.Operation, gameInput.Target, gameInput.Value,
-                    TimeSpan.FromMilliseconds(gameInput.LeaseMs), gameInput.X, gameInput.Y, gameInput.DeviceIndex, gameInput.Sensitive);
+                    TimeSpan.FromMilliseconds(gameInput.LeaseMs), gameInput.X, gameInput.Y, gameInput.DeviceIndex,
+                    gameInput.Sensitive, gameInput.Confirmed);
                 webGameInputCalls[gameInputRequestId] = envelope.callId;
             }
             catch (Exception error) { ResolveWebError(envelope.callId, "invalid_request", error.Message); }
@@ -233,7 +240,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         }
         var request = new GuaActionRequest(action, EmptyToNull(source.nodeId), EmptyToNull(source.value), source.deltaX, source.deltaY,
             source.@checked, EmptyToNull(source.key), (uint)Math.Clamp(source.modifiers, 0, 15), source.sensitive, source.scrollUnit);
-        var result = runtime.EnqueueAction(request, out var requestId);
+        var result = runtime.EnqueuePlayerAction(request, out var requestId);
         if (result != GuaActionError.None)
         {
             ResolveWebError(envelope.callId, WebErrorCode(result), $"Unity rejected the Gua action ({(int)result}).");
@@ -287,8 +294,10 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
 
     private bool EnsureWebGameInputSession()
     {
-        if (runtime == null || gameInputCapabilities == GuaGameInputCapabilities.None) return false;
-        webGameInputSession ??= runtime.CreateGameInputSession();
+        if (runtime == null) return false;
+        if (webGameInputSession != null) return true;
+        if (playerGameInputCapabilities == GuaGameInputCapabilities.None) return false;
+        webGameInputSession ??= runtime.CreateGameInputSession(GuaObservationProfile.Player);
         return true;
     }
 
@@ -307,14 +316,24 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     private string[] WebGameInputCapabilities()
     {
         var result = new List<string>();
-        if ((gameInputCapabilities & GuaGameInputCapabilities.Semantic) != 0) result.Add("semantic_game_input_v1");
-        if ((gameInputCapabilities & GuaGameInputCapabilities.Keyboard) != 0) result.Add("raw_keyboard_input_v1");
-        if ((gameInputCapabilities & GuaGameInputCapabilities.Pointer) != 0) result.Add("raw_pointer_input_v1");
-        if ((gameInputCapabilities & GuaGameInputCapabilities.Gamepad) != 0) result.Add("raw_gamepad_input_v1");
-        if ((gameInputCapabilities & GuaGameInputCapabilities.Text) != 0) result.Add("text_input_v1");
-        if (gameInputCapabilities != GuaGameInputCapabilities.None) result.Add("game_input_lease_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) != 0) result.Add("semantic_game_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Keyboard) != 0) result.Add("raw_keyboard_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Pointer) != 0) result.Add("raw_pointer_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Gamepad) != 0) result.Add("raw_gamepad_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Text) != 0) result.Add("text_input_v1");
+        if (playerGameInputCapabilities != GuaGameInputCapabilities.None) result.Add("game_input_lease_v1");
         return result.ToArray();
     }
+
+    private static GuaGameInputCapabilities RequiredGameInputCapability(GuaGameInputKind kind) => kind switch
+    {
+        GuaGameInputKind.Semantic => GuaGameInputCapabilities.Semantic,
+        GuaGameInputKind.Keyboard => GuaGameInputCapabilities.Keyboard,
+        GuaGameInputKind.Pointer => GuaGameInputCapabilities.Pointer,
+        GuaGameInputKind.Gamepad => GuaGameInputCapabilities.Gamepad,
+        GuaGameInputKind.TextInput => GuaGameInputCapabilities.Text,
+        _ => GuaGameInputCapabilities.None,
+    };
 
     private void ResolveWebError(int callId, string code, string message) =>
         GuaUnityWebResolve(webOwnerId, callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
@@ -542,7 +561,8 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
                     source.VisibleToPlayer, source.Active, parentId, source.Description,
                     source.AgentExposure, source.Tags, source.State,
                     string.IsNullOrEmpty(source.DomainId) ? null : source.DomainId,
-                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId));
+                    string.IsNullOrEmpty(source.RelatedUiNodeId) ? null : source.RelatedUiNodeId,
+                    source.GetComponent<GuaAgentPolicyComponent>()?.Policy));
             }
             runtime.EndWorldFrame();
             published = true;
@@ -668,7 +688,8 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         var registered = !suppressAsSelectableLabel && Register(id, role, label, bounds, visible, enabled, parentId,
             text: !sensitive && (role is "text" or "textbox") ? label : null, value: sensitive ? null : value,
             focused: ReferenceEquals(frameFocusTarget, transform.gameObject),
-            checkedValue: checkedValue, selectedValue: null, range: range, target: new Target(actionTarget, role, visible, enabled));
+            checkedValue: checkedValue, selectedValue: null, range: range,
+            target: new Target(actionTarget, role, visible, enabled, transform.gameObject));
         if (registered && actionTarget is Button button) ObserveClick(button, id);
         var childParentId = suppressAsSelectableLabel ? parentId : id;
         var childSelectableLabel = selectable != null ? selectableContentLabel : ancestorSelectableLabel;
@@ -683,8 +704,9 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         if (!ids.Add(id)) { runtime!.AddLog(3, $"Duplicate Unity Gua id ignored: {id}"); return false; }
         runtime!.RegisterNode(new GuaNodeDescriptor(id, role, label, bounds, visible, enabled, parentId, text, value,
             Focused: focused, Checked: checkedValue, Selected: selectedValue,
-            RangeValue: range.value, RangeMin: range.min, RangeMax: range.max));
-        targets[id] = new Target(target.Value, target.Role, visible, enabled);
+            RangeValue: range.value, RangeMin: range.min, RangeMax: range.max,
+            AgentPolicy: GuaUnityAdapterRegistry.PolicyFor(AgentPolicyTarget(target.Value))));
+        targets[id] = new Target(target.Value, target.Role, visible, enabled, target.PolicyHost);
         return true;
     }
 
@@ -695,14 +717,19 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         while (runtime!.TryConsumeAction(action, pair.Key, out var request))
         {
             var resultRequest = ProtectSensitiveResult(request, pair.Key, pair.Value.Value);
-            if (!pair.Value.Visible)
+            if (!pair.Value.Visible || !IsCurrentlyVisible(pair.Value.Value, pair.Value.Visible))
             {
                 runtime.EmitActionResult(resultRequest, false, GuaActionError.Hidden);
                 continue;
             }
-            if (!pair.Value.Enabled)
+            if (!pair.Value.Enabled || !IsCurrentlyEnabled(pair.Value.Value, pair.Value.Enabled))
             {
                 runtime.EmitActionResult(resultRequest, false, GuaActionError.Disabled);
+                continue;
+            }
+            if (request.ObservationProfile == GuaObservationProfile.Player && !IsAgentAuthorizedNow(pair.Value, request.Action))
+            {
+                runtime.EmitActionResult(resultRequest, false, GuaActionError.NodeNotFound);
                 continue;
             }
             var suppressObservedClick = request.Action == GuaActionType.Click && clickTargetIds.ContainsKey(pair.Value.Value);
@@ -737,9 +764,10 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             var focusedTarget = focused.Value;
             string? value = null;
             var failure = GuaActionError.Unsupported;
-            if (focusedTarget != null && !focusedTarget.Visible) failure = GuaActionError.Hidden;
-            else if (focusedTarget != null && !focusedTarget.Enabled) failure = GuaActionError.Disabled;
-            var ok = focusedTarget != null && focusedTarget.Visible && focusedTarget.Enabled && Apply(focusedTarget.Value, global, out value, out failure);
+            if (focusedTarget != null && (!focusedTarget.Visible || !IsCurrentlyVisible(focusedTarget.Value, focusedTarget.Visible))) failure = GuaActionError.Hidden;
+            else if (focusedTarget != null && (!focusedTarget.Enabled || !IsCurrentlyEnabled(focusedTarget.Value, focusedTarget.Enabled))) failure = GuaActionError.Disabled;
+            else if (focusedTarget != null && global.ObservationProfile == GuaObservationProfile.Player && !IsAgentAuthorizedNow(focusedTarget, global.Action)) failure = GuaActionError.NodeNotFound;
+            var ok = focusedTarget != null && failure == GuaActionError.Unsupported && Apply(focusedTarget.Value, global, out value, out failure);
             var resultRequest = focusedTarget == null ? global : ProtectSensitiveResult(global, focused.Key, focusedTarget.Value);
             runtime.EmitActionResult(resultRequest, ok, ok ? GuaActionError.None : failure, value);
         }
@@ -771,7 +799,8 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     private GuaActionRequest ProtectSensitiveResult(GuaActionRequest request, string id, object target) =>
         request.Sensitive || sensitiveTargetIds.Contains(id) || sensitiveTargets.TryGetValue(target, out _)
             ? new GuaActionRequest(request.Action, request.NodeId, request.Value, request.DeltaX, request.DeltaY,
-                request.BoolValue, request.Key, request.Modifiers, true, request.ScrollUnit, request.RequestId)
+                request.BoolValue, request.Key, request.Modifiers, true, request.ScrollUnit, request.RequestId,
+                request.ObservationProfile)
             : request;
 
     private void EmitObservedClick(object target)
@@ -1035,6 +1064,46 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         Component component => ReferenceEquals(frameFocusTarget, component.gameObject),
         _ => false,
     };
+    private static bool IsCurrentlyVisible(object target, bool collectedVisible) => target switch
+    {
+        VisualElement visual => visual.panel != null && visual.visible && visual.resolvedStyle.display != DisplayStyle.None,
+        ListItemTarget item => item.List.panel != null && item.List.visible && item.List.resolvedStyle.display != DisplayStyle.None,
+        GameObject gameObject => gameObject != null && gameObject.activeInHierarchy,
+        Behaviour behaviour => behaviour.isActiveAndEnabled && behaviour.gameObject.activeInHierarchy,
+        Component component => component.gameObject.activeInHierarchy,
+        _ => collectedVisible,
+    };
+    private static bool IsCurrentlyEnabled(object target, bool collectedEnabled) => target switch
+    {
+        VisualElement visual => visual.enabledInHierarchy,
+        ListItemTarget item => item.List.enabledInHierarchy,
+        GameObject gameObject => gameObject != null && gameObject.activeInHierarchy,
+        Selectable selectable => selectable.IsInteractable(),
+        Behaviour behaviour => behaviour.isActiveAndEnabled,
+        Component component => component.gameObject.activeInHierarchy,
+        _ => collectedEnabled,
+    };
+    private static bool IsAgentAuthorizedNow(Target target, GuaActionType action)
+    {
+        var policyTarget = AgentPolicyTarget(target.Value);
+        var policy = GuaUnityAdapterRegistry.PolicyFor(policyTarget);
+        if (policy?.Exposure == GuaAgentExposure.Private ||
+            (policy?.AllowedActions != null && !policy.AllowedActions.Contains(action))) return false;
+        var policyHost = target.PolicyHost ?? policyTarget switch
+        {
+            GameObject gameObject => gameObject,
+            Component component => component.gameObject,
+            _ => null,
+        };
+        for (var current = policyHost; current != null; current = current.transform.parent?.gameObject)
+            if (!ReferenceEquals(current, policyTarget) &&
+                GuaUnityAdapterRegistry.PolicyFor(current)?.Exposure == GuaAgentExposure.Private) return false;
+        if (policyTarget is VisualElement visual)
+            for (var parent = visual.parent; parent != null; parent = parent.parent)
+                if (GuaUnityAdapterRegistry.PolicyFor(parent)?.Exposure == GuaAgentExposure.Private) return false;
+        return true;
+    }
+    private static object AgentPolicyTarget(object target) => target is ListItemTarget item ? item.List : target;
     private sealed class ListItemTarget
     {
         internal ListItemTarget(ListView list, int index) { List = list; Index = index; }
@@ -1043,11 +1112,13 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     }
     private sealed class Target
     {
-        internal Target(object value, string role, bool visible = true, bool enabled = true) { Value = value; Role = role; Visible = visible; Enabled = enabled; }
+        internal Target(object value, string role, bool visible = true, bool enabled = true, GameObject? policyHost = null)
+        { Value = value; Role = role; Visible = visible; Enabled = enabled; PolicyHost = policyHost; }
         internal object Value { get; }
         internal string Role { get; }
         internal bool Visible { get; }
         internal bool Enabled { get; }
+        internal GameObject? PolicyHost { get; }
     }
     private sealed class SensitiveTarget { }
 }

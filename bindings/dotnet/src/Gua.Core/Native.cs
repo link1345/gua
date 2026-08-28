@@ -179,6 +179,13 @@ internal static partial class Native
         public long SelectedIndex;
     }
 
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeAgentFieldRuleV1
+    { public uint StructSize; public nint Path; public int Mode; public int ReplacementType; public nint StringValue; public double NumberValue; public int BoolValue; public double Quantum; }
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeAgentPolicyV1
+    { public uint StructSize; public int Exposure; public int HasAllowedActions; public ulong AllowedActions; public nint FieldRules; public uint FieldRuleCount; }
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeNodeDescriptorV4
+    { public uint StructSize; public GuaNativeNodeDescriptorV3 Base; public GuaNativeAgentPolicyV1 AgentPolicy; }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct GuaNativeWorldStateValueV1
     {
@@ -192,6 +199,8 @@ internal static partial class Native
         public int Space; public double PositionX, PositionY, PositionZ; public int VisibleToPlayer; public int Active; public int AgentExposure;
         public nint DomainId; public nint RelatedUiNodeId; public nint Tags; public uint TagCount; public nint StateValues; public uint StateValueCount;
     }
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeWorldObjectDescriptorV2
+    { public uint StructSize; public GuaNativeWorldObjectDescriptorV1 Base; public GuaNativeAgentPolicyV1 AgentPolicy; }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct GuaNativeWorldSelectorV1
@@ -361,9 +370,12 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static partial int gua_register_node_v3(nint context, in GuaNativeNodeDescriptorV3 descriptor);
+    [LibraryImport("gua")]
+    internal static partial int gua_register_node_v4(nint context, in GuaNativeNodeDescriptorV4 descriptor);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)] internal static partial int gua_begin_world_frame(nint context, string scene);
     [LibraryImport("gua")] internal static partial int gua_register_world_object_v1(nint context, in GuaNativeWorldObjectDescriptorV1 descriptor);
+    [LibraryImport("gua")] internal static partial int gua_register_world_object_v2(nint context, in GuaNativeWorldObjectDescriptorV2 descriptor);
     [LibraryImport("gua")] internal static partial int gua_end_world_frame(nint context);
     [LibraryImport("gua")] internal static partial int gua_abort_world_frame(nint context);
     [LibraryImport("gua")] internal static unsafe partial int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
@@ -374,6 +386,8 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_copy_ui_tree_json(nint context, byte* outJson, int outJsonSize);
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_ui_tree_json_for_profile(nint context, int profile, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void gua_add_log(nint context, int level, string message);
@@ -401,6 +415,8 @@ internal static partial class Native
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_copy_diagnostics_json(nint context, byte* outJson, int outJsonSize);
+    [LibraryImport("gua")]
+    internal static unsafe partial int gua_copy_diagnostics_json_for_profile(nint context, int profile, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua")]
     internal static unsafe partial int gua_copy_version_json(byte* outJson, int outJsonSize);

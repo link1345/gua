@@ -53,3 +53,11 @@ dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 environment JSON. `GetDiagnosticsJson` returns the versioned semantic failure
 snapshot without draining the event queue; sensitive action values are already
 redacted by the native core.
+
+Attach `GuaAgentPolicy` to node or world descriptors to define the Player
+projection. Field rules support omit, redact, typed replacement, and numeric
+quantization; an optional UI action list is intersected with role support.
+When a world policy omits `Exposure`, it inherits the descriptor's legacy
+`AgentExposure`; set it explicitly only to override that value.
+`GetUiTreeJson(GuaObservationProfile.Player)` and the matching diagnostics
+overload preview the exact host-side projection without changing Debug defaults.

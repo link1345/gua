@@ -39,6 +39,7 @@ struct Command {
     bool bool_value = false;
     unsigned int modifiers = 0;
     bool sensitive = false;
+    bool confirmed = false;
     int scroll_unit = 0;
     unsigned long long request_id = 0;
     unsigned long long expected_session_epoch = 0;
@@ -878,6 +879,7 @@ Command parse_command(std::string_view json)
     command.bool_value = json_bool_field(json, "checked");
     command.modifiers = static_cast<unsigned int>(json_int_field(json, "modifiers").value_or(0));
     command.sensitive = json_bool_field(json, "sensitive");
+    command.confirmed = json_bool_field(json, "confirmed");
     command.scroll_unit = json_int_field(json, "scrollUnit").value_or(0);
     command.request_id = json_uint64_field(json, "requestId").value_or(0);
     command.expected_session_epoch = json_uint64_field(json, "expectedSessionEpoch").value_or(0);
@@ -955,6 +957,7 @@ std::string_view game_input_error_name(long long code)
     case -4: return "unsupported";
     case -5: return "invalid_value";
     case -6: return "invalid_lease";
+    case -7: return "confirmation_required";
     default: return "unknown";
     }
 }
@@ -1370,7 +1373,7 @@ private:
                 } else if (command.type == "release_all_game_inputs") target = "all";
                 const long long request_id = handlers_.enqueue_game_input(game_input_owner_id, gua::ws::GameInputCommand {
                     command.type, std::move(target), std::move(value_json), x, y, command.lease_ms,
-                    command.device_index, command.sensitive });
+                    command.device_index, command.sensitive, command.confirmed });
                 return request_id > 0
                     ? ok_response(command.id, "{\"requestId\":" + std::to_string(request_id) + "}")
                     : error_response(command.id, "Gua game input rejected: " + std::string(game_input_error_name(request_id)));
