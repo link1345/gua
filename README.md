@@ -69,8 +69,9 @@ definitions are published as `gua-world-tools`. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
 custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
-The current Godot Web addon supports debug Web exports only; release export
-support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
+The Godot Web addon includes separate Debug and Release GDExtensions. Enable
+`Extension Support` in the Godot Web export preset; Godot then selects the
+matching `web.wasm32.single.debug` or `web.wasm32.single.release` library.
 
 ## Godot 4.7 support
 

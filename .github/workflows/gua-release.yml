@@ -136,9 +136,13 @@ jobs:
         shell: pwsh
         run: scripts/build-web-native.ps1 -Configuration Debug -Version '${{ needs.windows-assets.outputs.version }}' -BuildId '${{ github.sha }}'
 
-      - name: Build Release Unity WebGL runtime
+      - name: Build Release Godot Web extension and Unity WebGL runtime
         shell: pwsh
-        run: scripts/build-web-native.ps1 -Configuration Release -RuntimeOnly -Version '${{ needs.windows-assets.outputs.version }}' -BuildId '${{ github.sha }}'
+        run: scripts/build-web-native.ps1 -Configuration Release -Version '${{ needs.windows-assets.outputs.version }}' -BuildId '${{ github.sha }}'
+
+      - name: Verify Godot Web addon contract
+        shell: pwsh
+        run: scripts/verify-godot-web-addon.ps1 -RequireBinaries
 
       - name: Package browser native assets
         shell: pwsh
@@ -156,6 +160,8 @@ jobs:
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd" $godot
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godot
           Copy-Item "examples/godot-gdscript/addons/gua/bin/gua_godot.web.debug.wasm32.wasm" (Join-Path $godot "bin")
+          Copy-Item "examples/godot-gdscript/addons/gua/bin/gua_godot.web.release.wasm32.wasm" (Join-Path $godot "bin")
+          scripts/verify-godot-web-addon.ps1 -AddonDirectory $godot -RequireBinaries
           Compress-Archive -Path (Join-Path $root "gua-godot-plugin-web/addons") -DestinationPath (Join-Path $root "gua-godot-plugin-web-v${{ needs.windows-assets.outputs.version }}.zip")
 
       - name: Upload browser native assets

@@ -41,6 +41,7 @@ has no drawable-frame readback path.
 Feature detection is non-fatal. Each browser tab creates its own bridge and tool
 registrations, so no Gua session router or cross-tab session ID is introduced.
 
-The currently released Godot Web addon supports debug Web exports only. Release
-Web GDExtension builds are tracked in
-[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).
+The Godot Web addon ships separate Debug and Release GDExtensions. Enable
+`Extension Support` in the Web export preset so Godot selects the matching
+`web.wasm32.single.debug` or `web.wasm32.single.release` library before this
+package connects to `window.__guaGodotWebPort`.

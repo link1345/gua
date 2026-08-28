@@ -7,6 +7,49 @@ on:
       - main
 
 jobs:
+  godot-web-addon-contract:
+    name: Godot Web Debug / Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: 4.0.20
+          actions-cache-folder: emsdk-cache
+
+      - name: Build Debug Godot Web extension
+        shell: pwsh
+        run: scripts/build-web-native.ps1 -Configuration Debug
+
+      - name: Build Release Godot Web extension
+        shell: pwsh
+        run: scripts/build-web-native.ps1 -Configuration Release
+
+      - name: Verify Debug and Release addon contract
+        shell: pwsh
+        run: scripts/verify-godot-web-addon.ps1 -RequireBinaries
+
+      - name: Install Godot 4.7 editor and export templates
+        shell: bash
+        run: |
+          curl -fsSLO https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          curl -fsSLO https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
+          unzip -q Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q Godot_v4.7-stable_export_templates.tpz -d .godot-export-templates
+          chmod +x Godot_v4.7-stable_linux.x86_64
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.stable"
+          cp -R .godot-export-templates/templates/. "$HOME/.local/share/godot/export_templates/4.7.stable/"
+
+      - name: Link Release Godot Web export
+        shell: bash
+        run: |
+          mkdir -p artifacts/godot-web-release
+          ./Godot_v4.7-stable_linux.x86_64 --headless --path examples/godot-gdscript --export-release Web "$GITHUB_WORKSPACE/artifacts/godot-web-release/index.html"
+          test -s artifacts/godot-web-release/index.html
+
   remote-clock:
     name: .NET remote clock
     runs-on: windows-latest
