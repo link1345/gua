@@ -64,7 +64,7 @@ GuaはAIコーディングエージェントを補完します。AIがゲーム�
 
 Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Treeを実験的な
 ブラウザ`document.modelContext` APIから公開できます。
-[`gua-webmcp`パッケージ](https://www.npmjs.com/package/gua-webmcp)は、エンジンが
+`gua-webmcp`パッケージは、エンジンが
 所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、read-onlyの
 World Object Tree観測ツール、capabilityで制御されたSemantic Game Action / Raw Input、
 任意のscreenshotツールを登録します。world型とselector
@@ -225,6 +225,9 @@ adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公�
 既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
 `press_physical_key`を使います。
 
+- **gua-webmcp:** [![NPM Version](https://img.shields.io/npm/v/gua-webmcp)](https://www.npmjs.com/package/gua-webmcp) ![NPM Downloads](https://img.shields.io/npm/dw/gua-webmcp)<br>
+  ページのWebMCP APIを通じて、GuaのSemantic UI、World Object Tree、
+  ゲーム入力ツールを登録するブラウザネイティブadapterです。
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を
   AIエージェントへ公開する薄いMCPサーバーです。

@@ -62,7 +62,7 @@ recognition.
 
 Godot Web Export and Unity WebGL pages can expose the same live Semantic UI Tree
 through the experimental browser `document.modelContext` API. The
-[`gua-webmcp` package](https://www.npmjs.com/package/gua-webmcp) registers
+`gua-webmcp` package registers
 `get_ui_tree`, semantic actions, waits, the
 read-only World Object Tree observation tools, capability-gated Semantic Game
 Action / Raw Input tools, and an optional screenshot tool
@@ -188,6 +188,9 @@ Adapters advertise each input capability only after its pump and cleanup path
 are initialized. The existing semantic UI `press_key` API remains unchanged;
 raw keyboard gestures use `press_physical_key`.
 
+- **gua-webmcp:** [![NPM Version](https://img.shields.io/npm/v/gua-webmcp)](https://www.npmjs.com/package/gua-webmcp) ![NPM Downloads](https://img.shields.io/npm/dw/gua-webmcp)<br>
+  A browser-native adapter that registers Gua semantic UI, World Object Tree,
+  and game-input tools through the page's WebMCP API.
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   A thin MCP server that exposes Gua runtime actions to AI agents through the
   same WebSocket bridge used by the Inspector.
