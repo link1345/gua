@@ -642,10 +642,27 @@ completion when the connected bridge supports it.
 ## Release automation
 
 Pushing a manually created `gua-vX.Y.Z` tag runs the release workflows. The
-Inspector, Godot plugin, and ImGui plugin are built together and attached to the
-matching GitHub Release. `gua-world-tools`, `gua-webmcp`, `gui-mcp`, and the
-.NET packages publish the same tag-derived version to npm and NuGet. Changes
-pushed to `main` do not publish packages.
+Inspector, Godot addon, and Unity package are built together and attached to the
+matching GitHub Release, while the MCP and .NET packages publish the same
+version to npm and NuGet. Changes pushed to `main` do not publish packages.
+The ImGui adapter remains available as source in this repository but is not a
+public release asset.
+
+The public GitHub Release contains these versioned assets (using `1.0.0` as an
+example):
+
+```text
+gua-godot-addon-v1.0.0.zip
+com.link1345.gua-1.0.0.tgz
+Gua.Inspector_<inspector-version>_x64-setup.exe
+Gua.Inspector_<inspector-version>_x64_en-US.msi
+```
+
+`gua-godot-addon-v1.0.0.zip` contains one `addons/gua` tree with the Windows
+GDExtension DLL and both Debug and Release Web GDExtension WASM files. Files
+inside that addon, Unity WebGL static libraries, and an ImGui ZIP are not
+published as separate GitHub Release assets; the static libraries are already
+included in the Unity Package Manager archive.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gua-world-tools`, `gua-webmcp`, and `gui-mcp` packages must each be configured

@@ -74,11 +74,10 @@ jobs:
           $assets = Join-Path $env:RUNNER_TEMP "gua-release-assets"
           $godotRoot = Join-Path $env:RUNNER_TEMP "gua-godot-plugin"
           $godotTarget = Join-Path $godotRoot "addons/gua"
-          $imguiRoot = Join-Path $env:RUNNER_TEMP "gua-imgui-plugin"
           $version = '${{ steps.version.outputs.version }}'
 
-          Remove-Item -Recurse -Force $assets, $godotRoot, $imguiRoot -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force $assets, $godotTarget, (Join-Path $godotTarget "bin"), $imguiRoot | Out-Null
+          Remove-Item -Recurse -Force $assets, $godotRoot -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $assets, $godotTarget, (Join-Path $godotTarget "bin") | Out-Null
 
           Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/gua.gdextension.uid" $godotTarget
@@ -89,15 +88,7 @@ jobs:
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/bin/*.dll" (Join-Path $godotTarget "bin")
 
-          $imguiNativeRoot = Join-Path $imguiRoot "native"
-          New-Item -ItemType Directory -Force $imguiNativeRoot | Out-Null
-          Copy-Item "native/gua-imgui" $imguiNativeRoot -Recurse
-          New-Item -ItemType Directory -Force (Join-Path $imguiNativeRoot "gua-core") | Out-Null
-          Copy-Item "native/gua-core/include" (Join-Path $imguiNativeRoot "gua-core") -Recurse
-          Copy-Item "LICENSE" $imguiRoot
-
           Compress-Archive -Path (Join-Path $godotRoot "addons") -DestinationPath (Join-Path $assets "gua-godot-plugin-windows-debug-v$version.zip") -CompressionLevel Optimal
-          Compress-Archive -Path (Join-Path $imguiRoot "*") -DestinationPath (Join-Path $assets "gua-imgui-plugin-v$version.zip") -CompressionLevel Optimal
 
           Copy-Item "packages/inspector/src-tauri/target/release/bundle" (Join-Path $assets "inspector") -Recurse
           "assets=$assets" >> $env:GITHUB_OUTPUT
@@ -248,6 +239,9 @@ jobs:
       - web-native
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download Windows release assets
         uses: actions/download-artifact@v4
         with:
@@ -266,6 +260,16 @@ jobs:
           name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
           path: release-assets/web
 
+      - name: Package public GitHub Release assets
+        shell: pwsh
+        run: |
+          scripts/package-github-release-assets.ps1 `
+            -Version '${{ needs.windows-assets.outputs.version }}' `
+            -WindowsAssetsDirectory release-assets `
+            -WebNativeDirectory release-assets/web `
+            -UnityPackageDirectory release-assets/unity `
+            -OutputDirectory publish-assets
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -274,6 +278,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector bundles, Godot native and Web GDExtension addons, ImGui adapter headers, and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
-          files: release-assets/**/*
+            This release contains the Windows Inspector installers, one Godot addon archive with Windows and Web GDExtensions, and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
+          files: publish-assets/*
           fail_on_unmatched_files: true

@@ -5,7 +5,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$addon = Join-Path $root $AddonDirectory
+$addon = if ([System.IO.Path]::IsPathRooted($AddonDirectory)) {
+    $AddonDirectory
+} else {
+    Join-Path $root $AddonDirectory
+}
 $descriptorPath = Join-Path $addon "gua.gdextension"
 $descriptor = Get-Content -LiteralPath $descriptorPath -Raw
 
