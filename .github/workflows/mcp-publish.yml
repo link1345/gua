@@ -41,12 +41,12 @@ jobs:
       - name: Read WebMCP package version
         id: webmcp_version
         shell: bash
-        run: echo "version=$(node -p \"require('./packages/webmcp/package.json').version\")" >> "${GITHUB_OUTPUT}"
+        run: node -e "console.log('version=' + require('./packages/webmcp/package.json').version)" >> "${GITHUB_OUTPUT}"
 
       - name: Read World Tools package version
         id: world_tools_version
         shell: bash
-        run: echo "version=$(node -p \"require('./packages/world-tools/package.json').version\")" >> "${GITHUB_OUTPUT}"
+        run: node -e "console.log('version=' + require('./packages/world-tools/package.json').version)" >> "${GITHUB_OUTPUT}"
 
       - name: Check whether World Tools version is already published
         id: world_tools_npm_version
