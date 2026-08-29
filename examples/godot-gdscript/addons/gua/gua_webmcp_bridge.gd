@@ -72,11 +72,16 @@ func attach(gua_adapter: RefCounted) -> bool:
   const enqueueGameInput = globalThis.__guaGodotEnqueueGameInput;
   const pollGameInput = globalThis.__guaGodotPollGameInput;
   const releaseGameInput = globalThis.__guaGodotReleaseGameInput;
+  const callGodot = (callback, ...args) => {
+    const response = {};
+    callback(response, ...args);
+    return response.value;
+  };
   const pending = new Map();
   const pendingGameInputs = new Map();
   let disposed = false;
   const releasePendingGameInputs = (causeRequestId, causeError) => {
-    try { releaseGameInput("1"); } catch (_) {}
+    try { callGodot(releaseGameInput, "1"); } catch (_) {}
     for (const [requestId, call] of [...pendingGameInputs.entries()]) {
       const error = requestId === causeRequestId
         ? causeError
@@ -92,7 +97,7 @@ func attach(gua_adapter: RefCounted) -> bool:
       const error = engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
       for (const call of pending.values()) call.cancelOrDrain(error);
       for (const call of [...pendingGameInputs.values()]) call.fail(error);
-      try { releaseGameInput(); } catch (_) {}
+      try { callGodot(releaseGameInput); } catch (_) {}
     },
     async invoke(command, options) {
       if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
@@ -104,25 +109,25 @@ func attach(gua_adapter: RefCounted) -> bool:
         throw engineError('invalid_request', 'Godot Web timeoutMs must be an integer from 0 to 2147483647.');
       }
       if (command.type === 'get_ui_tree') {
-        const tree = JSON.parse(getTree());
+        const tree = JSON.parse(callGodot(getTree));
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua adapter is unavailable.');
         return tree;
       }
       if (command.type === 'get_world_object_tree') {
-        const tree = JSON.parse(getWorldTree());
+        const tree = JSON.parse(callGodot(getWorldTree));
         if (tree && tree.code) throw engineError(tree.code, tree.message || 'The Godot Gua world adapter is unavailable.');
         return tree;
       }
       if (command.type === 'query_world_objects') {
-        const result = JSON.parse(queryWorld(JSON.stringify(command)));
+        const result = JSON.parse(callGodot(queryWorld, JSON.stringify(command)));
         if (result && result.code) throw engineError(result.code, result.message || 'The Godot Gua world adapter is unavailable.');
         return result;
       }
-      if (command.type === 'get_game_input_capabilities') return JSON.parse(getGameInputCapabilities());
-      if (command.type === 'get_game_input_actions') return JSON.parse(getGameInputActions());
-      if (command.type === 'get_game_input_state') return JSON.parse(getGameInputState());
+      if (command.type === 'get_game_input_capabilities') return JSON.parse(callGodot(getGameInputCapabilities));
+      if (command.type === 'get_game_input_actions') return JSON.parse(callGodot(getGameInputActions));
+      if (command.type === 'get_game_input_state') return JSON.parse(callGodot(getGameInputState));
       if (command.type === 'perform_game_input') {
-        const receipt = JSON.parse(enqueueGameInput(JSON.stringify(command.request)));
+        const receipt = JSON.parse(callGodot(enqueueGameInput, JSON.stringify(command.request)));
         if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the game input request.');
         return await new Promise((resolve, reject) => {
           const deadline = performance.now() + (requestedTimeoutMs === undefined ? 5000 : requestedTimeoutMs);
@@ -143,7 +148,7 @@ func attach(gua_adapter: RefCounted) -> bool:
           const poll = () => {
             if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
             try {
-              const result = JSON.parse(pollGameInput(String(receipt.requestId)));
+              const result = JSON.parse(callGodot(pollGameInput, String(receipt.requestId)));
               if (result && result.completed) return finish(() => resolve(result));
               if (result && result.code) return finish(() => reject(engineError(result.code, result.message || 'The Godot game input session is unavailable.')));
               if (performance.now() >= deadline) {
@@ -161,7 +166,7 @@ func attach(gua_adapter: RefCounted) -> bool:
         });
       }
       if (command.type !== 'perform_action') throw engineError('engine_unsupported', `Godot Web command is unsupported: ${command.type}`);
-      const receipt = JSON.parse(enqueueAction(JSON.stringify(command.request)));
+      const receipt = JSON.parse(callGodot(enqueueAction, JSON.stringify(command.request)));
       if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the Gua action.');
       return await new Promise((resolve, reject) => {
         const deadline = performance.now() + (requestedTimeoutMs === undefined ? 5000 : requestedTimeoutMs);
@@ -181,7 +186,7 @@ func attach(gua_adapter: RefCounted) -> bool:
           reject(error);
         };
         const readResult = () => {
-          const result = JSON.parse(pollAction(String(receipt.requestId)));
+          const result = JSON.parse(callGodot(pollAction, String(receipt.requestId)));
           if (result && result.code) throw engineError(result.code, result.message || 'The Godot Gua adapter is unavailable.');
           return result;
         };
@@ -191,7 +196,7 @@ func attach(gua_adapter: RefCounted) -> bool:
         };
         const cancelOrDrain = (error) => {
           let cancellationResult;
-          try { cancellationResult = Number(cancelAction(String(receipt.requestId))); }
+          try { cancellationResult = Number(callGodot(cancelAction, String(receipt.requestId))); }
           catch (_) { cancellationResult = -1; }
           if (cancellationResult === 1) return finish(() => reject(error));
           if (cancellationResult === 0) {
@@ -282,29 +287,33 @@ func _notification(what: int) -> void:
 		detach()
 
 
-func _get_tree(_arguments: Array) -> String:
+func _get_tree(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	return adapter.get_player_ui_tree_json()
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."}))
+		return
+	_respond(arguments, adapter.get_player_ui_tree_json())
 
 
-func _get_world_tree(_arguments: Array) -> String:
+func _get_world_tree(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	return adapter.get_player_world_object_tree_json()
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."}))
+		return
+	_respond(arguments, adapter.get_player_world_object_tree_json())
 
 
-func _query_world(arguments: Array) -> String:
+func _query_world(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."}))
+		return
+	var source = JSON.parse_string(str(_request_argument(arguments)))
 	if not source is Dictionary:
-		return JSON.stringify({"code": "invalid_request", "message": "World query must be an object."})
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "World query must be an object."}))
+		return
 	var command: Dictionary = source
-	return adapter.query_player_world_objects_json({
+	_respond(arguments, adapter.query_player_world_objects_json({
 		"id": command.get("worldId", ""),
 		"kind": command.get("kind", ""),
 		"label": command.get("label", ""),
@@ -318,16 +327,18 @@ func _query_world(arguments: Array) -> String:
 		"state_string": command.get("stateString", ""),
 		"state_number": command.get("stateNumber", 0.0),
 		"state_bool": command.get("stateBool", false),
-	})
+	}))
 
 
-func _enqueue_action(arguments: Array) -> String:
+func _enqueue_action(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."}))
+		return
+	var source = JSON.parse_string(str(_request_argument(arguments)))
 	if not source is Dictionary:
-		return JSON.stringify({"code": "invalid_request", "message": "Action request must be an object."})
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "Action request must be an object."}))
+		return
 	var request: Dictionary = source
 	var native_request := {
 		"action": request.get("action", ""),
@@ -344,25 +355,28 @@ func _enqueue_action(arguments: Array) -> String:
 	var receipt: Dictionary = adapter.enqueue_player_action(native_request)
 	if receipt.get("error_code", -1) != 0:
 		var error_code := int(receipt.get("error_code", -1))
-		return JSON.stringify({"code": _web_error_code(error_code), "message": "Godot rejected the Gua action.", "hostError": error_code})
-	return JSON.stringify({"requestId": receipt.get("request_id", 0)})
+		_respond(arguments, JSON.stringify({"code": _web_error_code(error_code), "message": "Godot rejected the Gua action.", "hostError": error_code}))
+		return
+	_respond(arguments, JSON.stringify({"requestId": receipt.get("request_id", 0)}))
 
 
-func _poll_action(arguments: Array) -> String:
+func _poll_action(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."})
-	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "The Godot Gua adapter is no longer available."}))
+		return
+	var request_id := int(str(_request_argument(arguments)))
 	var result: Dictionary = adapter.poll_action_result(request_id)
-	return "null" if result.is_empty() else JSON.stringify(result)
+	_respond(arguments, "null" if result.is_empty() else JSON.stringify(result))
 
 
-func _cancel_action(arguments: Array) -> int:
+func _cancel_action(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return 0
-	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
-	return adapter.cancel_action_request(request_id)
+		_respond(arguments, 0)
+		return
+	var request_id := int(str(_request_argument(arguments)))
+	_respond(arguments, adapter.cancel_action_request(request_id))
 
 
 func _game_input_capabilities(adapter: RefCounted) -> Array:
@@ -377,52 +391,59 @@ func _game_input_capabilities(adapter: RefCounted) -> Array:
 	return result
 
 
-func _get_game_input_capabilities(_arguments: Array) -> String:
+func _get_game_input_capabilities(arguments: Array) -> void:
 	var adapter := _adapter()
-	return JSON.stringify(_game_input_capabilities(adapter)) if adapter != null else "[]"
+	_respond(arguments, JSON.stringify(_game_input_capabilities(adapter)) if adapter != null else "[]")
 
 
-func _get_game_input_actions(_arguments: Array) -> String:
+func _get_game_input_actions(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null or not "semantic_game_input_v1" in _game_input_capabilities(adapter):
-		return JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input is unavailable."})
-	return adapter.get_game_input_actions_json()
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input is unavailable."}))
+		return
+	_respond(arguments, adapter.get_game_input_actions_json())
 
 
-func _get_game_input_state(_arguments: Array) -> String:
+func _get_game_input_state(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter != null and game_input_owner_id == 0 and not _game_input_capabilities(adapter).is_empty():
 		game_input_owner_id = adapter.create_game_input_owner()
 	if adapter == null or game_input_owner_id == 0:
-		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
-	return adapter.get_game_input_state_json(game_input_owner_id)
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."}))
+		return
+	_respond(arguments, adapter.get_game_input_state_json(game_input_owner_id))
 
 
-func _enqueue_game_input(arguments: Array) -> String:
+func _enqueue_game_input(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null:
-		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."}))
+		return
 	if game_input_owner_id == 0:
 		game_input_owner_id = adapter.create_game_input_owner()
-	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
+	var source = JSON.parse_string(str(_request_argument(arguments)))
 	if not source is Dictionary:
-		return JSON.stringify({"code": "invalid_request", "message": "Game input request must be an object."})
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "Game input request must be an object."}))
+		return
 	var request: Dictionary = source
 	if request.get("type", "") in ["press_game_input_action", "set_game_input_action"]:
 		var action_map = JSON.parse_string(adapter.get_game_input_actions_json())
 		if action_map is Dictionary:
 			for action in action_map.get("actions", []):
 				if action is Dictionary and action.get("id", "") == request.get("actionId", "") and action.get("requiresConfirmation", false) and not request.get("confirmed", false):
-					return JSON.stringify({"code": "invalid_request", "message": "This game input action requires confirmed=true."})
+					_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "This game input action requires confirmed=true."}))
+					return
 	var native_request := _native_game_input_request(request)
 	if native_request.is_empty():
-		return JSON.stringify({"code": "invalid_request", "message": "Unknown game input request."})
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "Unknown game input request."}))
+		return
 	native_request["owner_id"] = game_input_owner_id
 	native_request["observation_profile"] = 1
 	var receipt: Dictionary = adapter.enqueue_game_input(native_request)
 	if receipt.get("error_code", -1) != 0:
-		return JSON.stringify({"code": "invalid_request", "message": "Godot rejected the game input request.", "hostError": receipt.get("error_code", -1)})
-	return JSON.stringify({"requestId": receipt.get("request_id", 0)})
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "Godot rejected the game input request.", "hostError": receipt.get("error_code", -1)}))
+		return
+	_respond(arguments, JSON.stringify({"requestId": receipt.get("request_id", 0)}))
 
 
 func _native_game_input_request(request: Dictionary) -> Dictionary:
@@ -462,24 +483,37 @@ func _merge_game_input(base: Dictionary, kind: int, operation: int, target: Stri
 	return result
 
 
-func _poll_game_input(arguments: Array) -> String:
+func _poll_game_input(arguments: Array) -> void:
 	var adapter := _adapter()
 	if adapter == null or game_input_owner_id == 0:
-		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
-	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
-	return adapter.get_game_input_result_json(game_input_owner_id, request_id)
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."}))
+		return
+	var request_id := int(str(_request_argument(arguments)))
+	_respond(arguments, adapter.get_game_input_result_json(game_input_owner_id, request_id))
 
 
-func _release_game_input_owner(arguments: Array) -> int:
+func _release_game_input_owner(arguments: Array) -> void:
 	var adapter := _adapter()
 	var owner_id := game_input_owner_id
 	game_input_owner_id = 0
 	if adapter == null or owner_id == 0:
-		return 0
+		_respond(arguments, 0)
+		return
 	var released: bool = bool(adapter.release_game_input_owner(owner_id))
-	if released and not arguments.is_empty() and str(arguments[0]) == "1" and not _game_input_capabilities(adapter).is_empty():
+	if released and str(_request_argument(arguments)) == "1" and not _game_input_capabilities(adapter).is_empty():
 		game_input_owner_id = adapter.create_game_input_owner()
-	return 1 if released else 0
+	_respond(arguments, 1 if released else 0)
+
+
+func _respond(arguments: Array, value: Variant) -> void:
+	if arguments.is_empty() or not arguments[0] is JavaScriptObject:
+		return
+	var response: JavaScriptObject = arguments[0]
+	response.value = value
+
+
+func _request_argument(arguments: Array) -> Variant:
+	return arguments[1] if arguments.size() > 1 else null
 
 
 func _adapter() -> RefCounted:
