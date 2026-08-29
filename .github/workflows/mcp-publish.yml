@@ -38,22 +38,12 @@ jobs:
           node-version: 24.15.0
           registry-url: https://registry.npmjs.org
 
-      - name: Read WebMCP package version
-        id: webmcp_version
-        shell: bash
-        run: node -e "console.log('version=' + require('./packages/webmcp/package.json').version)" >> "${GITHUB_OUTPUT}"
-
-      - name: Read World Tools package version
-        id: world_tools_version
-        shell: bash
-        run: node -e "console.log('version=' + require('./packages/world-tools/package.json').version)" >> "${GITHUB_OUTPUT}"
-
       - name: Check whether World Tools version is already published
         id: world_tools_npm_version
         shell: bash
         run: |
           package_name="gua-world-tools"
-          package_version="${{ steps.world_tools_version.outputs.version }}"
+          package_version="${{ steps.version.outputs.version }}"
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             "https://registry.npmjs.org/${package_name}/${package_version}")"
 
@@ -76,7 +66,7 @@ jobs:
         shell: bash
         run: |
           package_name="gua-webmcp"
-          package_version="${{ steps.webmcp_version.outputs.version }}"
+          package_version="${{ steps.version.outputs.version }}"
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             "https://registry.npmjs.org/${package_name}/${package_version}")"
 
@@ -135,23 +125,95 @@ jobs:
           bun run --filter gua-webmcp build
           bun run --filter gui-mcp build
 
+      - name: Prepare World Tools publish package
+        id: prepare_world_tools
+        shell: bash
+        run: |
+          package_version="${{ steps.version.outputs.version }}"
+          publish_dir="${RUNNER_TEMP}/gua-world-tools-package"
+
+          rm -rf "${publish_dir}"
+          mkdir -p "${publish_dir}/dist" "${publish_dir}/src"
+          cp packages/world-tools/README.md "${publish_dir}/README.md"
+          cp -R packages/world-tools/dist/. "${publish_dir}/dist/"
+          cp -R packages/world-tools/src/. "${publish_dir}/src/"
+
+          PACKAGE_VERSION="${package_version}" PUBLISH_DIR="${publish_dir}" node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const packageJson = JSON.parse(fs.readFileSync("packages/world-tools/package.json", "utf8"));
+          packageJson.version = process.env.PACKAGE_VERSION;
+          delete packageJson.scripts;
+          delete packageJson.devDependencies;
+
+          fs.writeFileSync(
+            path.join(process.env.PUBLISH_DIR, "package.json"),
+            `${JSON.stringify(packageJson, null, 2)}\n`,
+          );
+          NODE
+
+          echo "publish_dir=${publish_dir}" >> "${GITHUB_OUTPUT}"
+
       - name: Verify World Tools package contents
-        working-directory: packages/world-tools
-        run: npm pack --dry-run
+        run: |
+          cd "${{ steps.prepare_world_tools.outputs.publish_dir }}"
+          npm pack --dry-run
 
       - name: Publish World Tools to npm
         if: steps.world_tools_npm_version.outputs.published != 'true'
-        working-directory: packages/world-tools
-        run: npm publish --access public --tag latest
+        run: |
+          cd "${{ steps.prepare_world_tools.outputs.publish_dir }}"
+          npm publish --access public --tag latest
+
+      - name: Prepare WebMCP publish package
+        id: prepare_webmcp
+        shell: bash
+        run: |
+          package_version="${{ steps.version.outputs.version }}"
+          publish_dir="${RUNNER_TEMP}/gua-webmcp-package"
+
+          rm -rf "${publish_dir}"
+          mkdir -p "${publish_dir}/dist" "${publish_dir}/src"
+          cp packages/webmcp/README.md "${publish_dir}/README.md"
+          cp -R packages/webmcp/dist/. "${publish_dir}/dist/"
+          cp -R packages/webmcp/src/. "${publish_dir}/src/"
+
+          PACKAGE_VERSION="${package_version}" PUBLISH_DIR="${publish_dir}" node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const packageJson = JSON.parse(fs.readFileSync("packages/webmcp/package.json", "utf8"));
+          packageJson.version = process.env.PACKAGE_VERSION;
+          packageJson.dependencies["gua-world-tools"] = `^${process.env.PACKAGE_VERSION}`;
+          delete packageJson.scripts;
+          delete packageJson.devDependencies;
+          for (const section of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+            for (const [name, version] of Object.entries(packageJson[section] ?? {})) {
+              if (String(version).startsWith("workspace:")) {
+                throw new Error(`Published gua-webmcp manifest retains workspace dependency ${name}@${version}`);
+              }
+            }
+          }
+
+          fs.writeFileSync(
+            path.join(process.env.PUBLISH_DIR, "package.json"),
+            `${JSON.stringify(packageJson, null, 2)}\n`,
+          );
+          NODE
+
+          echo "publish_dir=${publish_dir}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify WebMCP package contents
-        working-directory: packages/webmcp
-        run: npm pack --dry-run
+        run: |
+          cd "${{ steps.prepare_webmcp.outputs.publish_dir }}"
+          npm pack --dry-run
 
       - name: Publish WebMCP to npm
         if: steps.webmcp_npm_version.outputs.published != 'true'
-        working-directory: packages/webmcp
-        run: npm publish --access public --tag latest
+        run: |
+          cd "${{ steps.prepare_webmcp.outputs.publish_dir }}"
+          npm publish --access public --tag latest
 
       - name: Prepare publish package
         id: prepare

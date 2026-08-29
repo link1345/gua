@@ -665,8 +665,9 @@ published as separate GitHub Release assets; the static libraries are already
 included in the Unity Package Manager archive.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
-`gui-mcp` package must be configured on npm with this repository, the
-`.github/workflows/mcp-publish.yml` workflow, and the `release` environment.
+`gua-world-tools`, `gua-webmcp`, and `gui-mcp` packages must each be configured
+on npm with this repository, the `.github/workflows/mcp-publish.yml` workflow,
+and the `release` environment.
 
 ## Godot 4.7 C# Sample
 
