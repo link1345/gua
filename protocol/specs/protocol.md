@@ -238,7 +238,7 @@ distinct unavailable errors defined by `screenshot-capture.schema.json`; a reset
 while queued produces `stale_session`. `get_screenshot` remains the latest-published-image
 compatibility API. Screenshots can contain rendered secrets and are not redacted.
 
-## Visual comparison and operation recording v1
+## Visual comparison and operation recording v2
 
 Visual comparison is an opt-in consumer of the existing PNG screenshot payload;
 semantic assertions remain the primary test path. Baselines use an explicit test
@@ -246,7 +246,9 @@ name and variant, are updated only by an API option or `GUA_UPDATE_BASELINES=1`,
 and are never inferred from OS/GPU state. Masks are removed from both diff output
 and the ratio denominator. Dimension mismatch never performs an implicit resize.
 
-`recording.schema.json` is the source of truth for recording version 1. Targets
+`recording.schema.json` is the source of truth. Version 2 adds mixed
+`ui_action`, `semantic_game_input`, and `raw_input` steps while retaining version
+1 read compatibility. Targets
 prefer stable `id`, then strict role/name/scope selection, with current focus valid
 only for key input and coordinate fallback only when explicitly recorded and
 permitted. Diagnostics history includes monotonic elapsed milliseconds and the
@@ -262,7 +264,10 @@ MCP and Inspector implement these features as protocol consumers rather than as
 new C ABI runtime state. MCP artifact names are confined to its configured
 artifact root. The browser Inspector uses explicit JSON/image import and download
 instead of arbitrary local filesystem access. Both consumers must preserve the
-recording v1 redaction rule.
+recording redaction rule. Held input, explicit release, and request-correlated
+host completion are recorded; automatic lease cleanup is runtime state and is
+not emitted as a replay step. Replay always releases all game inputs in a
+`finally` path after success, failure, or cancellation.
 
 ## Commands
 
@@ -315,6 +320,79 @@ Initial command types:
 - `set_checked`
 - `select`
 - `scroll`
+
+### Semantic game actions and raw input (v1)
+
+`game-input-actions.schema.json` describes the host-registered action map. It
+has its own monotonic `revision`, current `context`, and descriptors for
+`button`, `axis1d`, `vector2`, and `text` values. Only explicitly registered
+actions are visible; action maps are not inferred from engine assets or the UI
+tree. Hosts validate IDs, active context, finite values, ranges, and holdability
+both when enqueueing and when consuming requests.
+
+Semantic commands are `get_game_input_actions`, `press_game_input_action`,
+`set_game_input_action`, `release_game_input_action`, `get_game_input_state`,
+and `release_all_game_inputs`. Raw commands are `key_down`, `key_up`,
+`press_physical_key`, pointer move/button/wheel operations, standard-mapping
+gamepad button/axis/reset operations, and `text_input`. A `text_input` payload
+and a semantic `text` action value are limited to 40 Unicode code points so the
+stable v1 C ABI can carry the complete JSON string without truncation, including
+escaped input.
+The existing UI-tree `press_key` command is unchanged; physical keyboard input uses the supported
+W3C `KeyboardEvent.code` values enumerated by `commands.schema.json` through
+`press_physical_key`. This explicit cross-adapter subset includes standard
+alphanumeric, navigation, left/right modifier locations, F1-F24, numpad
+digit/operator, and PrintScreen codes; clients must not assume every optional
+or platform-specific W3C code is available.
+Before dispatching `press_game_input_action` or `set_game_input_action`, clients
+resolve the current descriptor and require `confirmed=true` when
+`requiresConfirmation` is set. The confirmation decision travels through the
+v2 C request descriptor and is revalidated against the current Action Map when
+the host consumes the request; legacy v1 C requests are unconfirmed. Inspector
+presents its local confirmation UI. Release operations remain available without
+confirmation so stale input can always be neutralized.
+
+Stateful operations use a 5000 ms lease when `leaseMs` is omitted and reject
+values above 60000 ms. Their safety deadline begins when the host consumes the
+request, rather than waiting for completion, and advances from unscaled elapsed
+host-frame time, not GuaClock. Expiry queues neutralization even when completion
+is delayed; a late completion cannot recreate the hold. Each WebSocket connection has a private owner ID; local C++ and
+.NET callers create an explicit game-input session. Disconnect, lease expiry,
+reset, and session disposal enqueue owner-scoped neutral cleanup for the next
+host frame. Adapter shutdown synchronously neutralizes all injected host state
+before runtime destruction; .NET adapters register that shutdown path when they
+enable game input. Enqueue acceptance is not completion: clients
+must wait for the matching request ID to be completed after injection into the
+host input path.
+If an owner disconnects after its request was consumed, the adapter may still
+complete that in-flight request so its pump can drain normally. The core accepts
+that late completion but does not recreate a hold or retain a result for the
+released owner. It queues neutral cleanup immediately and, if that cleanup was
+already consumed before the last ordinary in-flight request completes, queues a
+final cleanup again so delayed host injection cannot remain active.
+Non-strict reset preserves the same internal completion tombstone for consumed
+game-input requests, suppresses their stale caller result, and repeats owner
+cleanup after the final late completion.
+Local C++ sessions use `result_json(requestId)` and .NET sessions use
+`PollResult(requestId)` to distinguish pending, successful, and failed host
+injection. A completed result is acknowledged and removed after a successful
+full-buffer copy; implementations retain at most 1024 unacknowledged results per owner
+and discard results owned by a released session.
+
+Adapters advertise only initialized paths from `semantic_game_input_v1`,
+`raw_keyboard_input_v1`, `raw_pointer_input_v1`, `raw_gamepad_input_v1`,
+`text_input_v1`, and `game_input_lease_v1`. Raw input is opt-in; an adapter with
+no active pump and neutral-release path must omit the capability and return
+`unsupported`.
+
+Player/Public Agent game input is a separate, host-owned opt-in and is denied by
+default. Enabling input for a local Debug inspector does not authorize the same
+Semantic or Raw capability for WebMCP. The engine captures the Player profile
+for page-owned requests and the runtime intersects the Player authorization with
+the initialized adapter capabilities both at enqueue and immediately before the
+host consumes the request. Transports cannot select or elevate that profile.
+Neutral cleanup remains available for an already-created owner even when the
+host later revokes its Player capability.
 
 ### Semantic action lifecycle (v1)
 
@@ -412,7 +490,9 @@ by their ordinary JavaScript and engine instances.
 
 The browser-safe surface shares the base tool names and semantics for
 `get_ui_tree`, v1 semantic actions, `wait_for_node`, and optional
-`get_screenshot` with `gui-mcp`. Transport-specific definitions may add
+`get_screenshot` with `gui-mcp`. When the engine reports an initialized game
+input pump and cleanup route, it also exposes the Issue 77 Semantic Game Action
+and Raw Input tools matching the active capability set. Transport-specific definitions may add
 requirements that do not cross the browser boundary; for example, `gui-mcp`
 requires `secretKey` for every sensitive `set_value` so recordings can retain a
 stable secret reference. The
@@ -421,7 +501,7 @@ and resolves only with its request-ID-correlated host completion, and may expose
 the latest published screenshot. JavaScript validates live visibility, enabled
 state, and the advertised action but never owns or recreates the semantic tree.
 The engine boundary always projects UI and World observations as Player and
-captures browser action requests as Player, even when the same local runtime
+captures browser action and game-input requests as Player, even when the same local runtime
 continues to serve Debug observations to an Inspector. Neither tool arguments
 nor transport payloads may select or elevate an observation profile.
 
@@ -435,6 +515,16 @@ immediately, while the bridge continues request-specific polling until it drains
 the correlated completion. `get_screenshot` is registered only after the engine supplies a drawable
 frame readback path. Sensitive values may reach the host action consumer but are
 blank in completion results and absent from logs and error details.
+
+Each page bridge creates one internal game-input owner; that owner is not
+exposed on the wire and is never shared across tabs. Game-input promises resolve
+only after request-correlated host completion. Timeout, caller cancellation,
+tool unregister, port replacement, and engine disposal release every semantic
+and raw input held by that page owner. Semantic actions marked
+`requiresConfirmation` are re-resolved against the current action map and reject
+unless the current call supplies `confirmed: true`. Raw keyboard, pointer,
+gamepad, and text tools are registered only for capabilities advertised by the
+initialized host adapter.
 
 ## Events
 

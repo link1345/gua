@@ -68,6 +68,18 @@ public:
     Dictionary consume_clock_step();
     Array consume_clock_steps();
     void enable_virtual_clock_adapter();
+    bool publish_game_input_actions(const String& input_context, const Array& actions);
+    String get_game_input_actions_json() const;
+    void enable_game_input_adapter(int capabilities, int player_capabilities = 0);
+    int get_game_input_capabilities(int observation_profile) const;
+    uint64_t create_game_input_owner();
+    bool release_game_input_owner(uint64_t owner_id);
+    Dictionary enqueue_game_input(const Dictionary& request);
+    String get_game_input_state_json(uint64_t owner_id) const;
+    String get_game_input_result_json(uint64_t owner_id, uint64_t request_id) const;
+    Dictionary consume_game_input_request();
+    bool complete_game_input_request(const Dictionary& result);
+    int tick_game_input_leases(double elapsed_ms);
     bool start_inspector_bridge(int port = 8765);
     void stop_inspector_bridge();
     bool inspector_bridge_running() const;

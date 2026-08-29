@@ -1,6 +1,6 @@
-import type { GuaNode, GuaUiTree } from "./core";
+import type { GameInputCommandInput, GuaGameInputAction, GuaGameInputActions, GuaNode, GuaUiTree } from "./core";
 
-export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
+export type RecordedAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key" | "game_input";
 
 export interface SemanticActionInput {
   action: RecordedAction;
@@ -33,9 +33,11 @@ export interface RecordingStep {
   deltaY?: number;
   scrollUnit?: number;
   modifiers?: number;
+  operation?: GameInputCommandInput["type"];
+  arguments?: Record<string, unknown>;
 }
 
-export interface GuaRecording { schemaVersion: 1; steps: RecordingStep[] }
+export interface GuaRecording { schemaVersion: 1 | 2; steps: RecordingStep[] }
 
 export interface ActionOutcome {
   requestId?: number;
@@ -76,10 +78,24 @@ export class InspectorRecorder {
     }) as unknown as RecordingStep);
   }
 
+  recordGameInput(input: GameInputCommandInput, requestId?: number): void {
+    if (this.startedAt === null) return;
+    const sensitive = "sensitive" in input && input.sensitive === true;
+    const secretKey = "secretKey" in input ? input.secretKey : undefined;
+    if (sensitive && secretKey === undefined) throw new Error("Sensitive game input requires secretKey.");
+    const argumentsValue = { ...input } as Record<string, unknown>;
+    delete argumentsValue.type;
+    delete argumentsValue.secretKey;
+    if (sensitive) { delete argumentsValue.value; delete argumentsValue.text; }
+    this.steps.push({ action: "game_input", operation: input.type, arguments: argumentsValue,
+      requestId, relativeMilliseconds: Date.now() - this.startedAt, preRevision: 0, postRevision: 0,
+      sensitive, secretKey: sensitive ? secretKey : undefined });
+  }
+
   stop(): GuaRecording {
     if (this.startedAt === null) throw new Error("No recording is active.");
     this.startedAt = null;
-    const recording: GuaRecording = { schemaVersion: 1, steps: [...this.steps] };
+    const recording: GuaRecording = { schemaVersion: 2, steps: [...this.steps] };
     validateRecording(recording);
     return recording;
   }
@@ -90,13 +106,40 @@ export async function replayRecording(
   getTree: () => Promise<GuaUiTree>,
   perform: (action: SemanticActionInput) => Promise<ActionOutcome>,
   secrets: Record<string, string> = {},
+  performGameInput?: (command: GameInputCommandInput) => Promise<unknown>,
+  getGameInputActions?: () => Promise<GuaGameInputActions>,
+  confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
 ): Promise<void> {
   validateRecording(recording);
   let previous = 0;
-  for (const step of recording.steps) {
+  let replaySucceeded = false;
+  try { for (const step of recording.steps) {
     if (step.waitCondition !== undefined) await waitForCondition(getTree, step.waitCondition, 10000);
     else if (step.relativeMilliseconds > previous) await delay(step.relativeMilliseconds - previous);
     previous = step.relativeMilliseconds;
+    if (step.action === "game_input") {
+      if (performGameInput === undefined || step.operation === undefined || step.arguments === undefined) throw new Error("Game input replay is unavailable.");
+      const argumentsValue = { ...step.arguments, type: step.operation } as Record<string, unknown>;
+      if (step.operation === "press_game_input_action" || step.operation === "set_game_input_action") {
+        if (getGameInputActions === undefined) throw new Error("Current game input actions are unavailable for replay.");
+        const confirmed = await prepareManualGameInput(
+          argumentsValue as GameInputCommandInput,
+          getGameInputActions,
+          confirmGameInputAction,
+        );
+        if (confirmed === null) throw new Error(`Confirmation was declined for game input action '${argumentsValue.actionId as string}'.`);
+        delete argumentsValue.confirmed;
+        Object.assign(argumentsValue, confirmed);
+      }
+      if (step.sensitive) {
+        const secret = secrets[step.secretKey as string];
+        if (secret === undefined) throw new Error(`Missing secret '${step.secretKey}'.`);
+        if (step.operation === "text_input") argumentsValue.text = secret;
+        else argumentsValue.value = secret;
+      }
+      await performGameInput(argumentsValue as GameInputCommandInput);
+      continue;
+    }
     const nodeId = await resolveTarget(step, await getTree());
     const value = step.sensitive ? secrets[step.secretKey as string] : step.value;
     if (step.sensitive && value === undefined) throw new Error(`Missing secret '${step.secretKey}'.`);
@@ -108,6 +151,28 @@ export async function replayRecording(
       scrollUnit: step.scrollUnit, sensitive: step.sensitive, secretKey: step.secretKey,
     });
   }
+  replaySucceeded = true;
+  } finally {
+    if (performGameInput !== undefined) {
+      try { await performGameInput({ type: "release_all_game_inputs" }); }
+      catch (cleanupError) { if (replaySucceeded) throw cleanupError; }
+    }
+  }
+}
+
+export async function prepareManualGameInput(
+  command: GameInputCommandInput,
+  getGameInputActions: () => Promise<GuaGameInputActions>,
+  confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
+): Promise<GameInputCommandInput | null> {
+  if (command.type !== "press_game_input_action" && command.type !== "set_game_input_action") return command;
+  const current = { ...command } as GameInputCommandInput & { confirmed?: boolean };
+  delete current.confirmed;
+  const action = (await getGameInputActions()).actions.find((candidate) => candidate.id === command.actionId);
+  if (action === undefined) throw new Error(`Game input action '${command.actionId}' is not currently published.`);
+  if (!action.requiresConfirmation) return current;
+  if (confirmGameInputAction === undefined || !await confirmGameInputAction(action)) return null;
+  return { ...current, confirmed: true } as GameInputCommandInput;
 }
 
 export interface BrowserVisualResult {
@@ -168,21 +233,37 @@ export async function compareImages(
 }
 
 export function validateRecording(value: unknown): asserts value is GuaRecording {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.steps)) {
-    throw new Error("Recording must use schemaVersion 1 and contain steps.");
+  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2) || !Array.isArray(value.steps)) {
+    throw new Error("Recording must use schemaVersion 1 or 2 and contain steps.");
   }
   let previous = -1;
   value.steps.forEach((raw, index) => {
     if (!isRecord(raw) || typeof raw.action !== "string" || !actions.includes(raw.action as RecordedAction)) {
       throw new Error(`Recording step ${index} has an unsupported action.`);
     }
+    if (raw.action === "game_input") {
+      if (value.schemaVersion !== 2 || typeof raw.operation !== "string" || !isRecord(raw.arguments))
+        throw new Error(`Recording step ${index} has invalid game input.`);
+      validateGameInputRecordingStep(index, raw.operation, raw.arguments, raw.sensitive === true);
+    }
+    if (raw.action === "game_input" && raw.sensitive === true && isRecord(raw.arguments) &&
+        ("value" in raw.arguments || "text" in raw.arguments))
+      throw new Error(`Recording step ${index} contains sensitive game input plaintext.`);
+    if (raw.sensitive === true && (typeof raw.secretKey !== "string" || raw.secretKey.length === 0))
+      throw new Error(`Recording step ${index} requires a secretKey for sensitive input.`);
+    if (raw.sensitive === false && raw.secretKey !== undefined)
+      throw new Error(`Recording step ${index} cannot have a secretKey when input is not sensitive.`);
     if (!Number.isInteger(raw.relativeMilliseconds) || (raw.relativeMilliseconds as number) < previous) {
       throw new Error(`Recording step ${index} has invalid timing.`);
     }
     previous = raw.relativeMilliseconds as number;
     const hasTarget = isRecord(raw.target);
     const hasCoordinate = isRecord(raw.coordinateFallback);
-    if (hasTarget === hasCoordinate) throw new Error(`Recording step ${index} requires exactly one target or coordinate fallback.`);
+    if (raw.action === "game_input") {
+      if (hasTarget || hasCoordinate) throw new Error(`Recording step ${index} game input cannot have a UI target.`);
+    } else if (hasTarget === hasCoordinate) {
+      throw new Error(`Recording step ${index} requires exactly one target or coordinate fallback.`);
+    }
     if (!Number.isInteger(raw.preRevision) || !Number.isInteger(raw.postRevision)) throw new Error(`Recording step ${index} has invalid revisions.`);
   });
 }
@@ -287,6 +368,101 @@ function compact<T extends Record<string, unknown>>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }
 
+function validateGameInputRecordingStep(
+  index: number,
+  operation: string,
+  argumentsValue: Record<string, unknown>,
+  sensitive: boolean,
+): void {
+  const invalid = (): never => { throw new Error(`Recording step ${index} has invalid game input arguments.`); };
+  if (!gameInputOperations.includes(operation as GameInputCommandInput["type"])) invalid();
+  const shape = (allowed: readonly string[], required: readonly string[] = []): void => {
+    if (Object.keys(argumentsValue).some((key) => !allowed.includes(key)) ||
+        required.some((key) => !(key in argumentsValue))) invalid();
+  };
+  const string = (key: string): boolean => typeof argumentsValue[key] === "string" && (argumentsValue[key] as string).length > 0;
+  const finite = (key: string): boolean => typeof argumentsValue[key] === "number" && Number.isFinite(argumentsValue[key]);
+  const optionalBoolean = (key: string): boolean => argumentsValue[key] === undefined || typeof argumentsValue[key] === "boolean";
+  const lease = (): boolean => argumentsValue.leaseMs === undefined ||
+    (Number.isInteger(argumentsValue.leaseMs) && (argumentsValue.leaseMs as number) >= 1 && (argumentsValue.leaseMs as number) <= 60000);
+  const gamepadIndex = (): boolean => argumentsValue.gamepadIndex === undefined ||
+    (Number.isInteger(argumentsValue.gamepadIndex) && (argumentsValue.gamepadIndex as number) >= 0 && (argumentsValue.gamepadIndex as number) <= 3);
+  const value = argumentsValue.value;
+  const semanticValue = value !== null && !Array.isArray(value) &&
+    (typeof value === "boolean" || typeof value === "string" ||
+      (typeof value === "number" && Number.isFinite(value)) || isRecord(value));
+  const semanticButtons = ["primary", "secondary", "auxiliary", "back", "forward"];
+  const gamepadButtons = ["south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger",
+    "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right"];
+  const gamepadAxes = ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"];
+
+  switch (operation as GameInputCommandInput["type"]) {
+    case "press_game_input_action":
+      shape(["actionId", "confirmed"], ["actionId"]);
+      if (!string("actionId") || !optionalBoolean("confirmed") || sensitive) invalid();
+      return;
+    case "set_game_input_action":
+      shape(["actionId", "value", "leaseMs", "confirmed", "sensitive"], sensitive ? ["actionId"] : ["actionId", "value"]);
+      if (!string("actionId") || (!sensitive && !semanticValue) || !lease() || !optionalBoolean("confirmed") ||
+          !optionalBoolean("sensitive") || (sensitive ? argumentsValue.sensitive !== true : argumentsValue.sensitive === true)) invalid();
+      return;
+    case "release_game_input_action":
+      shape(["actionId"], ["actionId"]);
+      if (!string("actionId") || sensitive) invalid();
+      return;
+    case "release_all_game_inputs":
+      shape([]);
+      if (sensitive) invalid();
+      return;
+    case "key_down": case "key_up": case "press_physical_key":
+      shape(["code", "leaseMs"], ["code"]);
+      if (!string("code") || !lease() || sensitive) invalid();
+      return;
+    case "pointer_move":
+      shape(["mode", "coordinateSpace", "x", "y"], ["mode", "x", "y"]);
+      if ((argumentsValue.mode !== "absolute" && argumentsValue.mode !== "delta") || !finite("x") || !finite("y") || sensitive ||
+          (argumentsValue.mode === "absolute" && argumentsValue.coordinateSpace !== "viewport_normalized" && argumentsValue.coordinateSpace !== "viewport_pixels") ||
+          (argumentsValue.mode === "delta" && argumentsValue.coordinateSpace !== undefined) ||
+          (argumentsValue.coordinateSpace === "viewport_normalized" &&
+            ((argumentsValue.x as number) < 0 || (argumentsValue.x as number) > 1 || (argumentsValue.y as number) < 0 || (argumentsValue.y as number) > 1))) invalid();
+      return;
+    case "pointer_button_down": case "pointer_button_up":
+      shape(["button", "leaseMs"], ["button"]);
+      if (!semanticButtons.includes(argumentsValue.button as string) || !lease() || sensitive) invalid();
+      return;
+    case "pointer_wheel":
+      shape(["deltaX", "deltaY", "wheelUnit"], ["deltaX", "deltaY"]);
+      if (!finite("deltaX") || !finite("deltaY") ||
+          (argumentsValue.wheelUnit !== undefined && argumentsValue.wheelUnit !== "pixels" && argumentsValue.wheelUnit !== "lines") || sensitive) invalid();
+      return;
+    case "gamepad_button_down": case "gamepad_button_up":
+      shape(["button", "gamepadIndex", "leaseMs"], ["button"]);
+      if (!gamepadButtons.includes(argumentsValue.button as string) || !gamepadIndex() || !lease() || sensitive) invalid();
+      return;
+    case "set_gamepad_axis":
+      shape(["axis", "value", "gamepadIndex", "leaseMs"], ["axis", "value"]);
+      if (!gamepadAxes.includes(argumentsValue.axis as string) || !finite("value") ||
+          (argumentsValue.value as number) < -1 || (argumentsValue.value as number) > 1 || !gamepadIndex() || !lease() || sensitive) invalid();
+      return;
+    case "reset_gamepad":
+      shape(["gamepadIndex"]);
+      if (!gamepadIndex() || sensitive) invalid();
+      return;
+    case "text_input":
+      shape(["text", "sensitive"], sensitive ? [] : ["text"]);
+      if ((!sensitive && typeof argumentsValue.text !== "string") || !optionalBoolean("sensitive") ||
+          (sensitive ? argumentsValue.sensitive !== true : argumentsValue.sensitive === true)) invalid();
+      return;
+    default:
+      invalid();
+  }
+}
+
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-const actions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"];
+const actions: RecordedAction[] = ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"];
+const gameInputOperations: GameInputCommandInput["type"][] = [
+  "press_game_input_action", "set_game_input_action", "release_game_input_action", "release_all_game_inputs",
+  "key_down", "key_up", "press_physical_key", "pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel",
+  "gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad", "text_input",
+];

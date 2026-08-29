@@ -274,6 +274,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector bundles, Godot native and Web GDExtension addons, ImGui adapter headers, and the Unity Package Manager archive with Windows x64 Mono and WebGL native runtimes.
+            This release contains the Windows Inspector bundles, Godot native and Web GDExtension addons, ImGui adapter headers, and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
           files: release-assets/**/*
           fail_on_unmatched_files: true

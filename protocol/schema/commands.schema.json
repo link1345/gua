@@ -16,6 +16,10 @@
     { "$ref": "#/$defs/captureScreenshot" },
     { "$ref": "#/$defs/clockInstall" },
     { "$ref": "#/$defs/clockRunFor" },
+    { "$ref": "#/$defs/gameInputAction" },
+    { "$ref": "#/$defs/rawKey" },
+    { "$ref": "#/$defs/pointerInput" },
+    { "$ref": "#/$defs/gamepadInput" },
     { "$ref": "#/$defs/textInput" },
     { "$ref": "#/$defs/moveGamepad" },
     { "$ref": "#/$defs/simpleCommand" }
@@ -179,13 +183,172 @@
         "stepMs": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "gameInputAction": {
+      "type": "object",
+      "required": ["type", "actionId"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["press_game_input_action", "set_game_input_action", "release_game_input_action"] },
+        "actionId": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "value": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "number" },
+            { "type": "string", "maxLength": 40 },
+            { "type": "object" }
+          ]
+        },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "confirmed": { "type": "boolean", "default": false },
+        "sensitive": { "type": "boolean", "default": false }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "set_game_input_action" } }, "required": ["type"] },
+          "then": { "required": ["value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "press_game_input_action" } }, "required": ["type"] },
+          "then": { "not": { "anyOf": [{ "required": ["value"] }, { "required": ["leaseMs"] }, { "required": ["sensitive"] }] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "release_game_input_action" } }, "required": ["type"] },
+          "then": { "not": { "anyOf": [
+            { "required": ["value"] }, { "required": ["leaseMs"] },
+            { "required": ["confirmed"] }, { "required": ["sensitive"] }
+          ] } }
+        }
+      ]
+    },
+    "keyboardCode": {
+      "type": "string",
+      "enum": [
+        "Backquote", "Backslash", "Backspace", "BracketLeft", "BracketRight", "CapsLock", "Comma",
+        "ContextMenu", "Delete", "End", "Enter", "Equal", "Escape", "Home", "Insert", "MetaLeft",
+        "MetaRight", "Minus", "NumLock", "PageDown", "PageUp", "Pause", "Period", "Quote", "ScrollLock",
+        "Semicolon", "ShiftLeft", "ShiftRight", "Slash", "Space", "Tab", "ControlLeft", "ControlRight",
+        "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "PrintScreen",
+        "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadMultiply",
+        "NumpadSubtract",
+        "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM",
+        "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ",
+        "Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9",
+        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+        "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
+        "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9"
+      ]
+    },
+    "rawKey": {
+      "type": "object", "required": ["type", "code"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["key_down", "key_up", "press_physical_key"] },
+        "code": { "$ref": "#/$defs/keyboardCode" },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      }
+    },
+    "pointerInput": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel"] },
+        "mode": { "enum": ["absolute", "delta"] },
+        "coordinateSpace": { "enum": ["viewport_normalized", "viewport_pixels"] },
+        "x": { "type": "number" }, "y": { "type": "number" },
+        "button": { "enum": ["primary", "secondary", "auxiliary", "back", "forward"] },
+        "deltaX": { "type": "number" }, "deltaY": { "type": "number" },
+        "wheelUnit": { "enum": ["pixels", "lines"] },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "pointer_move" } }, "required": ["type"] },
+          "then": {
+            "required": ["mode", "x", "y"],
+            "not": { "anyOf": [
+              { "required": ["button"] }, { "required": ["deltaX"] }, { "required": ["deltaY"] },
+              { "required": ["wheelUnit"] }, { "required": ["leaseMs"] }
+            ] },
+            "allOf": [
+              {
+                "if": { "properties": { "mode": { "const": "absolute" } }, "required": ["mode"] },
+                "then": {
+                  "required": ["coordinateSpace"],
+                  "allOf": [{
+                    "if": { "properties": { "coordinateSpace": { "const": "viewport_normalized" } }, "required": ["coordinateSpace"] },
+                    "then": { "properties": { "x": { "minimum": 0, "maximum": 1 }, "y": { "minimum": 0, "maximum": 1 } } }
+                  }]
+                },
+                "else": { "not": { "required": ["coordinateSpace"] } }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["pointer_button_down", "pointer_button_up"] } }, "required": ["type"] },
+          "then": {
+            "required": ["button"],
+            "not": { "anyOf": [
+              { "required": ["mode"] }, { "required": ["coordinateSpace"] }, { "required": ["x"] },
+              { "required": ["y"] }, { "required": ["deltaX"] }, { "required": ["deltaY"] },
+              { "required": ["wheelUnit"] }
+            ] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "pointer_wheel" } }, "required": ["type"] },
+          "then": {
+            "anyOf": [{ "required": ["deltaX"] }, { "required": ["deltaY"] }],
+            "not": { "anyOf": [
+              { "required": ["mode"] }, { "required": ["coordinateSpace"] }, { "required": ["x"] },
+              { "required": ["y"] }, { "required": ["button"] }, { "required": ["leaseMs"] }
+            ] }
+          }
+        }
+      ]
+    },
+    "gamepadInput": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad"] },
+        "gamepadIndex": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0 },
+        "button": { "enum": ["south", "east", "west", "north", "left_shoulder", "right_shoulder", "left_trigger", "right_trigger", "back", "start", "left_stick", "right_stick", "dpad_up", "dpad_down", "dpad_left", "dpad_right"] },
+        "axis": { "enum": ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] },
+        "value": { "type": "number", "minimum": -1, "maximum": 1 },
+        "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "enum": ["gamepad_button_down", "gamepad_button_up"] } }, "required": ["type"] },
+          "then": {
+            "required": ["button"],
+            "not": { "anyOf": [{ "required": ["axis"] }, { "required": ["value"] }] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "set_gamepad_axis" } }, "required": ["type"] },
+          "then": {
+            "required": ["axis", "value"],
+            "not": { "required": ["button"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reset_gamepad" } }, "required": ["type"] },
+          "then": {
+            "not": { "anyOf": [
+              { "required": ["button"] }, { "required": ["axis"] }, { "required": ["value"] }, { "required": ["leaseMs"] }
+            ] }
+          }
+        }
+      ]
+    },
     "textInput": {
       "type": "object",
       "required": ["type", "text"],
       "additionalProperties": false,
       "properties": {
         "type": { "const": "text_input" },
-        "text": { "type": "string" }
+        "text": { "type": "string", "maxLength": 40 },
+        "sensitive": { "type": "boolean", "default": false },
+        "secretKey": { "type": "string", "minLength": 1 }
       }
     },
     "moveGamepad": {
@@ -204,9 +367,20 @@
       "additionalProperties": false,
       "properties": {
         "type": {
-          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "get_clock", "clock_pause", "clock_resume"]
+          "enum": ["get_screenshot", "get_logs", "get_diagnostics", "get_version", "get_context_status", "poll_events", "poll_game_input", "get_clock", "clock_pause", "clock_resume", "get_game_input_actions", "get_game_input_state", "release_all_game_inputs"]
+        },
+        "requestId": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "poll_game_input" } }, "required": ["type"] },
+          "then": { "required": ["requestId"] }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["poll_events", "poll_game_input"] } }, "required": ["type"] },
+          "else": { "not": { "required": ["requestId"] } }
         }
-      }
+      ]
     }
   }
 }

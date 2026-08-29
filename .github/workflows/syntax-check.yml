@@ -10,9 +10,13 @@ jobs:
   godot-web-addon-contract:
     name: Godot Web Debug / Release
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Set up Emscripten
         uses: emscripten-core/setup-emsdk@v15
@@ -49,6 +53,9 @@ jobs:
           mkdir -p artifacts/godot-web-release
           ./Godot_v4.7-stable_linux.x86_64 --headless --path examples/godot-gdscript --export-release Web "$GITHUB_WORKSPACE/artifacts/godot-web-release/index.html"
           test -s artifacts/godot-web-release/index.html
+
+      - name: Run Release Web in-page bridge smoke
+        run: bun scripts/verify-godot-web-release.ts artifacts/godot-web-release
 
   remote-clock:
     name: .NET remote clock

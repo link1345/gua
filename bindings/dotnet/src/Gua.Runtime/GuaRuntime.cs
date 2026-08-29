@@ -251,8 +251,12 @@ public sealed partial class GuaRuntime : IDisposable
     public void Dispose()
     {
         if (_handle == 0) return;
-        Native.gua_runtime_destroy(_handle);
-        _handle = 0;
+        try { ShutdownGameInputHost(); }
+        finally
+        {
+            Native.gua_runtime_destroy(_handle);
+            _handle = 0;
+        }
     }
 
     private void ThrowIfDisposed() { if (_handle == 0) throw new ObjectDisposedException(nameof(GuaRuntime)); }

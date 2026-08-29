@@ -4,9 +4,11 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { PNG } from "pngjs";
+import { guaPhysicalKeyboardCodes } from "gua-webmcp";
 
-import { GuaAutomationManager } from "../src/automation";
-import { GuaBridgeClient, guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments } from "../src/index";
+import { GuaAutomationManager, validateRecording } from "../src/automation";
+import { GuaBridgeClient, guaMcpToolDefinitions, guaMcpTools, parseClockRunForArguments, replayRecording } from "../src/index";
+import { validateRecording as validateInspectorRecording } from "../../inspector/src/automation";
 
 const roots: string[] = [];
 
@@ -104,6 +106,158 @@ describe("GuaAutomationManager", () => {
     const saved = await manager.saveRecording("login-flow");
     expect(await readFile(saved.path, "utf8")).not.toContain("not-written");
     expect((await manager.loadRecording("login-flow")).steps).toEqual(recording.steps);
+  });
+
+  test("keeps game-input command metadata out of recorded arguments", async () => {
+    const manager = await createManager();
+    manager.startRecording();
+    manager.recordGameInput({
+      operation: "set_game_input_action", requestId: 12, sensitive: true, secretKey: "chat-secret",
+      arguments: { type: "set_game_input_action", actionId: "chat", sensitive: true, secretKey: "chat-secret" },
+    });
+
+    const recording = manager.stopRecording();
+    validateInspectorRecording(recording);
+    const step = recording.steps[0];
+    expect(step?.operation).toBe("set_game_input_action");
+    expect(step?.secretKey).toBe("chat-secret");
+    expect(step?.arguments).toEqual({ actionId: "chat", sensitive: true });
+  });
+
+  test("keeps advertised physical keyboard codes aligned with the protocol schema", async () => {
+    const schema = JSON.parse(await readFile(new URL("../../../protocol/schema/commands.schema.json", import.meta.url), "utf8"));
+    expect(schema.$defs.keyboardCode.enum).toEqual(guaPhysicalKeyboardCodes);
+    for (const name of ["key_down", "key_up", "press_physical_key"]) {
+      const tool = guaMcpToolDefinitions.find((candidate) => candidate.name === name)!;
+      const code = (tool.inputSchema as { properties: { code: { enum: string[] } } }).properties.code;
+      expect(code.enum).toEqual(guaPhysicalKeyboardCodes);
+    }
+  });
+
+  test("validates common metadata on imported game-input steps", () => {
+    const step = {
+      action: "game_input", operation: "key_down", arguments: { code: "KeyW" },
+      relativeMilliseconds: 10, preRevision: 0, postRevision: 0, sensitive: false,
+    };
+    expect(() => validateRecording({ schemaVersion: 2, steps: [step] })).not.toThrow();
+    const validate = (candidate: Record<string, unknown>) => {
+      const recording = { schemaVersion: 2 as const, steps: [{ ...step, ...candidate }] };
+      return () => validateRecording(recording);
+    };
+    expect(validate({ relativeMilliseconds: undefined })).toThrow("relativeMilliseconds");
+    expect(validate({ relativeMilliseconds: -1 })).toThrow("relativeMilliseconds");
+    expect(validate({ preRevision: -1 })).toThrow("revisions");
+    expect(validate({ postRevision: -1 })).toThrow("revisions");
+    expect(validate({ sensitive: undefined })).toThrow("sensitive metadata");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [step, { ...step, relativeMilliseconds: 9 }] }))
+      .toThrow("non-monotonic relativeMilliseconds");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      operation: "reset_context", arguments: { expectedSessionEpoch: 1 } }] }))
+      .toThrow("invalid game input arguments");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      arguments: { type: "reset_context", code: "KeyW" } }] }))
+      .toThrow("invalid game input arguments");
+    expect(() => validateRecording({ schemaVersion: 2, steps: [{ ...step,
+      arguments: { code: "IntlBackslash" } }] }))
+      .toThrow("invalid game input arguments");
+  });
+
+  test("cancels replay before a delayed game-input dispatch and still cleans up", async () => {
+    const commands: string[] = [];
+    const bridge = {
+      async performGameInput(input: { type: string }) { commands.push(input.type); return { requestId: 1 }; },
+      async waitForGameInput() { return { completed: true, requestId: 1, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    const controller = new AbortController();
+    const replay = replayRecording({ schemaVersion: 2, steps: [{
+      action: "game_input", operation: "key_down", arguments: { code: "KeyW" },
+      relativeMilliseconds: 100, preRevision: 0, postRevision: 0, sensitive: false,
+    }] }, bridge, {}, "preserve_delays", 1000, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(replay).rejects.toThrow("cancelled");
+    expect(commands).toEqual(["release_all_game_inputs"]);
+  });
+
+  test("cancels replay during game-input preflight before dispatch", async () => {
+    const commands: string[] = [];
+    let markPreflightStarted!: () => void;
+    let resolveActions!: (value: unknown) => void;
+    const preflightStarted = new Promise<void>((resolve) => { markPreflightStarted = resolve; });
+    const actions = new Promise<unknown>((resolve) => { resolveActions = resolve; });
+    const bridge = {
+      getGameInputActions() { markPreflightStarted(); return actions; },
+      async performGameInput(input: { type: string }) { commands.push(input.type); return { requestId: 1 }; },
+      async waitForGameInput() { return { completed: true, requestId: 1, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    const controller = new AbortController();
+    const replay = replayRecording({ schemaVersion: 2, steps: [{
+      action: "game_input", operation: "press_game_input_action", arguments: { actionId: "danger" },
+      relativeMilliseconds: 0, preRevision: 0, postRevision: 0, sensitive: false,
+    }] }, bridge, {}, "prefer_conditions", 1000, controller.signal);
+    await preflightStarted;
+    controller.abort();
+    resolveActions({ actions: [{ id: "danger", requiresConfirmation: false }] });
+    await expect(replay).rejects.toThrow("cancelled");
+    expect(commands).toEqual(["release_all_game_inputs"]);
+  });
+
+  test("cancels replay during UI preflight before dispatch", async () => {
+    const commands: string[] = [];
+    let markPreflightStarted!: () => void;
+    let resolveTree!: (value: unknown) => void;
+    const preflightStarted = new Promise<void>((resolve) => { markPreflightStarted = resolve; });
+    const tree = new Promise<unknown>((resolve) => { resolveTree = resolve; });
+    const bridge = {
+      getUiTree() { markPreflightStarted(); return tree; },
+      async performAction() { commands.push("click"); return { requestId: 1 }; },
+      async performGameInput(input: { type: string }) { commands.push(input.type); return { requestId: 2 }; },
+      async waitForGameInput() { return { completed: true, requestId: 2, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    const controller = new AbortController();
+    const replay = replayRecording({ schemaVersion: 2, steps: [{
+      action: "click", target: { id: "button" }, relativeMilliseconds: 0,
+      preRevision: 0, postRevision: 0, sensitive: false,
+    }] }, bridge, {}, "prefer_conditions", 1000, controller.signal);
+    await preflightStarted;
+    controller.abort();
+    resolveTree({ revision: 1, nodes: [] });
+    await expect(replay).rejects.toThrow("cancelled");
+    expect(commands).toEqual(["release_all_game_inputs"]);
+  });
+
+  test("restores sensitive semantic game-input secrets with their published type", async () => {
+    const values: unknown[] = [];
+    const bridge = {
+      async getGameInputActions() { return { actions: [{ id: "move", valueType: "vector2", requiresConfirmation: false }] }; },
+      async performGameInput(input: { type: string; value?: unknown }) { values.push(input.value); return { requestId: 8 }; },
+      async waitForGameInput() { return { completed: true, requestId: 8, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    await replayRecording({ schemaVersion: 2, steps: [{
+      action: "game_input", operation: "set_game_input_action", arguments: { actionId: "move", sensitive: true },
+      relativeMilliseconds: 0, preRevision: 0, postRevision: 0, sensitive: true, secretKey: "move-secret",
+    }] }, bridge, { "move-secret": "{\"x\":1,\"y\":0}" }, "prefer_conditions", 1000);
+    expect(values[0]).toEqual({ x: 1, y: 0 });
+  });
+
+  test("does not expose malformed sensitive vector secrets in replay errors", async () => {
+    const bridge = {
+      async getGameInputActions() { return { actions: [{ id: "move", valueType: "vector2", requiresConfirmation: false }] }; },
+      async performGameInput() { return { requestId: 9 }; },
+      async waitForGameInput() { return { completed: true, requestId: 9, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    const marker = "topsecret-value";
+    let message = "";
+    try {
+      await replayRecording({ schemaVersion: 2, steps: [{
+        action: "game_input", operation: "set_game_input_action", arguments: { actionId: "move", sensitive: true },
+        relativeMilliseconds: 0, preRevision: 0, postRevision: 0, sensitive: true, secretKey: "move-secret",
+      }] }, bridge, { "move-secret": marker }, "prefer_conditions", 1000);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("finite vector2 JSON object");
+    expect(message).not.toContain(marker);
+    expect(message).not.toContain("topsecret");
   });
 
   test("creates an explicit baseline and emits diff artifacts on mismatch", async () => {

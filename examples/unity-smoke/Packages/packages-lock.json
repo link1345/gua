@@ -8,8 +8,18 @@
         "com.unity.ugui": "2.0.0",
         "com.unity.modules.uielements": "1.0.0",
         "com.unity.modules.screencapture": "1.0.0",
-        "com.unity.modules.imageconversion": "1.0.0"
+        "com.unity.modules.imageconversion": "1.0.0",
+        "com.unity.inputsystem": "1.20.0"
       }
+    },
+    "com.unity.inputsystem": {
+      "version": "1.20.0",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.modules.uielements": "1.0.0"
+      },
+      "url": "https://packages.unity.com"
     },
     "com.unity.ext.nunit": {
       "version": "2.1.0",

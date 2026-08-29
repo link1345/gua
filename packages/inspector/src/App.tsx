@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type GuaInspectorClient,
   type GuaClockStatus,
+  type GuaGameInputActions,
+  type GuaGameInputState,
+  type GameInputCommandInput,
   type GuaNode,
   type GuaWorldObject,
   type InspectorSnapshot,
@@ -25,6 +28,7 @@ import {
   type GuaRecording,
   type SemanticActionInput,
   compareImages,
+  prepareManualGameInput,
   replayRecording,
   validateRecording,
 } from "./automation";
@@ -50,6 +54,8 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   const [visualResult, setVisualResult] = useState<BrowserVisualResult | null>(null);
   const [secretsJson, setSecretsJson] = useState("{}");
   const [clock, setClock] = useState<GuaClockStatus | null>(null);
+  const [gameInputActions, setGameInputActions] = useState<GuaGameInputActions | null>(null);
+  const [gameInputState, setGameInputState] = useState<GuaGameInputState | null>(null);
   const clockRefresh = useRef<{
     client: GuaInspectorClient;
     run: () => Promise<void>;
@@ -90,6 +96,10 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       const snapshot = await readSnapshot(inspectorClient);
       setState((current) => updateInspectorState(current, snapshot));
       await refreshClock();
+      try {
+        const [actions, inputState] = await Promise.all([inspectorClient.getGameInputActions(), inspectorClient.getGameInputState()]);
+        setGameInputActions(actions); setGameInputState(inputState);
+      } catch { setGameInputActions(null); setGameInputState(null); }
       setStatus("idle");
     } catch (caught) {
       setError((caught as Error).message);
@@ -205,6 +215,9 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
         () => inspectorClient.getUiTree(),
         (action) => inspectorClient.performAction(action),
         parsedSecrets as Record<string, string>,
+        (command) => inspectorClient.performGameInput(command),
+        () => inspectorClient.getGameInputActions(),
+        (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
       );
       await refresh();
       setError(null);
@@ -282,6 +295,22 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
           onResume={async () => setClock(await inspectorClient.resumeClock())}
           onError={(message) => setError(message)}
         />
+        <GameInputPanel
+          actions={gameInputActions}
+          state={gameInputState}
+          onInput={async (command) => {
+            const currentCommand = await prepareManualGameInput(
+              command,
+              () => inspectorClient.getGameInputActions(),
+              (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
+            );
+            if (currentCommand === null) return;
+            const receipt = await inspectorClient.performGameInput(currentCommand);
+            recorder.current.recordGameInput(currentCommand, receipt.requestId);
+            setGameInputState(await inspectorClient.getGameInputState());
+          }}
+          onError={(message) => setError(message)}
+        />
         <AutomationPanel
           recording={recording}
           lastRecording={lastRecording}
@@ -310,6 +339,39 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       </main>
     </div>
   );
+}
+
+function GameInputPanel({ actions, state, onInput, onError }: {
+  actions: GuaGameInputActions | null; state: GuaGameInputState | null;
+  onInput(command: GameInputCommandInput): Promise<void>; onError(message: string): void;
+}) {
+  const [rawCode, setRawCode] = useState("Space");
+  const run = (command: GameInputCommandInput) => {
+    void onInput(command).catch((caught) => onError((caught as Error).message));
+  };
+  return <section className="gua-panel gua-game-input-panel">
+    <PanelHeader title="Game Input" detail={actions === null ? "unsupported" : `${actions.context} · r${actions.revision}`} />
+    {actions?.actions.map((action) => <div className="gua-game-action" key={action.id}>
+      <span><strong>{action.id}</strong><small>{action.valueType} · {action.active ? "active" : "inactive"} · {action.risk}</small></span>
+      {action.valueType === "button" ? <>
+        <button type="button" disabled={!action.active} onClick={() => run({ type: "press_game_input_action", actionId: action.id })}>Press</button>
+        {action.holdable ? <button type="button" disabled={!action.active} onClick={() => run({ type: "set_game_input_action", actionId: action.id, value: true })}>Hold</button> : null}
+        <button type="button" onClick={() => run({ type: "release_game_input_action", actionId: action.id })}>Release</button>
+      </> : <GameInputValueControl action={action} onRun={(value) => run({ type: "set_game_input_action", actionId: action.id, value })} />}
+    </div>)}
+    <div className="gua-game-raw">
+      <input aria-label="W3C physical key code" value={rawCode} onChange={(event) => setRawCode(event.currentTarget.value)} />
+      <button type="button" onClick={() => run({ type: "press_physical_key", code: rawCode })}>Press physical key</button>
+      <button type="button" className="gua-danger" onClick={() => run({ type: "release_all_game_inputs" })}>Release all</button>
+    </div>
+    <ul className="gua-held-inputs">{state?.held.map((held, index) => <li key={`${held.kind}:${held.target}:${held.deviceIndex}:${index}`}>{held.target} · {held.remainingLeaseMs.toFixed(0)} ms</li>)}</ul>
+  </section>;
+}
+
+function GameInputValueControl({ action, onRun }: { action: NonNullable<GuaGameInputActions>["actions"][number]; onRun(value: unknown): void }) {
+  const [value, setValue] = useState(action.valueType === "vector2" ? "0,0" : action.valueType === "text" ? "" : "0");
+  return <><input aria-label={`${action.id} value`} value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+    <button type="button" disabled={!action.active} onClick={() => onRun(action.valueType === "vector2" ? { x: Number(value.split(",")[0]), y: Number(value.split(",")[1]) } : action.valueType === "axis1d" ? Number(value) : value)}>Set</button></>;
 }
 
 function ClockPanel({ clock, onInstall, onPause, onRunFor, onResume, onError }: {

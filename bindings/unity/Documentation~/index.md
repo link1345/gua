@@ -5,7 +5,7 @@ players, reflects UI Toolkit, uGUI, and TextMeshPro runtime controls, and listen
 `GUA_BRIDGE_PORT` (8765 by default). Add `GuaId` only where a stable explicit id
 is required; semantic registration is otherwise automatic.
 
-The stable support range is Windows x64, Unity 6000.0 or newer, and Mono. The
+The stable support range is Windows x64, Unity 6000.5 or newer, and Mono. The
 package contains precompiled managed assemblies and Windows Editor/Player native
 libraries. Other IL2CPP targets, other operating systems, IMGUI, and EditorWindow
 UI automation remain outside that stable range; the WebGL path below is
@@ -25,10 +25,32 @@ read-only `get_world_object_tree`, `find_world_objects`, and
 `wait_for_world_object` tools. Shared browser-safe world contracts are provided
 by `gua-world-tools`; WebMCP callers cannot elevate the runtime observation
 profile or invoke actions on world objects.
+When `GuaGameInputMap` initializes the input pump, the same page bridge exposes
+only the matching Semantic Game Action and Raw Input capabilities. Calls wait
+for correlated host completion and use a page-owned session that is released on
+abort, timeout, bridge uninstall, or runtime destruction.
 
 The WebGL build must include the Gua C ABI runtime as a WebAssembly native plugin;
 the managed adapter remains a P/Invoke wrapper and does not implement another UI
 model. The initial Unity bridge does not advertise screenshot support.
+
+## Semantic game actions and raw input
+
+Add `GuaGameInputMap` to one scene object and register only the actions intended
+for automation. Game code reads semantic values with
+`GuaUnityRuntime.GetGameInputValue` or subscribes to `GameInputChanged`.
+Enabling **Raw Input** creates virtual keyboard, mouse, and gamepad devices with
+Unity Input System 1.20.0. The adapter queues host-frame state events and
+neutralizes/removes the devices when it stops. Raw capabilities are omitted
+when Input System support or the opt-in map setting is unavailable.
+`AllowPlayerAgentSemanticInput` and `AllowPlayerAgentRawInput` are independent,
+default-off permissions for WebMCP/Public Agent callers. `EnableRawInput` alone
+only initializes the local Debug path and never grants browser input access.
+Physical keyboard tools accept the cross-adapter W3C code subset enumerated by
+`commands.schema.json`, including left/right modifiers and common numpad operators.
+When scenes change, the persistent runtime neutralizes the previous map and
+publishes the `GuaGameInputMap` found in the new scene before accepting more
+input.
 
 ## World objects
 

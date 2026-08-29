@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/game-input-actions.schema.json",
+  "title": "Gua Game Input Action Map",
+  "type": "object",
+  "required": ["schemaVersion", "sessionEpoch", "revision", "context", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "context": { "type": "string", "minLength": 1 },
+    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id", "description", "valueType", "holdable", "active", "bindings", "risk", "requiresConfirmation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "description": { "type": "string" },
+        "valueType": { "enum": ["button", "axis1d", "vector2", "text"] },
+        "range": {
+          "type": "object", "required": ["minimum", "maximum"], "additionalProperties": false,
+          "properties": { "minimum": { "type": "number" }, "maximum": { "type": "number" } }
+        },
+        "holdable": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "bindings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "risk": { "enum": ["safe", "caution", "dangerous"] },
+        "requiresConfirmation": { "type": "boolean" }
+      }
+    }
+  }
+}

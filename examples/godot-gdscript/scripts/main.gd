@@ -23,6 +23,10 @@ func _ready() -> void:
 		inspector_bridge_port = int(OS.get_environment("GUA_BRIDGE_PORT"))
 	_build_ui()
 	ui.attach(self)
+	if not ui.configure_game_input_actions("sample", [{
+		"id": "jump", "description": "Jump", "value_type": "button", "holdable": false,
+	}], true):
+		push_warning("Failed to publish the sample game input action map.")
 	ui.update(_current_screen())
 
 	if start_inspector_bridge_on_ready:
@@ -40,6 +44,10 @@ func _process(delta: float) -> void:
 	ui.update(_current_screen())
 
 
+func _exit_tree() -> void:
+	ui.dispose()
+
+
 func _build_ui() -> void:
 	title_label = Label.new()
 	title_label.name = "title"
@@ -54,6 +62,7 @@ func _build_ui() -> void:
 	start_button.text = "Start Game"
 	start_button.position = Vector2(512, 312)
 	start_button.size = Vector2(256, 56)
+	start_button.set_meta(&"gua_agent_allowed_actions", ["click"])
 	start_button.pressed.connect(_show_loading)
 	add_child(start_button)
 

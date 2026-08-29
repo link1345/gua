@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "sessionEpoch": 1,
+  "revision": 1,
+  "context": "gameplay",
+  "actions": [
+    {
+      "id": "move",
+      "description": "Move the player",
+      "valueType": "vector2",
+      "range": { "minimum": -1, "maximum": 1 },
+      "holdable": true,
+      "active": true,
+      "bindings": ["KeyW/KeyA/KeyS/KeyD", "GamepadLeftStick"],
+      "risk": "safe",
+      "requiresConfirmation": false
+    },
+    {
+      "id": "interact",
+      "description": "Interact with the nearby target",
+      "valueType": "button",
+      "holdable": false,
+      "active": true,
+      "bindings": ["KeyE", "GamepadSouth"],
+      "risk": "safe",
+      "requiresConfirmation": false
+    }
+  ]
+}

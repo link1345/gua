@@ -49,6 +49,18 @@ struct ActionCommand {
     int scroll_unit = 0;
 };
 
+struct GameInputCommand {
+    std::string type;
+    std::string target;
+    std::string value_json = "null";
+    double x = 0;
+    double y = 0;
+    unsigned int lease_ms = 5000;
+    int device_index = 0;
+    bool sensitive = false;
+    bool confirmed = false;
+};
+
 struct CommandResult {
     bool ok = false;
     std::string json;
@@ -76,6 +88,13 @@ struct BridgeHandlers {
     std::function<bool(std::string_view key)> press_key;
     std::function<long long(const ActionCommand& command)> enqueue_action;
     std::function<std::string(unsigned long long request_id)> poll_action_event_json;
+    std::function<unsigned long long()> create_game_input_owner;
+    std::function<void(unsigned long long owner_id)> release_game_input_owner;
+    std::function<bool(unsigned int capability)> game_input_supported;
+    std::function<std::string()> get_game_input_actions_json;
+    std::function<std::string(unsigned long long owner_id)> get_game_input_state_json;
+    std::function<long long(unsigned long long owner_id, const GameInputCommand& command)> enqueue_game_input;
+    std::function<std::string(unsigned long long owner_id, unsigned long long request_id)> poll_game_input_result_json;
 };
 
 struct BridgeOptions {

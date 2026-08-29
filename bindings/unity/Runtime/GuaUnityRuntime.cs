@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using Gua.Core;
 using Gua.Runtime;
 using UnityEngine;
@@ -21,7 +22,7 @@ namespace Gua.Unity
 {
 
 [DefaultExecutionOrder(-32000)]
-public sealed class GuaUnityRuntime : MonoBehaviour
+public sealed partial class GuaUnityRuntime : MonoBehaviour
 {
     private readonly Dictionary<string, Target> targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> ids = new(StringComparer.Ordinal);
@@ -36,6 +37,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
     private bool screenshotRunning;
     private static GuaUnityRuntime activeRuntime;
     private readonly Dictionary<ulong, int> webCalls = new();
+    private readonly Dictionary<ulong, int> webGameInputCalls = new();
+    private GuaGameInputSession? webGameInputSession;
     private const int DefaultWebCallTimeoutMs = 5000;
     private string webOwnerId = string.Empty;
     private bool webInstalled;
@@ -60,6 +63,10 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             runtime.Clock.CallbackFailed += error => Debug.LogError("Gua clock callback failed: " + error);
             runtime.SetAdapterVersion("unity", GuaVersion.Parse(runtime.GetVersionJson()).RuntimeVersion);
             runtime.EnableVirtualClockAdapter();
+            SceneManager.sceneLoaded += HandleGameInputSceneLoaded;
+            SceneManager.sceneUnloaded += HandleGameInputSceneUnloaded;
+            SceneManager.activeSceneChanged += HandleGameInputActiveSceneChanged;
+            InitializeGameInput();
             runtime.EnableWorldObjectTreeAdapter();
             if (Application.platform == RuntimePlatform.WebGLPlayer)
             {
@@ -79,9 +86,34 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         }
         catch (Exception error)
         {
+            UnsubscribeGameInputSceneEvents();
             Debug.LogError("Failed to initialize the Gua Unity adapter: " + error);
+            try { runtime?.Dispose(); }
+            catch (Exception cleanupError) { Debug.LogError("Failed to dispose the partially initialized Gua Unity runtime: " + cleanupError); }
+            finally { runtime = null; }
+            try { DisposeGameInput(); }
+            catch (Exception cleanupError) { Debug.LogError("Failed to remove partially initialized Gua Unity input devices: " + cleanupError); }
             enabled = false;
         }
+    }
+
+    private IEnumerator Start()
+    {
+        // Scene fixtures and user maps may be created by AfterSceneLoad hooks.
+        yield return null;
+        gameInputMapRefreshPending = true;
+        InitializeGameInput();
+    }
+
+    private void HandleGameInputSceneLoaded(Scene _scene, LoadSceneMode _mode) => gameInputMapRefreshPending = true;
+    private void HandleGameInputSceneUnloaded(Scene _scene) => gameInputMapRefreshPending = true;
+    private void HandleGameInputActiveSceneChanged(Scene _previous, Scene _next) => gameInputMapRefreshPending = true;
+
+    private void UnsubscribeGameInputSceneEvents()
+    {
+        SceneManager.sceneLoaded -= HandleGameInputSceneLoaded;
+        SceneManager.sceneUnloaded -= HandleGameInputSceneUnloaded;
+        SceneManager.activeSceneChanged -= HandleGameInputActiveSceneChanged;
     }
 
     public static void RunFrame() { if (activeRuntime != null && activeRuntime.enabled) activeRuntime.Tick(); }
@@ -98,6 +130,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         if (runtime == null) return;
         try
         {
+            if (gameInputMapRefreshPending) InitializeGameInput();
             runtime.Clock.AdvanceMilliseconds((double)Time.unscaledDeltaTime * 1000.0);
             targets.Clear();
             ids.Clear();
@@ -111,7 +144,8 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             try { CollectWorldObjects(); }
             catch (Exception error) { Debug.LogError("Gua Unity world publication failed: " + error); }
             DispatchActions();
-            if (Application.platform == RuntimePlatform.WebGLPlayer) FlushWebActionResults();
+            PumpGameInput();
+            if (Application.platform == RuntimePlatform.WebGLPlayer) { FlushWebActionResults(); FlushWebGameInputResults(); }
             ScheduleScreenshot();
         }
         catch (Exception error) { Debug.LogError("Gua Unity adapter frame failed: " + error); }
@@ -142,6 +176,55 @@ public sealed class GuaUnityRuntime : MonoBehaviour
                 return;
             }
             GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.QueryPlayerWorldObjectsJson(selector), 0);
+            return;
+        }
+        if (envelope.command.type == "get_game_input_capabilities")
+        {
+            GuaUnityWebResolve(webOwnerId, envelope.callId, JsonSerializer.Serialize(WebGameInputCapabilities()), 0);
+            return;
+        }
+        if (envelope.command.type == "get_game_input_actions")
+        {
+            if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) == 0) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity Player game input is not authorized."); return; }
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetGameInputActionsJson(), 0);
+            return;
+        }
+        if (envelope.command.type == "get_game_input_state")
+        {
+            if (!EnsureWebGameInputSession()) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity game input is not initialized."); return; }
+            GuaUnityWebResolve(webOwnerId, envelope.callId, webGameInputSession!.GetStateJson(), 0);
+            return;
+        }
+        if (envelope.command.type == "perform_game_input")
+        {
+            var gameInput = default(ParsedGameInput);
+            var gameInputError = "Invalid game input request.";
+            if (!EnsureWebGameInputSession() || !TryParseWebGameInput(json, out gameInput, out gameInputError))
+            {
+                ResolveWebError(envelope.callId, playerGameInputCapabilities == GuaGameInputCapabilities.None ? "engine_unsupported" : "invalid_request",
+                    playerGameInputCapabilities == GuaGameInputCapabilities.None ? "Unity Player game input is not authorized." : gameInputError);
+                return;
+            }
+            var requiredCapability = RequiredGameInputCapability(gameInput.Kind);
+            if (gameInput.Kind != GuaGameInputKind.Cleanup && (playerGameInputCapabilities & requiredCapability) == 0)
+            {
+                ResolveWebError(envelope.callId, "engine_unsupported", "This Unity Player game input capability is not authorized.");
+                return;
+            }
+            if (gameInput.Kind == GuaGameInputKind.Semantic && gameInput.Operation is GuaGameInputOperation.Press or GuaGameInputOperation.Set &&
+                WebGameInputRequiresConfirmation(gameInput.Target) && !gameInput.Confirmed)
+            {
+                ResolveWebError(envelope.callId, "invalid_request", $"Game input action '{gameInput.Target}' requires confirmed=true.");
+                return;
+            }
+            try
+            {
+                var gameInputRequestId = webGameInputSession!.Send(gameInput.Kind, gameInput.Operation, gameInput.Target, gameInput.Value,
+                    TimeSpan.FromMilliseconds(gameInput.LeaseMs), gameInput.X, gameInput.Y, gameInput.DeviceIndex,
+                    gameInput.Sensitive, gameInput.Confirmed);
+                webGameInputCalls[gameInputRequestId] = envelope.callId;
+            }
+            catch (Exception error) { ResolveWebError(envelope.callId, "invalid_request", error.Message); }
             return;
         }
         if (envelope.command.type != "perform_action" || envelope.command.request == null)
@@ -177,6 +260,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             if (result == GuaActionCancelResult.NotFound) runtime?.TryPollActionEvent(pair.Key, out _);
             webCalls.Remove(pair.Key);
         }
+        if (webGameInputCalls.Values.Contains(callId)) ReleaseWebGameInputSession(callId);
     }
 
     private void FlushWebActionResults()
@@ -195,6 +279,61 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             webCalls.Remove(pair.Key);
         }
     }
+
+    private void FlushWebGameInputResults()
+    {
+        if (webGameInputSession == null) return;
+        foreach (var pair in webGameInputCalls.ToArray())
+        {
+            var result = webGameInputSession.PollResult(pair.Key);
+            if (!result.Completed) continue;
+            GuaUnityWebResolve(webOwnerId, pair.Value, JsonSerializer.Serialize(result), 0);
+            webGameInputCalls.Remove(pair.Key);
+        }
+    }
+
+    private bool EnsureWebGameInputSession()
+    {
+        if (runtime == null) return false;
+        if (webGameInputSession != null) return true;
+        if (playerGameInputCapabilities == GuaGameInputCapabilities.None) return false;
+        webGameInputSession ??= runtime.CreateGameInputSession(GuaObservationProfile.Player);
+        return true;
+    }
+
+    private void ReleaseWebGameInputSession(int cancelledCallId = 0)
+    {
+        var affectedCalls = webGameInputCalls.Values.Distinct().ToArray();
+        webGameInputCalls.Clear();
+        foreach (var callId in affectedCalls)
+            if (callId != cancelledCallId)
+                ResolveWebError(callId, "aborted", "The page-owned game input session was released because another call was cancelled.");
+        try { webGameInputSession?.Dispose(); }
+        catch (Exception error) { Debug.LogError("Failed to release Unity WebMCP game input: " + error.Message); }
+        webGameInputSession = null;
+    }
+
+    private string[] WebGameInputCapabilities()
+    {
+        var result = new List<string>();
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) != 0) result.Add("semantic_game_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Keyboard) != 0) result.Add("raw_keyboard_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Pointer) != 0) result.Add("raw_pointer_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Gamepad) != 0) result.Add("raw_gamepad_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Text) != 0) result.Add("text_input_v1");
+        if (playerGameInputCapabilities != GuaGameInputCapabilities.None) result.Add("game_input_lease_v1");
+        return result.ToArray();
+    }
+
+    private static GuaGameInputCapabilities RequiredGameInputCapability(GuaGameInputKind kind) => kind switch
+    {
+        GuaGameInputKind.Semantic => GuaGameInputCapabilities.Semantic,
+        GuaGameInputKind.Keyboard => GuaGameInputCapabilities.Keyboard,
+        GuaGameInputKind.Pointer => GuaGameInputCapabilities.Pointer,
+        GuaGameInputKind.Gamepad => GuaGameInputCapabilities.Gamepad,
+        GuaGameInputKind.TextInput => GuaGameInputCapabilities.Text,
+        _ => GuaGameInputCapabilities.None,
+    };
 
     private void ResolveWebError(int callId, string code, string message) =>
         GuaUnityWebResolve(webOwnerId, callId, JsonUtility.ToJson(new WebError { code = code, message = message }), 1);
@@ -270,6 +409,80 @@ public sealed class GuaUnityRuntime : MonoBehaviour
         return action != 0;
     }
 
+    private static bool TryParseWebGameInput(string json, out ParsedGameInput result, out string error)
+    {
+        result = default;
+        error = "Invalid game input request.";
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var request = document.RootElement.GetProperty("command").GetProperty("request");
+            var type = request.GetProperty("type").GetString() ?? string.Empty;
+            var leaseMs = request.TryGetProperty("leaseMs", out var lease) ? lease.GetInt32() : 5000;
+            var deviceIndex = request.TryGetProperty("gamepadIndex", out var index) ? index.GetInt32() : 0;
+            if (leaseMs is < 1 or > 60000 || deviceIndex is < 0 or > 3) return false;
+            var sensitive = request.TryGetProperty("sensitive", out var sensitiveValue) && sensitiveValue.ValueKind == JsonValueKind.True;
+            var confirmed = request.TryGetProperty("confirmed", out var confirmedValue) && confirmedValue.ValueKind == JsonValueKind.True;
+            string Text(string name, string fallback = "") => request.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() ?? fallback : fallback;
+            double Number(string name) => request.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number ? item.GetDouble() : 0;
+            ParsedGameInput Build(GuaGameInputKind kind, GuaGameInputOperation operation, string target, object? value = null) =>
+                new(kind, operation, target, value, leaseMs, Number("x"), Number("y"), deviceIndex, sensitive, confirmed);
+            result = type switch
+            {
+                "press_game_input_action" => Build(GuaGameInputKind.Semantic, GuaGameInputOperation.Press, Text("actionId"), true),
+                "set_game_input_action" when request.TryGetProperty("value", out var value) => Build(GuaGameInputKind.Semantic, GuaGameInputOperation.Set, Text("actionId"), value.Clone()),
+                "release_game_input_action" => Build(GuaGameInputKind.Semantic, GuaGameInputOperation.Release, Text("actionId")),
+                "release_all_game_inputs" => Build(GuaGameInputKind.Cleanup, GuaGameInputOperation.ReleaseAll, string.Empty),
+                "key_down" => Build(GuaGameInputKind.Keyboard, GuaGameInputOperation.Down, Text("code")),
+                "key_up" => Build(GuaGameInputKind.Keyboard, GuaGameInputOperation.Up, Text("code")),
+                "press_physical_key" => Build(GuaGameInputKind.Keyboard, GuaGameInputOperation.Press, Text("code")),
+                "pointer_move" when Text("mode") == "absolute" => Build(GuaGameInputKind.Pointer, GuaGameInputOperation.MoveAbsolute, "absolute:" + Text("coordinateSpace", "viewport_pixels")),
+                "pointer_move" when Text("mode") == "delta" => Build(GuaGameInputKind.Pointer, GuaGameInputOperation.MoveDelta, "delta:"),
+                "pointer_button_down" => Build(GuaGameInputKind.Pointer, GuaGameInputOperation.Down, Text("button")),
+                "pointer_button_up" => Build(GuaGameInputKind.Pointer, GuaGameInputOperation.Up, Text("button")),
+                "pointer_wheel" => new ParsedGameInput(GuaGameInputKind.Pointer, GuaGameInputOperation.Wheel,
+                    Text("wheelUnit", "pixels"), null, leaseMs, Number("deltaX"), Number("deltaY"), deviceIndex, sensitive, confirmed),
+                "gamepad_button_down" => Build(GuaGameInputKind.Gamepad, GuaGameInputOperation.Down, Text("button")),
+                "gamepad_button_up" => Build(GuaGameInputKind.Gamepad, GuaGameInputOperation.Up, Text("button")),
+                "set_gamepad_axis" => Build(GuaGameInputKind.Gamepad, GuaGameInputOperation.Set, Text("axis"), Number("value")),
+                "reset_gamepad" => Build(GuaGameInputKind.Gamepad, GuaGameInputOperation.Reset, string.Empty),
+                "text_input" => Build(GuaGameInputKind.TextInput, GuaGameInputOperation.Set, string.Empty, Text("text")),
+                _ => default,
+            };
+            if (result.Kind == 0) return false;
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception parseError) { error = parseError.Message; return false; }
+    }
+
+    private bool WebGameInputRequiresConfirmation(string actionId)
+    {
+        if (runtime == null) return false;
+        using var document = JsonDocument.Parse(runtime.GetGameInputActionsJson());
+        foreach (var action in document.RootElement.GetProperty("actions").EnumerateArray())
+            if (action.GetProperty("id").GetString() == actionId)
+                return action.TryGetProperty("requiresConfirmation", out var confirmation) && confirmation.ValueKind == JsonValueKind.True;
+        return false;
+    }
+
+    private readonly struct ParsedGameInput
+    {
+        public ParsedGameInput(GuaGameInputKind kind, GuaGameInputOperation operation, string target, object? value,
+            int leaseMs, double x, double y, int deviceIndex, bool sensitive, bool confirmed)
+        { Kind = kind; Operation = operation; Target = target; Value = value; LeaseMs = leaseMs; X = x; Y = y; DeviceIndex = deviceIndex; Sensitive = sensitive; Confirmed = confirmed; }
+        public GuaGameInputKind Kind { get; }
+        public GuaGameInputOperation Operation { get; }
+        public string Target { get; }
+        public object? Value { get; }
+        public int LeaseMs { get; }
+        public double X { get; }
+        public double Y { get; }
+        public int DeviceIndex { get; }
+        public bool Sensitive { get; }
+        public bool Confirmed { get; }
+    }
+
     [Serializable] private sealed class WebEnvelope { public int callId; public WebCommand command; public string[] commandFields; }
     [Serializable] private sealed class WebCommand
     {
@@ -291,6 +504,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
 
     private void OnDestroy()
     {
+        UnsubscribeGameInputSceneEvents();
         if (activeRuntime == this) activeRuntime = null;
         if (webInstalled)
         {
@@ -298,6 +512,7 @@ public sealed class GuaUnityRuntime : MonoBehaviour
             webInstalled = false;
         }
         webCalls.Clear();
+        ReleaseWebGameInputSession();
         foreach (var pair in uGuiClickHandlers)
             if (pair.Key != null) pair.Key.onClick.RemoveListener(pair.Value);
         foreach (var pair in visualClickHandlers) pair.Key.clicked -= pair.Value;

@@ -13,6 +13,12 @@ const godotGlobals = globalThis as typeof globalThis & {
   __guaGodotEnqueueAction?: (request: string) => string;
   __guaGodotPollAction?: (requestId: string) => string;
   __guaGodotCancelAction?: (requestId: string) => number;
+  __guaGodotGetGameInputCapabilities?: () => string;
+  __guaGodotGetGameInputActions?: () => string;
+  __guaGodotGetGameInputState?: () => string;
+  __guaGodotEnqueueGameInput?: (request: string) => string;
+  __guaGodotPollGameInput?: (requestId: string) => string;
+  __guaGodotReleaseGameInput?: (recreate?: string) => number;
 };
 
 afterEach(() => {
@@ -24,11 +30,23 @@ afterEach(() => {
   delete godotGlobals.__guaGodotEnqueueAction;
   delete godotGlobals.__guaGodotPollAction;
   delete godotGlobals.__guaGodotCancelAction;
+  delete godotGlobals.__guaGodotGetGameInputCapabilities;
+  delete godotGlobals.__guaGodotGetGameInputActions;
+  delete godotGlobals.__guaGodotGetGameInputState;
+  delete godotGlobals.__guaGodotEnqueueGameInput;
+  delete godotGlobals.__guaGodotPollGameInput;
+  delete godotGlobals.__guaGodotReleaseGameInput;
 });
 
 async function installGodotWebPort(
   cancelled: string[],
-  options: { cancellationResult?: number; pollAction?: (requestId: string) => string } = {},
+  options: {
+    cancellationResult?: number;
+    pollAction?: (requestId: string) => string;
+    enqueueGameInput?: (request: string) => string;
+    pollGameInput?: (requestId: string) => string;
+    releaseGameInput?: (recreate?: string) => number;
+  } = {},
 ) {
   const source = await Bun.file(new URL(
     "../../../examples/godot-gdscript/addons/gua/gua_webmcp_bridge.gd",
@@ -42,6 +60,12 @@ async function installGodotWebPort(
   godotGlobals.__guaGodotEnqueueAction = () => JSON.stringify({ requestId: 17 });
   godotGlobals.__guaGodotPollAction = options.pollAction ?? (() => "null");
   godotGlobals.__guaGodotCancelAction = (requestId) => { cancelled.push(requestId); return options.cancellationResult ?? 1; };
+  godotGlobals.__guaGodotGetGameInputCapabilities = () => JSON.stringify(["raw_keyboard_input_v1"]);
+  godotGlobals.__guaGodotGetGameInputActions = () => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "", actions: [] });
+  godotGlobals.__guaGodotGetGameInputState = () => JSON.stringify({ schemaVersion: 1, held: [] });
+  godotGlobals.__guaGodotEnqueueGameInput = options.enqueueGameInput ?? (() => JSON.stringify({ requestId: 23 }));
+  godotGlobals.__guaGodotPollGameInput = options.pollGameInput ?? (() => "null");
+  godotGlobals.__guaGodotReleaseGameInput = options.releaseGameInput ?? (() => 1);
   new Function(match[1]!.replaceAll("%s", "test-owner"))();
   return godotGlobals.__guaGodotWebPort!;
 }
@@ -75,6 +99,46 @@ describe("Godot Web same-page port", () => {
       { timeoutMs: 0 },
     )).rejects.toMatchObject({ code: "timeout" });
     expect(cancelled).toEqual(["17"]);
+  });
+
+  test("aborts every correlated game-input call when one call releases the page owner", async () => {
+    const released: Array<string | undefined> = [];
+    let requestId = 20;
+    const port = await installGodotWebPort([], {
+      enqueueGameInput: () => JSON.stringify({ requestId: ++requestId }),
+      releaseGameInput: (recreate) => { released.push(recreate); return 1; },
+    });
+    const controller = new AbortController();
+    const first = port.invoke(
+      { type: "perform_game_input", request: { type: "key_down", code: "KeyA" } },
+      { signal: controller.signal },
+    ).catch((error) => error);
+    const second = port.invoke(
+      { type: "perform_game_input", request: { type: "key_down", code: "KeyB" } },
+    ).catch((error) => error);
+
+    controller.abort();
+
+    await expect(first).resolves.toMatchObject({ code: "aborted" });
+    await expect(second).resolves.toMatchObject({ code: "aborted" });
+    expect(released).toEqual(["1"]);
+  });
+
+  test("rejects every pending game-input call when the port is uninstalled", async () => {
+    const released: Array<string | undefined> = [];
+    let requestId = 30;
+    const port = await installGodotWebPort([], {
+      enqueueGameInput: () => JSON.stringify({ requestId: ++requestId }),
+      releaseGameInput: (recreate) => { released.push(recreate); return 1; },
+    });
+    const first = port.invoke({ type: "perform_game_input", request: { type: "key_down", code: "KeyA" } }).catch((error) => error);
+    const second = port.invoke({ type: "perform_game_input", request: { type: "key_down", code: "KeyB" } }).catch((error) => error);
+
+    port.__guaUninstall();
+
+    await expect(first).resolves.toMatchObject({ code: "engine_unsupported" });
+    await expect(second).resolves.toMatchObject({ code: "engine_unsupported" });
+    expect(released).toEqual([undefined]);
   });
 
   test("rejects and cancels pending actions when the port is uninstalled", async () => {
