@@ -25,6 +25,11 @@ struct gua_runtime_t {
         uint64_t session_epoch = 0;
         std::vector<uint64_t> request_ids;
     };
+    struct GameInputAuthorization {
+        int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG;
+        uint64_t owner_id = 0;
+        bool consumed = false;
+    };
 
     gua_context_t* context = nullptr;
     mutable std::mutex context_mutex;
@@ -42,6 +47,9 @@ struct gua_runtime_t {
     std::string godot_plugin_version;
     std::map<std::string, std::string> adapter_versions;
     bool virtual_clock_enabled = false;
+    uint32_t game_input_capabilities = 0;
+    uint32_t player_game_input_capabilities = 0;
+    std::unordered_map<uint64_t, GameInputAuthorization> game_input_request_profiles;
     bool world_object_tree_enabled = false;
     bool player_screenshot_enabled = false;
     int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG;
@@ -61,6 +69,42 @@ bool valid_runtime(gua_runtime_t* runtime)
     return runtime != nullptr && runtime->context != nullptr;
 }
 
+constexpr uint32_t all_game_input_capabilities =
+    GUA_RUNTIME_GAME_INPUT_SEMANTIC | GUA_RUNTIME_GAME_INPUT_KEYBOARD |
+    GUA_RUNTIME_GAME_INPUT_POINTER | GUA_RUNTIME_GAME_INPUT_GAMEPAD | GUA_RUNTIME_GAME_INPUT_TEXT;
+
+uint32_t effective_game_input_capabilities(const gua_runtime_t* runtime, int observation_profile)
+{
+    if (observation_profile == GUA_OBSERVATION_PROFILE_DEBUG) return runtime->game_input_capabilities;
+    if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER)
+        return runtime->game_input_capabilities & runtime->player_game_input_capabilities;
+    return 0;
+}
+
+uint32_t required_game_input_capability(int kind)
+{
+    switch (kind) {
+    case GUA_GAME_INPUT_SEMANTIC: return GUA_RUNTIME_GAME_INPUT_SEMANTIC;
+    case GUA_GAME_INPUT_KEYBOARD: return GUA_RUNTIME_GAME_INPUT_KEYBOARD;
+    case GUA_GAME_INPUT_POINTER: return GUA_RUNTIME_GAME_INPUT_POINTER;
+    case GUA_GAME_INPUT_GAMEPAD: return GUA_RUNTIME_GAME_INPUT_GAMEPAD;
+    case GUA_GAME_INPUT_TEXT_INPUT: return GUA_RUNTIME_GAME_INPUT_TEXT;
+    case GUA_GAME_INPUT_CLEANUP: return 0;
+    default: return UINT32_MAX;
+    }
+}
+
+int release_game_input_owner_unlocked(gua_runtime_t* runtime, uint64_t owner_id)
+{
+    const int result = gua_release_game_input_owner(runtime->context, owner_id);
+    if (result != 0) {
+        std::erase_if(runtime->game_input_request_profiles, [&](const auto& entry) {
+            return entry.second.owner_id == owner_id && !entry.second.consumed;
+        });
+    }
+    return result;
+}
+
 int copy_json_string(const std::string& json, char* out_json, int out_json_size)
 {
     const int required_size = static_cast<int>(json.size() + 1U);
@@ -70,9 +114,10 @@ int copy_json_string(const std::string& json, char* out_json, int out_json_size)
     return required_size;
 }
 
-void remove_capability(std::string& json, std::string_view capability)
+void remove_capability(std::string& json, std::string_view capability_name)
 {
     constexpr std::string_view key = "\"capabilities\":[";
+    const std::string capability = "\"" + std::string(capability_name) + "\"";
     const auto key_position = json.find(key);
     if (key_position == std::string::npos) return;
     const auto array_begin = key_position + key.size();
@@ -89,6 +134,17 @@ void remove_capability(std::string& json, std::string_view capability)
     json.erase(position, size);
 }
 
+void filter_runtime_capabilities(std::string& json, bool virtual_clock_enabled, uint32_t game_input_capabilities)
+{
+    if (!virtual_clock_enabled) remove_capability(json, "virtual_clock_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_SEMANTIC) == 0) remove_capability(json, "semantic_game_input_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_KEYBOARD) == 0) remove_capability(json, "raw_keyboard_input_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_POINTER) == 0) remove_capability(json, "raw_pointer_input_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_GAMEPAD) == 0) remove_capability(json, "raw_gamepad_input_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_TEXT) == 0) remove_capability(json, "text_input_v1");
+    if (game_input_capabilities == 0) remove_capability(json, "game_input_lease_v1");
+}
+
 std::string core_version_json()
 {
     const int size = gua_copy_version_json(nullptr, 0);
@@ -100,8 +156,9 @@ std::string core_version_json()
 
 std::string decorate_version_json(gua_runtime_t* runtime, std::string json)
 {
-    if (!runtime->virtual_clock_enabled) remove_capability(json, "\"virtual_clock_v1\"");
-    if (!runtime->world_object_tree_enabled) remove_capability(json, "\"world_object_tree_v1\"");
+    filter_runtime_capabilities(json, runtime->virtual_clock_enabled,
+        effective_game_input_capabilities(runtime, runtime->observation_profile));
+    if (!runtime->world_object_tree_enabled) remove_capability(json, "world_object_tree_v1");
     if (!runtime->godot_plugin_version.empty()) {
         const std::string marker = "\"godotPluginVersion\":null";
         const auto position = json.find(marker);
@@ -410,7 +467,13 @@ std::string reset_report_json(gua_runtime_t* runtime, unsigned long long expecte
         report.first_pending_action = 0; report.first_event_action = 0;
         report.first_pending_node_id[0] = '\0'; report.first_event_node_id[0] = '\0';
     }
-    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
+    if (result == GUA_RESET_SUCCEEDED) {
+        invalidate_screenshot_requests(runtime);
+        if ((options.flags & GUA_RESET_REQUESTS) != 0) {
+            std::erase_if(runtime->game_input_request_profiles,
+                [](const auto& entry) { return !entry.second.consumed; });
+        }
+    }
     return "{\"result\":" + std::to_string(result) +
         ",\"previousSessionEpoch\":" + std::to_string(report.previous_session_epoch) +
         ",\"sessionEpoch\":" + std::to_string(report.session_epoch) +
@@ -913,6 +976,167 @@ extern "C" void gua_runtime_set_virtual_clock_enabled(gua_runtime_t* runtime, in
     runtime->virtual_clock_enabled = enabled != 0;
 }
 
+extern "C" void gua_runtime_set_game_input_capabilities(gua_runtime_t* runtime, uint32_t capabilities)
+{
+    if (!valid_runtime(runtime)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    runtime->game_input_capabilities = capabilities & all_game_input_capabilities;
+    runtime->player_game_input_capabilities &= runtime->game_input_capabilities;
+}
+
+extern "C" void gua_runtime_set_player_game_input_capabilities(gua_runtime_t* runtime, uint32_t capabilities)
+{
+    if (!valid_runtime(runtime)) return;
+    const std::lock_guard lock(runtime->context_mutex);
+    runtime->player_game_input_capabilities = capabilities & runtime->game_input_capabilities & all_game_input_capabilities;
+}
+
+extern "C" uint32_t gua_runtime_get_game_input_capabilities(gua_runtime_t* runtime, int observation_profile)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return effective_game_input_capabilities(runtime, observation_profile);
+}
+
+extern "C" int gua_runtime_begin_game_input_frame(gua_runtime_t* runtime, const char* input_context)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_begin_game_input_frame(runtime->context, input_context);
+}
+
+extern "C" int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v1_t* descriptor)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_register_game_input_action_v1(runtime->context, descriptor);
+}
+
+extern "C" int gua_runtime_end_game_input_frame(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_end_game_input_frame(runtime->context);
+}
+
+extern "C" int gua_runtime_abort_game_input_frame(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_abort_game_input_frame(runtime->context);
+}
+
+extern "C" uint64_t gua_runtime_create_game_input_owner(gua_runtime_t* runtime)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_create_game_input_owner(runtime->context);
+}
+
+extern "C" int gua_runtime_release_game_input_owner(gua_runtime_t* runtime, uint64_t owner_id)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return release_game_input_owner_unlocked(runtime, owner_id);
+}
+
+extern "C" int gua_runtime_enqueue_game_input(gua_runtime_t* runtime,
+    const gua_game_input_request_descriptor_v1_t* descriptor, uint64_t* out_request_id)
+{
+    if (!valid_runtime(runtime)) return GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT;
+    if (descriptor == nullptr) return GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT;
+    gua_game_input_request_descriptor_v2_t upgraded { sizeof(upgraded), descriptor->owner_id, descriptor->kind,
+        descriptor->operation, descriptor->target, descriptor->value_json, descriptor->x, descriptor->y,
+        descriptor->lease_ms, descriptor->device_index, descriptor->sensitive, 0 };
+    return gua_runtime_enqueue_game_input_for_profile_v2(runtime, &upgraded, runtime->observation_profile, out_request_id);
+}
+
+extern "C" int gua_runtime_enqueue_game_input_v2(gua_runtime_t* runtime,
+    const gua_game_input_request_descriptor_v2_t* descriptor, uint64_t* out_request_id)
+{
+    return gua_runtime_enqueue_game_input_for_profile_v2(runtime, descriptor,
+        valid_runtime(runtime) ? runtime->observation_profile : GUA_OBSERVATION_PROFILE_DEBUG, out_request_id);
+}
+
+extern "C" int gua_runtime_enqueue_game_input_for_profile_v2(gua_runtime_t* runtime,
+    const gua_game_input_request_descriptor_v2_t* descriptor, int observation_profile, uint64_t* out_request_id)
+{
+    if (!valid_runtime(runtime) || descriptor == nullptr ||
+        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER))
+        return GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER)
+        return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
+    const uint32_t required = required_game_input_capability(descriptor->kind);
+    const uint32_t available = effective_game_input_capabilities(runtime, observation_profile);
+    if (required == UINT32_MAX || (required != 0 && (available & required) == 0))
+        return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
+    uint64_t request_id = 0;
+    const int result = gua_enqueue_game_input_v2(runtime->context, descriptor, &request_id);
+    if (result == GUA_GAME_INPUT_OK) {
+        runtime->game_input_request_profiles[request_id] = { observation_profile, descriptor->owner_id, false };
+        if (out_request_id != nullptr) *out_request_id = request_id;
+    }
+    return result;
+}
+
+extern "C" int gua_runtime_consume_game_input_request(gua_runtime_t* runtime, gua_game_input_request_v1_t* out_request)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    while (gua_consume_game_input_request(runtime->context, out_request) != 0) {
+        const auto profile = runtime->game_input_request_profiles.find(out_request->request_id);
+        const bool internal_cleanup = profile == runtime->game_input_request_profiles.end();
+        const int observation_profile = profile == runtime->game_input_request_profiles.end()
+            ? runtime->observation_profile : profile->second.observation_profile;
+        if (profile != runtime->game_input_request_profiles.end()) profile->second.consumed = true;
+        const uint32_t required = required_game_input_capability(out_request->kind);
+        const uint32_t available = effective_game_input_capabilities(runtime, observation_profile);
+        if (internal_cleanup || required == 0 || (required != UINT32_MAX && (available & required) != 0)) return 1;
+        (void)gua_complete_game_input_request(runtime->context, out_request->request_id, 0, GUA_GAME_INPUT_ERROR_UNSUPPORTED);
+        runtime->game_input_request_profiles.erase(out_request->request_id);
+    }
+    return 0;
+}
+
+extern "C" int gua_runtime_complete_game_input_request(gua_runtime_t* runtime, uint64_t request_id, int succeeded, int error_code)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    const int result = gua_complete_game_input_request(runtime->context, request_id, succeeded, error_code);
+    if (result != 0) runtime->game_input_request_profiles.erase(request_id);
+    return result;
+}
+
+extern "C" int gua_runtime_tick_game_input_leases(gua_runtime_t* runtime, double elapsed_ms)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_tick_game_input_leases(runtime->context, elapsed_ms);
+}
+
+extern "C" int gua_runtime_copy_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_copy_game_input_actions_json(runtime->context, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, uint64_t owner_id, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_copy_game_input_state_json(runtime->context, owner_id, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, uint64_t owner_id, uint64_t request_id,
+    char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_copy_game_input_result_json(runtime->context, owner_id, request_id, out_json, out_json_size);
+}
+
 extern "C" void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled)
 {
     if (!valid_runtime(runtime)) return;
@@ -1212,7 +1436,13 @@ extern "C" int gua_runtime_reset_context(gua_runtime_t* runtime, const gua_reset
         out_report->first_pending_action = 0; out_report->first_event_action = 0;
         out_report->first_pending_node_id[0] = '\0'; out_report->first_event_node_id[0] = '\0';
     }
-    if (result == GUA_RESET_SUCCEEDED) invalidate_screenshot_requests(runtime);
+    if (result == GUA_RESET_SUCCEEDED) {
+        invalidate_screenshot_requests(runtime);
+        if (options != nullptr && (options->flags & GUA_RESET_REQUESTS) != 0) {
+            std::erase_if(runtime->game_input_request_profiles,
+                [](const auto& entry) { return !entry.second.consumed; });
+        }
+    }
     return result;
 }
 
@@ -1493,6 +1723,88 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
                 ",\"sessionEpoch\":" + std::to_string(event.session_epoch) +
                 ",\"frameSequence\":" + std::to_string(event.frame_sequence) +
                 ",\"revision\":" + std::to_string(event.revision) + "}";
+        },
+        .create_game_input_owner = [runtime] {
+            const std::lock_guard lock(runtime->context_mutex);
+            return gua_create_game_input_owner(runtime->context);
+        },
+        .release_game_input_owner = [runtime](unsigned long long owner_id) {
+            const std::lock_guard lock(runtime->context_mutex);
+            (void)release_game_input_owner_unlocked(runtime, owner_id);
+        },
+        .game_input_supported = [runtime](unsigned int capability) {
+            const std::lock_guard lock(runtime->context_mutex);
+            return (effective_game_input_capabilities(runtime, runtime->observation_profile) & capability) != 0;
+        },
+        .get_game_input_actions_json = [runtime] {
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_copy_game_input_actions_json(runtime->context, nullptr, 0);
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_copy_game_input_actions_json(runtime->context, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
+        },
+        .get_game_input_state_json = [runtime](unsigned long long owner_id) {
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_copy_game_input_state_json(runtime->context, owner_id, nullptr, 0);
+            if (size <= 0) return std::string("{}");
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_copy_game_input_state_json(runtime->context, owner_id, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
+        },
+        .enqueue_game_input = [runtime](unsigned long long owner_id, const gua::ws::GameInputCommand& command) -> long long {
+            int kind = 0, operation = 0;
+            unsigned int required = 0;
+            if (command.type == "press_game_input_action" || command.type == "set_game_input_action" ||
+                command.type == "release_game_input_action") {
+                kind = GUA_GAME_INPUT_SEMANTIC; required = GUA_RUNTIME_GAME_INPUT_SEMANTIC;
+                operation = command.type == "press_game_input_action" ? GUA_GAME_INPUT_PRESS :
+                    command.type == "set_game_input_action" ? GUA_GAME_INPUT_SET : GUA_GAME_INPUT_RELEASE;
+            } else if (command.type == "key_down" || command.type == "key_up" || command.type == "press_physical_key") {
+                kind = GUA_GAME_INPUT_KEYBOARD; required = GUA_RUNTIME_GAME_INPUT_KEYBOARD;
+                operation = command.type == "key_down" ? GUA_GAME_INPUT_DOWN :
+                    command.type == "key_up" ? GUA_GAME_INPUT_UP : GUA_GAME_INPUT_PRESS;
+            } else if (command.type.rfind("pointer_", 0) == 0) {
+                kind = GUA_GAME_INPUT_POINTER; required = GUA_RUNTIME_GAME_INPUT_POINTER;
+                operation = command.type == "pointer_move" ?
+                    (command.target.rfind("delta:", 0) == 0 ? GUA_GAME_INPUT_MOVE_DELTA : GUA_GAME_INPUT_MOVE_ABSOLUTE) :
+                    command.type == "pointer_button_down" ? GUA_GAME_INPUT_DOWN :
+                    command.type == "pointer_button_up" ? GUA_GAME_INPUT_UP : GUA_GAME_INPUT_WHEEL;
+            } else if (command.type == "gamepad_button_down" || command.type == "gamepad_button_up" ||
+                command.type == "set_gamepad_axis" || command.type == "reset_gamepad") {
+                kind = GUA_GAME_INPUT_GAMEPAD; required = GUA_RUNTIME_GAME_INPUT_GAMEPAD;
+                operation = command.type == "gamepad_button_down" ? GUA_GAME_INPUT_DOWN :
+                    command.type == "gamepad_button_up" ? GUA_GAME_INPUT_UP :
+                    command.type == "set_gamepad_axis" ? GUA_GAME_INPUT_SET : GUA_GAME_INPUT_RESET;
+            } else if (command.type == "text_input") {
+                kind = GUA_GAME_INPUT_TEXT_INPUT; operation = GUA_GAME_INPUT_SET; required = GUA_RUNTIME_GAME_INPUT_TEXT;
+            } else if (command.type == "release_all_game_inputs") {
+                kind = GUA_GAME_INPUT_CLEANUP; operation = GUA_GAME_INPUT_RELEASE_ALL;
+                required = GUA_RUNTIME_GAME_INPUT_SEMANTIC | GUA_RUNTIME_GAME_INPUT_KEYBOARD |
+                    GUA_RUNTIME_GAME_INPUT_POINTER | GUA_RUNTIME_GAME_INPUT_GAMEPAD | GUA_RUNTIME_GAME_INPUT_TEXT;
+            }
+            const std::lock_guard lock(runtime->context_mutex);
+            const uint32_t available = effective_game_input_capabilities(runtime, runtime->observation_profile);
+            if (kind == 0 || required == 0 || (kind != GUA_GAME_INPUT_CLEANUP && (available & required) == 0))
+                return static_cast<long long>(GUA_GAME_INPUT_ERROR_UNSUPPORTED);
+            gua_game_input_request_descriptor_v2_t descriptor { sizeof(descriptor), owner_id, kind, operation,
+                command.target.c_str(), command.value_json.c_str(), command.x, command.y, command.lease_ms,
+                command.device_index, command.sensitive ? 1 : 0, command.confirmed ? 1 : 0 };
+            std::uint64_t request_id = 0;
+            const int result = gua_enqueue_game_input_v2(runtime->context, &descriptor, &request_id);
+            if (result == GUA_GAME_INPUT_OK)
+                runtime->game_input_request_profiles[request_id] = { runtime->observation_profile, owner_id, false };
+            return result == GUA_GAME_INPUT_OK ? static_cast<long long>(request_id) : static_cast<long long>(result);
+        },
+        .poll_game_input_result_json = [runtime](unsigned long long owner_id, unsigned long long request_id) {
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_copy_game_input_result_json(runtime->context, owner_id, request_id, nullptr, 0);
+            if (size <= 0) return std::string("null");
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_copy_game_input_result_json(runtime->context, owner_id, request_id, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
         },
     };
 

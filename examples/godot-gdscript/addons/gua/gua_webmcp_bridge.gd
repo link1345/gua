@@ -10,7 +10,15 @@ var query_world_callback: JavaScriptObject
 var enqueue_callback: JavaScriptObject
 var poll_callback: JavaScriptObject
 var cancel_callback: JavaScriptObject
+var get_game_input_capabilities_callback: JavaScriptObject
+var get_game_input_actions_callback: JavaScriptObject
+var get_game_input_state_callback: JavaScriptObject
+var enqueue_game_input_callback: JavaScriptObject
+var poll_game_input_callback: JavaScriptObject
+var release_game_input_callback: JavaScriptObject
 var bridge_owner_id := ""
+var game_input_owner_id := 0
+var attached := false
 
 
 func attach(gua_adapter: RefCounted) -> bool:
@@ -27,12 +35,25 @@ func attach(gua_adapter: RefCounted) -> bool:
 	enqueue_callback = JavaScriptBridge.create_callback(_enqueue_action)
 	poll_callback = JavaScriptBridge.create_callback(_poll_action)
 	cancel_callback = JavaScriptBridge.create_callback(_cancel_action)
+	get_game_input_capabilities_callback = JavaScriptBridge.create_callback(_get_game_input_capabilities)
+	get_game_input_actions_callback = JavaScriptBridge.create_callback(_get_game_input_actions)
+	get_game_input_state_callback = JavaScriptBridge.create_callback(_get_game_input_state)
+	enqueue_game_input_callback = JavaScriptBridge.create_callback(_enqueue_game_input)
+	poll_game_input_callback = JavaScriptBridge.create_callback(_poll_game_input)
+	release_game_input_callback = JavaScriptBridge.create_callback(_release_game_input_owner)
 	window.__guaGodotGetTree = get_tree_callback
 	window.__guaGodotGetWorldTree = get_world_tree_callback
 	window.__guaGodotQueryWorld = query_world_callback
 	window.__guaGodotEnqueueAction = enqueue_callback
 	window.__guaGodotPollAction = poll_callback
 	window.__guaGodotCancelAction = cancel_callback
+	window.__guaGodotGetGameInputCapabilities = get_game_input_capabilities_callback
+	window.__guaGodotGetGameInputActions = get_game_input_actions_callback
+	window.__guaGodotGetGameInputState = get_game_input_state_callback
+	window.__guaGodotEnqueueGameInput = enqueue_game_input_callback
+	window.__guaGodotPollGameInput = poll_game_input_callback
+	window.__guaGodotReleaseGameInput = release_game_input_callback
+	game_input_owner_id = gua_adapter.create_game_input_owner() if not _game_input_capabilities(gua_adapter).is_empty() else 0
 	bridge_owner_id = str(get_instance_id())
 	JavaScriptBridge.eval("""
 (() => {
@@ -45,8 +66,24 @@ func attach(gua_adapter: RefCounted) -> bool:
   const enqueueAction = globalThis.__guaGodotEnqueueAction;
   const pollAction = globalThis.__guaGodotPollAction;
   const cancelAction = globalThis.__guaGodotCancelAction;
+  const getGameInputCapabilities = globalThis.__guaGodotGetGameInputCapabilities;
+  const getGameInputActions = globalThis.__guaGodotGetGameInputActions;
+  const getGameInputState = globalThis.__guaGodotGetGameInputState;
+  const enqueueGameInput = globalThis.__guaGodotEnqueueGameInput;
+  const pollGameInput = globalThis.__guaGodotPollGameInput;
+  const releaseGameInput = globalThis.__guaGodotReleaseGameInput;
   const pending = new Map();
+  const pendingGameInputs = new Map();
   let disposed = false;
+  const releasePendingGameInputs = (causeRequestId, causeError) => {
+    try { releaseGameInput("1"); } catch (_) {}
+    for (const [requestId, call] of [...pendingGameInputs.entries()]) {
+      const error = requestId === causeRequestId
+        ? causeError
+        : engineError('aborted', 'The page-owned Godot game input session was released because another call ended.');
+      call.fail(error);
+    }
+  };
   const port = {
     __guaOwnerId: "%s",
     __guaUninstall() {
@@ -54,6 +91,8 @@ func attach(gua_adapter: RefCounted) -> bool:
       disposed = true;
       const error = engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
       for (const call of pending.values()) call.cancelOrDrain(error);
+      for (const call of [...pendingGameInputs.values()]) call.fail(error);
+      try { releaseGameInput(); } catch (_) {}
     },
     async invoke(command, options) {
       if (disposed) throw engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.');
@@ -78,6 +117,48 @@ func attach(gua_adapter: RefCounted) -> bool:
         const result = JSON.parse(queryWorld(JSON.stringify(command)));
         if (result && result.code) throw engineError(result.code, result.message || 'The Godot Gua world adapter is unavailable.');
         return result;
+      }
+      if (command.type === 'get_game_input_capabilities') return JSON.parse(getGameInputCapabilities());
+      if (command.type === 'get_game_input_actions') return JSON.parse(getGameInputActions());
+      if (command.type === 'get_game_input_state') return JSON.parse(getGameInputState());
+      if (command.type === 'perform_game_input') {
+        const receipt = JSON.parse(enqueueGameInput(JSON.stringify(command.request)));
+        if (!receipt.requestId) throw engineError(receipt.code || 'invalid_request', receipt.message || 'Godot rejected the game input request.');
+        return await new Promise((resolve, reject) => {
+          const deadline = performance.now() + (requestedTimeoutMs === undefined ? 5000 : requestedTimeoutMs);
+          let timer = 0;
+          let settled = false;
+          const finish = (settle) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', aborted);
+            pendingGameInputs.delete(receipt.requestId);
+            settle();
+          };
+          const call = { fail: (error) => finish(() => reject(error)) };
+          const aborted = () => {
+            releasePendingGameInputs(receipt.requestId, engineError('aborted', 'The Godot game input call was aborted and page-owned inputs were released.'));
+          };
+          const poll = () => {
+            if (disposed) return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
+            try {
+              const result = JSON.parse(pollGameInput(String(receipt.requestId)));
+              if (result && result.completed) return finish(() => resolve(result));
+              if (result && result.code) return finish(() => reject(engineError(result.code, result.message || 'The Godot game input session is unavailable.')));
+              if (performance.now() >= deadline) {
+                return releasePendingGameInputs(receipt.requestId, engineError('timeout', 'Timed out waiting for Godot game input completion; page-owned inputs were released.'));
+              }
+              timer = setTimeout(poll, 0);
+            } catch (_) {
+              return finish(() => reject(engineError('engine_unsupported', 'The Godot Gua adapter is no longer available.')));
+            }
+          };
+          pendingGameInputs.set(receipt.requestId, call);
+          if (signal) signal.addEventListener('abort', aborted, { once: true });
+          if (signal && signal.aborted) return aborted();
+          poll();
+        });
       }
       if (command.type !== 'perform_action') throw engineError('engine_unsupported', `Godot Web command is unsupported: ${command.type}`);
       const receipt = JSON.parse(enqueueAction(JSON.stringify(command.request)));
@@ -152,6 +233,7 @@ func attach(gua_adapter: RefCounted) -> bool:
   globalThis.__guaGodotWebPort = port;
 })();
 """ % bridge_owner_id)
+	attached = true
 	return true
 
 
@@ -169,8 +251,15 @@ func detach() -> void:
   delete globalThis.__guaGodotEnqueueAction;
   delete globalThis.__guaGodotPollAction;
   delete globalThis.__guaGodotCancelAction;
+  delete globalThis.__guaGodotGetGameInputCapabilities;
+  delete globalThis.__guaGodotGetGameInputActions;
+  delete globalThis.__guaGodotGetGameInputState;
+  delete globalThis.__guaGodotEnqueueGameInput;
+  delete globalThis.__guaGodotPollGameInput;
+  delete globalThis.__guaGodotReleaseGameInput;
 })();
 """ % bridge_owner_id)
+	_release_game_input_owner([])
 	bridge_owner_id = ""
 	get_tree_callback = null
 	get_world_tree_callback = null
@@ -178,11 +267,18 @@ func detach() -> void:
 	enqueue_callback = null
 	poll_callback = null
 	cancel_callback = null
+	get_game_input_capabilities_callback = null
+	get_game_input_actions_callback = null
+	get_game_input_state_callback = null
+	enqueue_game_input_callback = null
+	poll_game_input_callback = null
+	release_game_input_callback = null
 	adapter_ref = null
+	attached = false
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE:
+	if what == NOTIFICATION_PREDELETE and attached:
 		detach()
 
 
@@ -267,6 +363,123 @@ func _cancel_action(arguments: Array) -> int:
 		return 0
 	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
 	return adapter.cancel_action_request(request_id)
+
+
+func _game_input_capabilities(adapter: RefCounted) -> Array:
+	var mask := int(adapter.get_game_input_capabilities(1))
+	var result: Array = []
+	if mask & 1: result.push_back("semantic_game_input_v1")
+	if mask & 2: result.push_back("raw_keyboard_input_v1")
+	if mask & 4: result.push_back("raw_pointer_input_v1")
+	if mask & 8: result.push_back("raw_gamepad_input_v1")
+	if mask & 16: result.push_back("text_input_v1")
+	if mask != 0: result.push_back("game_input_lease_v1")
+	return result
+
+
+func _get_game_input_capabilities(_arguments: Array) -> String:
+	var adapter := _adapter()
+	return JSON.stringify(_game_input_capabilities(adapter)) if adapter != null else "[]"
+
+
+func _get_game_input_actions(_arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null or not "semantic_game_input_v1" in _game_input_capabilities(adapter):
+		return JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input is unavailable."})
+	return adapter.get_game_input_actions_json()
+
+
+func _get_game_input_state(_arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter != null and game_input_owner_id == 0 and not _game_input_capabilities(adapter).is_empty():
+		game_input_owner_id = adapter.create_game_input_owner()
+	if adapter == null or game_input_owner_id == 0:
+		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
+	return adapter.get_game_input_state_json(game_input_owner_id)
+
+
+func _enqueue_game_input(arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null:
+		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
+	if game_input_owner_id == 0:
+		game_input_owner_id = adapter.create_game_input_owner()
+	var source = JSON.parse_string(str(arguments[0])) if not arguments.is_empty() else null
+	if not source is Dictionary:
+		return JSON.stringify({"code": "invalid_request", "message": "Game input request must be an object."})
+	var request: Dictionary = source
+	if request.get("type", "") in ["press_game_input_action", "set_game_input_action"]:
+		var action_map = JSON.parse_string(adapter.get_game_input_actions_json())
+		if action_map is Dictionary:
+			for action in action_map.get("actions", []):
+				if action is Dictionary and action.get("id", "") == request.get("actionId", "") and action.get("requiresConfirmation", false) and not request.get("confirmed", false):
+					return JSON.stringify({"code": "invalid_request", "message": "This game input action requires confirmed=true."})
+	var native_request := _native_game_input_request(request)
+	if native_request.is_empty():
+		return JSON.stringify({"code": "invalid_request", "message": "Unknown game input request."})
+	native_request["owner_id"] = game_input_owner_id
+	native_request["observation_profile"] = 1
+	var receipt: Dictionary = adapter.enqueue_game_input(native_request)
+	if receipt.get("error_code", -1) != 0:
+		return JSON.stringify({"code": "invalid_request", "message": "Godot rejected the game input request.", "hostError": receipt.get("error_code", -1)})
+	return JSON.stringify({"requestId": receipt.get("request_id", 0)})
+
+
+func _native_game_input_request(request: Dictionary) -> Dictionary:
+	var type := str(request.get("type", ""))
+	var base := {"lease_ms": int(request.get("leaseMs", 5000)), "device_index": int(request.get("gamepadIndex", 0)),
+		"sensitive": bool(request.get("sensitive", false)), "confirmed": bool(request.get("confirmed", false)),
+		"x": float(request.get("x", 0.0)), "y": float(request.get("y", 0.0)), "value": null}
+	match type:
+		"press_game_input_action": return _merge_game_input(base, 1, 1, str(request.get("actionId", "")), true)
+		"set_game_input_action": return _merge_game_input(base, 1, 2, str(request.get("actionId", "")), request.get("value"))
+		"release_game_input_action": return _merge_game_input(base, 1, 3, str(request.get("actionId", "")), null)
+		"release_all_game_inputs": return _merge_game_input(base, 6, 10, "", null)
+		"key_down": return _merge_game_input(base, 2, 4, str(request.get("code", "")), null)
+		"key_up": return _merge_game_input(base, 2, 5, str(request.get("code", "")), null)
+		"press_physical_key": return _merge_game_input(base, 2, 1, str(request.get("code", "")), null)
+		"pointer_move":
+			var absolute: bool = request.get("mode", "") == "absolute"
+			return _merge_game_input(base, 3, 6 if absolute else 7,
+				"absolute:" + str(request.get("coordinateSpace", "viewport_pixels")) if absolute else "delta:", null)
+		"pointer_button_down": return _merge_game_input(base, 3, 4, str(request.get("button", "")), null)
+		"pointer_button_up": return _merge_game_input(base, 3, 5, str(request.get("button", "")), null)
+		"pointer_wheel":
+			base["x"] = float(request.get("deltaX", 0.0))
+			base["y"] = float(request.get("deltaY", 0.0))
+			return _merge_game_input(base, 3, 8, str(request.get("wheelUnit", "pixels")), null)
+		"gamepad_button_down": return _merge_game_input(base, 4, 4, str(request.get("button", "")), null)
+		"gamepad_button_up": return _merge_game_input(base, 4, 5, str(request.get("button", "")), null)
+		"set_gamepad_axis": return _merge_game_input(base, 4, 2, str(request.get("axis", "")), request.get("value"))
+		"reset_gamepad": return _merge_game_input(base, 4, 9, "", null)
+		"text_input": return _merge_game_input(base, 5, 2, "", request.get("text", ""))
+	return {}
+
+
+func _merge_game_input(base: Dictionary, kind: int, operation: int, target: String, value: Variant) -> Dictionary:
+	var result := base.duplicate()
+	result.merge({"kind": kind, "operation": operation, "target": target, "value": value}, true)
+	return result
+
+
+func _poll_game_input(arguments: Array) -> String:
+	var adapter := _adapter()
+	if adapter == null or game_input_owner_id == 0:
+		return JSON.stringify({"code": "engine_unsupported", "message": "Game input is unavailable."})
+	var request_id := int(str(arguments[0])) if not arguments.is_empty() else 0
+	return adapter.get_game_input_result_json(game_input_owner_id, request_id)
+
+
+func _release_game_input_owner(arguments: Array) -> int:
+	var adapter := _adapter()
+	var owner_id := game_input_owner_id
+	game_input_owner_id = 0
+	if adapter == null or owner_id == 0:
+		return 0
+	var released: bool = bool(adapter.release_game_input_owner(owner_id))
+	if released and not arguments.is_empty() and str(arguments[0]) == "1" and not _game_input_capabilities(adapter).is_empty():
+		game_input_owner_id = adapter.create_game_input_owner()
+	return 1 if released else 0
 
 
 func _adapter() -> RefCounted:

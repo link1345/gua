@@ -19,7 +19,30 @@ export const guaWebMcpToolNames = [
 
 export type GuaWebMcpToolName = (typeof guaWebMcpToolNames)[number];
 
+export const guaGameInputToolNames = [
+  "get_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action",
+  "get_game_input_state", "release_all_game_inputs", "key_down", "key_up", "press_physical_key", "pointer_move",
+  "pointer_button_down", "pointer_button_up", "pointer_wheel", "gamepad_button_down", "gamepad_button_up",
+  "set_gamepad_axis", "reset_gamepad", "text_input",
+] as const;
+
+export type GuaGameInputToolName = (typeof guaGameInputToolNames)[number];
+
 export const maxBrowserTimerDelayMs = 2_147_483_647;
+
+export const guaPhysicalKeyboardCodes: readonly string[] = [
+  "Backquote", "Backslash", "Backspace", "BracketLeft", "BracketRight", "CapsLock", "Comma",
+  "ContextMenu", "Delete", "End", "Enter", "Equal", "Escape", "Home", "Insert", "MetaLeft",
+  "MetaRight", "Minus", "NumLock", "PageDown", "PageUp", "Pause", "Period", "Quote", "ScrollLock",
+  "Semicolon", "ShiftLeft", "ShiftRight", "Slash", "Space", "Tab", "ControlLeft", "ControlRight",
+  "AltLeft", "AltRight", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "PrintScreen",
+  "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadMultiply",
+  "NumpadSubtract",
+  ...Array.from({ length: 26 }, (_, index) => `Key${String.fromCharCode(65 + index)}`),
+  ...Array.from({ length: 10 }, (_, index) => `Digit${index}`),
+  ...Array.from({ length: 24 }, (_, index) => `F${index + 1}`),
+  ...Array.from({ length: 10 }, (_, index) => `Numpad${index}`),
+];
 
 export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolName>[] = [
   {
@@ -96,6 +119,56 @@ export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolN
   },
 ];
 
+export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInputToolName>[] = [
+  { name: "get_game_input_actions", description: "Read the host-published semantic game action map.", inputSchema: objectSchema({}) },
+  { name: "press_game_input_action", description: "Press a semantic button action and wait for host completion.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
+  }, ["actionId"]) },
+  { name: "set_game_input_action", description: "Set and optionally hold a semantic game action value.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."),
+    value: { anyOf: [{ type: "boolean" }, { type: "number" }, { type: "string", maxLength: 40 }, { type: "object" }] },
+    leaseMs: leaseProperty(), confirmed: { type: "boolean" },
+    sensitive: { type: "boolean" },
+  }, ["actionId", "value"]) },
+  { name: "release_game_input_action", description: "Release a held semantic game action.", inputSchema: objectSchema({
+    actionId: stringProperty("Stable host-published action id."),
+  }, ["actionId"]) },
+  { name: "get_game_input_state", description: "Inspect held inputs owned by this page-local WebMCP session.", inputSchema: objectSchema({}) },
+  { name: "release_all_game_inputs", description: "Release every semantic and raw input owned by this page-local WebMCP session.", inputSchema: objectSchema({}) },
+  ...(["key_down", "key_up", "press_physical_key"] as const).map((name) => ({
+    name, description: `${name} using a supported W3C KeyboardEvent.code identifier.`,
+    inputSchema: objectSchema({ code: { type: "string", enum: guaPhysicalKeyboardCodes,
+      description: "Supported W3C KeyboardEvent.code such as KeyW or NumpadEnter." }, leaseMs: leaseProperty() }, ["code"]),
+  })),
+  { name: "pointer_move", description: "Move the engine pointer using absolute or delta coordinates.", inputSchema: objectSchema({
+    mode: { type: "string", enum: ["absolute", "delta"] }, coordinateSpace: { type: "string", enum: ["viewport_normalized", "viewport_pixels"] },
+    x: { type: "number" }, y: { type: "number" },
+  }, ["mode", "x", "y"]) },
+  ...(["pointer_button_down", "pointer_button_up"] as const).map((name) => ({
+    name, description: `${name} for an engine pointer button.`,
+    inputSchema: objectSchema({ button: { type: "string", enum: ["primary", "secondary", "auxiliary", "back", "forward"] },
+      leaseMs: leaseProperty() }, ["button"]),
+  })),
+  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: {
+    ...objectSchema({ deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] } }),
+    anyOf: [{ required: ["deltaX"] }, { required: ["deltaY"] }],
+  } },
+  ...(["gamepad_button_down", "gamepad_button_up"] as const).map((name) => ({
+    name, description: `${name} using Standard Gamepad mapping names.`,
+    inputSchema: objectSchema({ gamepadIndex: gamepadIndexProperty(), button: stringProperty("Standard Gamepad button name."),
+      leaseMs: leaseProperty() }, ["button"]),
+  })),
+  { name: "set_gamepad_axis", description: "Set and hold a Standard Gamepad axis.", inputSchema: objectSchema({
+    gamepadIndex: gamepadIndexProperty(),
+    axis: { type: "string", enum: ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] },
+    value: { type: "number", minimum: -1, maximum: 1 }, leaseMs: leaseProperty(),
+  }, ["axis", "value"]) },
+  { name: "reset_gamepad", description: "Reset one virtual gamepad to neutral.", inputSchema: objectSchema({ gamepadIndex: gamepadIndexProperty() }) },
+  { name: "text_input", description: "Inject text through the engine input route.", inputSchema: objectSchema({
+    text: { type: "string", maxLength: 40 }, sensitive: { type: "boolean" },
+  }, ["text"]) },
+];
+
 function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
   return { type: "object", additionalProperties: false, properties, ...(required.length === 0 ? {} : { required }) };
 }
@@ -106,4 +179,12 @@ function stringProperty(description: string): Record<string, unknown> {
 
 function numberProperty(description: string): Record<string, unknown> {
   return { type: "number", description };
+}
+
+function leaseProperty(): Record<string, unknown> {
+  return { type: "integer", minimum: 1, maximum: 60000 };
+}
+
+function gamepadIndexProperty(): Record<string, unknown> {
+  return { type: "integer", minimum: 0, maximum: 3 };
 }

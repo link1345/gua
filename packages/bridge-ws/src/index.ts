@@ -6,12 +6,15 @@ import type {
   GuaUiTree,
   GuaClockStatus,
   GuaContextStatus,
+  GuaGameInputActions,
+  GuaGameInputState,
+  GameInputCommandInput,
   GuaWorldObjectTree,
 } from "@gua/inspector/core";
 
 const defaultPort = 8765;
 const port = Number.parseInt(Bun.env.GUA_BRIDGE_PORT ?? Bun.argv[2] ?? `${defaultPort}`, 10);
-type GuaInspectorResult = GuaUiTree | GuaWorldObjectTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | null;
+type GuaInspectorResult = GuaUiTree | GuaWorldObjectTree | GuaLogEntry[] | GuaScreenshot | GuaClockStatus | GuaContextStatus | GuaGameInputActions | GuaGameInputState | { requestId: number } | { completed: boolean; succeeded?: boolean; errorCode?: number } | null;
 
 export function handleMessage(message: string | Buffer, target: DemoRuntime = runtime): GuaInspectorResponse {
   if (typeof message !== "string") {
@@ -41,6 +44,9 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
       case "clock_pause": return ok(command.id, target.pauseClock());
       case "clock_run_for": return ok(command.id, target.runClockFor(command.durationMs, command.stepMs));
       case "clock_resume": return ok(command.id, target.resumeClock());
+      case "get_game_input_actions": return ok(command.id, target.getGameInputActions());
+      case "get_game_input_state": return ok(command.id, target.getGameInputState());
+      case "poll_game_input": return ok(command.id, { completed: true, succeeded: true, errorCode: 0 });
       case "poll_events":
         return ok(command.id, null);
       case "click_node":
@@ -64,6 +70,12 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
       case "scroll":
         target.log("info", `scroll(${command.nodeId}, ${command.deltaX}, ${command.deltaY})`);
         return ok(command.id, null);
+      case "press_game_input_action": case "set_game_input_action": case "release_game_input_action":
+      case "key_down": case "key_up": case "press_physical_key":
+      case "pointer_move": case "pointer_button_down": case "pointer_button_up": case "pointer_wheel":
+      case "gamepad_button_down": case "gamepad_button_up": case "set_gamepad_axis": case "reset_gamepad":
+      case "text_input": case "release_all_game_inputs":
+        return ok(command.id, target.performGameInput(command));
     }
   } catch (error) {
     return { id: command.id, ok: false, error: (error as Error).message };
@@ -87,6 +99,8 @@ export class DemoRuntime {
     { sequence: 1, level: "info", message: "Demo runtime started." },
     { sequence: 2, level: "debug", message: "Serving Gua protocol snapshots over WebSocket." },
   ];
+  private nextGameInputRequestId = 1;
+  private heldGameInputs: GuaGameInputState["held"] = [];
 
   constructor(private readonly monotonicNow: () => number = () => performance.now()) {}
 
@@ -180,6 +194,21 @@ export class DemoRuntime {
     return result;
   }
   resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.advanceRunningClock(); this.clock = { ...this.clock, state: "running" }; this.runningClockStartMs = this.clock.nowMs; this.runningClockStartTimeMs = this.monotonicNow(); return this.clock; }
+  getGameInputActions(): GuaGameInputActions { return { schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "demo", actions: [
+    { id: "jump", description: "Jump", valueType: "button", holdable: true, active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false },
+    { id: "move", description: "Move", valueType: "vector2", range: { minimum: -1, maximum: 1 }, holdable: true, active: true, bindings: ["Gamepad.leftStick"], risk: "safe", requiresConfirmation: false },
+  ] }; }
+  getGameInputState(): GuaGameInputState { return { schemaVersion: 1, held: [...this.heldGameInputs] }; }
+  performGameInput(command: GameInputCommandInput): { requestId: number } {
+    const requestId = this.nextGameInputRequestId++;
+    if (command.type === "release_all_game_inputs") this.heldGameInputs = [];
+    else if (command.type === "set_game_input_action" || command.type === "key_down" || command.type === "pointer_button_down" || command.type === "gamepad_button_down" || command.type === "set_gamepad_axis") {
+      const target = "actionId" in command ? command.actionId : "code" in command ? command.code : "button" in command ? command.button : "axis" in command ? command.axis : "raw";
+      this.heldGameInputs = [...this.heldGameInputs.filter((held) => held.target !== target), { kind: 1, target, deviceIndex: "gamepadIndex" in command ? command.gamepadIndex ?? 0 : 0, value: "value" in command ? command.value : true, remainingLeaseMs: "leaseMs" in command ? command.leaseMs ?? 5000 : 5000 }];
+    }
+    this.log("info", `game_input(${command.type})`);
+    return { requestId };
+  }
 
   private advanceRunningClock() {
     if (!this.clock.installed || this.clock.state !== "running") return;

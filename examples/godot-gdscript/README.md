@@ -16,6 +16,20 @@ frame; concurrent pending requests share that readback. The headless smoke cover
 button, text input, checkbox, and select semantics plus PNG capture; managed
 `Gua.Testing.Visual` tests own baseline comparison policy, while
 `Gua.Testing.Recording` owns semantic recording and correlated replay.
+
+Game input is opt-in. Call `configure_game_input_actions(...)` with the actions
+the game intends to expose, and call `enable_raw_input()` only after the
+adapter's main-thread pump is active. The adapter emits
+`game_input_action_changed`, exposes `get_game_input_action_value(id)`, injects
+raw events through `Input.parse_input_event`, and releases held values when the
+lease or session ends.
+Both methods deny Player/Public Agent transports by default. Pass
+`allow_player_agents=true` only for the Semantic and Raw capability groups that
+the game intentionally exposes to WebMCP; Debug Inspector access remains a
+separate host opt-in.
+In a Web export, the page-local WebMCP bridge advertises only those initialized
+capabilities. It creates a private game-input owner and releases all input on
+abort, timeout, bridge replacement, adapter disposal, or tool unregister.
 Because Godot's dummy headless renderer has no viewport texture, the smoke injects
 a deterministic `Image`; normal runtime calls omit that test-only argument and
 capture `Viewport.get_texture().get_image()`.
@@ -119,13 +133,20 @@ checks pending/in-flight requests and unconsumed events and changes nothing when
 it reports a leak. The default preserves logs and screenshots; all clients of
 the same runtime observe the new `sessionEpoch`.
 
+Call `GuaAutoAdapter.dispose()` before dropping the adapter. It neutralizes
+injected input, disconnects adapter-managed signals, stops the Inspector bridge,
+and releases the native context deterministically.
+
 For a headless smoke check of the load-order-safe path:
 
 ```powershell
-scripts/run-godot-smoke.ps1
+.\scripts\run-godot-smoke.ps1 -GodotExecutable 'C:\path\to\Godot_v4.7-stable_win64_console.exe'
 ```
 
-The wrapper writes Godot's log inside the repository instead of the default
-`user://logs` location, disables the crash handler for deterministic headless
-failures, and terminates a stalled smoke process after two minutes. Override the
-executable with `GODOT_EXECUTABLE` or `-GodotExecutable` when needed.
+Run the command from the repository root. The wrapper keeps Godot's temporary
+`user://` data under the ignored `build/` directory, avoiding a Godot 4.7
+Windows access violation when `%APPDATA%` is not writable.
+It writes Godot's log inside the repository, disables the crash handler for
+deterministic headless failures, and terminates a stalled smoke process after
+two minutes. Override the executable with `GODOT_EXECUTABLE` or
+`-GodotExecutable` when needed.

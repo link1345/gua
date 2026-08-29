@@ -31,6 +31,105 @@ enum {
 };
 
 enum {
+    GUA_GAME_INPUT_BUTTON = 1,
+    GUA_GAME_INPUT_AXIS1D = 2,
+    GUA_GAME_INPUT_VECTOR2 = 3,
+    GUA_GAME_INPUT_TEXT = 4
+};
+
+enum {
+    GUA_GAME_INPUT_SEMANTIC = 1,
+    GUA_GAME_INPUT_KEYBOARD = 2,
+    GUA_GAME_INPUT_POINTER = 3,
+    GUA_GAME_INPUT_GAMEPAD = 4,
+    GUA_GAME_INPUT_TEXT_INPUT = 5,
+    GUA_GAME_INPUT_CLEANUP = 6
+};
+
+enum {
+    GUA_GAME_INPUT_PRESS = 1,
+    GUA_GAME_INPUT_SET = 2,
+    GUA_GAME_INPUT_RELEASE = 3,
+    GUA_GAME_INPUT_DOWN = 4,
+    GUA_GAME_INPUT_UP = 5,
+    GUA_GAME_INPUT_MOVE_ABSOLUTE = 6,
+    GUA_GAME_INPUT_MOVE_DELTA = 7,
+    GUA_GAME_INPUT_WHEEL = 8,
+    GUA_GAME_INPUT_RESET = 9,
+    GUA_GAME_INPUT_RELEASE_ALL = 10
+};
+
+enum {
+    GUA_GAME_INPUT_OK = 1,
+    GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT = -1,
+    GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND = -2,
+    GUA_GAME_INPUT_ERROR_INACTIVE = -3,
+    GUA_GAME_INPUT_ERROR_UNSUPPORTED = -4,
+    GUA_GAME_INPUT_ERROR_INVALID_VALUE = -5,
+    GUA_GAME_INPUT_ERROR_LEASE = -6,
+    GUA_GAME_INPUT_ERROR_CONFIRMATION_REQUIRED = -7
+};
+
+typedef struct gua_game_input_action_descriptor_v1_t {
+    uint32_t struct_size;
+    const char* id;
+    const char* description;
+    int value_type;
+    double minimum;
+    double maximum;
+    int has_range;
+    int holdable;
+    int active;
+    const char* bindings_json;
+    const char* risk;
+    int requires_confirmation;
+} gua_game_input_action_descriptor_v1_t;
+
+typedef struct gua_game_input_request_descriptor_v1_t {
+    uint32_t struct_size;
+    uint64_t owner_id;
+    int kind;
+    int operation;
+    const char* target;
+    const char* value_json;
+    double x;
+    double y;
+    uint32_t lease_ms;
+    int device_index;
+    int sensitive;
+} gua_game_input_request_descriptor_v1_t;
+
+typedef struct gua_game_input_request_descriptor_v2_t {
+    uint32_t struct_size;
+    uint64_t owner_id;
+    int kind;
+    int operation;
+    const char* target;
+    const char* value_json;
+    double x;
+    double y;
+    uint32_t lease_ms;
+    int device_index;
+    int sensitive;
+    int confirmed;
+} gua_game_input_request_descriptor_v2_t;
+
+typedef struct gua_game_input_request_v1_t {
+    uint32_t struct_size;
+    uint64_t request_id;
+    uint64_t owner_id;
+    int kind;
+    int operation;
+    char target[128];
+    char value_json[512];
+    double x;
+    double y;
+    uint32_t lease_ms;
+    int device_index;
+    int sensitive;
+} gua_game_input_request_v1_t;
+
+enum {
     GUA_CLOCK_OK = 1,
     GUA_CLOCK_ERROR_INVALID_ARGUMENT = -1,
     GUA_CLOCK_ERROR_NOT_INSTALLED = -2,
@@ -541,6 +640,24 @@ int gua_poll_event_v3_for_profile(gua_context_t* ctx, int observation_profile, g
 int gua_poll_event_v3_for_request_and_profile(gua_context_t* ctx, uint64_t request_id, int observation_profile, gua_event_v3_t* out_event);
 int gua_get_context_status(gua_context_t* ctx, gua_context_status_t* out_status);
 int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gua_reset_report_t* out_report);
+
+/* Game input action-map publication is atomic and independent from the UI tree. */
+int gua_begin_game_input_frame(gua_context_t* ctx, const char* input_context);
+int gua_register_game_input_action_v1(gua_context_t* ctx, const gua_game_input_action_descriptor_v1_t* descriptor);
+int gua_end_game_input_frame(gua_context_t* ctx);
+int gua_abort_game_input_frame(gua_context_t* ctx);
+int gua_copy_game_input_actions_json(gua_context_t* ctx, char* out_json, int out_json_size);
+/* Owners isolate held inputs. A zero owner is invalid. */
+uint64_t gua_create_game_input_owner(gua_context_t* ctx);
+int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_id);
+int gua_enqueue_game_input(gua_context_t* ctx, const gua_game_input_request_descriptor_v1_t* descriptor, uint64_t* out_request_id);
+int gua_enqueue_game_input_v2(gua_context_t* ctx, const gua_game_input_request_descriptor_v2_t* descriptor, uint64_t* out_request_id);
+int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input_request_v1_t* out_request);
+int gua_complete_game_input_request(gua_context_t* ctx, uint64_t request_id, int succeeded, int error_code);
+/* Advance safety leases with unscaled host time, never GuaClock time. */
+int gua_tick_game_input_leases(gua_context_t* ctx, double elapsed_ms);
+int gua_copy_game_input_state_json(gua_context_t* ctx, uint64_t owner_id, char* out_json, int out_json_size);
+int gua_copy_game_input_result_json(gua_context_t* ctx, uint64_t owner_id, uint64_t request_id, char* out_json, int out_json_size);
 
 #ifdef __cplusplus
 }

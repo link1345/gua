@@ -28,3 +28,21 @@ The native `gua_runtime` library must be deployed for the current platform.
 Screenshot adapters should use `TryCompleteScreenshot`. It returns `false`
 when a timeout, cancellation, or context reset has already invalidated the
 request; such a late completion is benign and must not be retried.
+
+## Game input adapter API
+
+Publish a complete action-map frame with `PublishGameInputActions`, then enable
+only the initialized `GuaGameInputCapabilities` with `EnableGameInput` and a
+shutdown action that synchronously neutralizes every injected host value before
+the native runtime is destroyed. Local consumers create a
+`GuaGameInputSession`; `Dispose` queues owner-scoped neutral cleanup. Adapters
+call `TryConsumeGameInput`, inject the request on the host thread, and then call
+`CompleteGameInput`. Call `TickGameInputLeases` once per host frame with
+unscaled elapsed time. Enqueue acceptance and host completion are deliberately
+separate; local callers use `GuaGameInputSession.PollResult(requestId)` for the
+correlated completion. Lease timing never uses `GuaRuntime.Clock`.
+The optional third `EnableGameInput` argument is the Player/Public Agent
+capability ceiling and defaults to `None`. Trusted engine bridges create a
+Player session with `CreateGameInputSession(GuaObservationProfile.Player)`;
+the runtime intersects that authorization with initialized adapter capabilities
+at enqueue and again immediately before host consumption.

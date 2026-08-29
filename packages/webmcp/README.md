@@ -6,6 +6,10 @@ engine bridge in the same page. It does not start an MCP server or WebSocket.
 Alongside Semantic UI Tree actions, the Godot and Unity bridge helpers register
 the read-only `get_world_object_tree`, `find_world_objects`, and
 `wait_for_world_object` tools when the engine-owned world adapter is available.
+The helpers also register Semantic Game Action and Raw Input tools only for
+capabilities reported by an initialized engine input pump. One page-local input
+owner is used for all such calls; timeout, cancellation, unregister, port
+replacement, and engine shutdown release its held input.
 World types and selector definitions come from the public `gua-world-tools`
 package; observation remains host-filtered and browser callers cannot request a
 debug profile.
@@ -40,6 +44,8 @@ has no drawable-frame readback path.
 
 Feature detection is non-fatal. Each browser tab creates its own bridge and tool
 registrations, so no Gua session router or cross-tab session ID is introduced.
+Actions with `requiresConfirmation` are checked against the current action map
+immediately before dispatch and require `confirmed: true`.
 
 The currently released Godot Web addon supports debug Web exports only. Release
 Web GDExtension builds are tracked in

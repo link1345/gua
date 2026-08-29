@@ -61,6 +61,35 @@ export interface GuaUiTree {
 }
 export interface GuaScreenshot { dataUri: string; width: number; height: number }
 
+export const guaGameInputCapabilities = [
+  "semantic_game_input_v1", "raw_keyboard_input_v1", "raw_pointer_input_v1", "raw_gamepad_input_v1",
+  "text_input_v1", "game_input_lease_v1",
+] as const;
+export type GuaGameInputCapability = (typeof guaGameInputCapabilities)[number];
+export type GuaGameInputValueType = "button" | "axis1d" | "vector2" | "text";
+export interface GuaGameInputAction {
+  id: string; description: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number };
+  holdable: boolean; active: boolean; bindings: string[]; risk: string; requiresConfirmation: boolean;
+}
+export interface GuaGameInputActionMap {
+  schemaVersion: 1; sessionEpoch: number; revision: number; context: string; actions: GuaGameInputAction[];
+}
+export interface GuaGameInputState { schemaVersion: 1; held: unknown[] }
+export type GuaGameInputRequest =
+  | { type: "press_game_input_action"; actionId: string; confirmed?: boolean }
+  | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; confirmed?: boolean; sensitive?: boolean }
+  | { type: "release_game_input_action"; actionId: string }
+  | { type: "release_all_game_inputs" }
+  | { type: "key_down" | "key_up" | "press_physical_key"; code: string; leaseMs?: number }
+  | { type: "pointer_move"; mode: "absolute" | "delta"; coordinateSpace?: "viewport_normalized" | "viewport_pixels"; x: number; y: number }
+  | { type: "pointer_button_down" | "pointer_button_up"; button: "primary" | "secondary" | "auxiliary" | "back" | "forward"; leaseMs?: number }
+  | { type: "pointer_wheel"; deltaX: number; deltaY: number; wheelUnit?: "pixels" | "lines" }
+  | { type: "gamepad_button_down" | "gamepad_button_up"; gamepadIndex?: number; button: string; leaseMs?: number }
+  | { type: "set_gamepad_axis"; gamepadIndex?: number; axis: "left_stick_x" | "left_stick_y" | "right_stick_x" | "right_stick_y"; value: number; leaseMs?: number }
+  | { type: "reset_gamepad"; gamepadIndex?: number }
+  | { type: "text_input"; text: string; sensitive?: boolean };
+export interface GuaGameInputCompletion { completed: true; requestId: number; succeeded: boolean; errorCode: number }
+
 export type GuaWebAction = "click" | "focus" | "set_value" | "set_checked" | "select" | "scroll" | "press_key";
 export type GuaWebActionRequest =
   | { action: "click" | "focus"; nodeId: string }
@@ -91,6 +120,10 @@ export interface GuaBrowserBridge {
   getScreenshot?(): Promise<GuaScreenshot>;
   getWorldObjectTree?(options?: GuaBridgeCallOptions): Promise<GuaWorldObjectTree>;
   findWorldObjects?(selector: GuaWorldSelector, options?: GuaBridgeCallOptions): Promise<GuaWorldQueryResult>;
+  getGameInputCapabilities?(): Promise<GuaGameInputCapability[]>;
+  getGameInputActions?(): Promise<GuaGameInputActionMap>;
+  getGameInputState?(): Promise<GuaGameInputState>;
+  performGameInput?(request: GuaGameInputRequest, options?: GuaBridgeCallOptions): Promise<GuaGameInputCompletion>;
 }
 
 export type GuaWebErrorCode =
@@ -128,7 +161,7 @@ export interface GuaWebMcpRegistration {
   error?: GuaWebError;
 }
 
-import { guaWebMcpToolDefinitions, maxBrowserTimerDelayMs } from "./tool-definitions.js";
+import { guaGameInputToolDefinitions, guaWebMcpToolDefinitions, maxBrowserTimerDelayMs } from "./tool-definitions.js";
 
 export async function registerGuaWebMcp(
   bridge: GuaBrowserBridge,
@@ -147,14 +180,32 @@ export async function registerGuaWebMcp(
     };
   }
 
+  let defaultTimeoutMs: number;
+  try { defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs"); }
+  catch (error) {
+    return {
+      supported: false,
+      registeredTools,
+      unregister: () => controller.abort(),
+      error: error instanceof GuaWebError ? error : new GuaWebError("invalid_request", "Invalid WebMCP timeout."),
+    };
+  }
+
+  let gameInputCapabilities: GuaGameInputCapability[] = [];
+  if (bridge.getGameInputCapabilities && bridge.performGameInput) {
+    try { gameInputCapabilities = await withTimeout(bridge.getGameInputCapabilities(), defaultTimeoutMs, controller.signal,
+      "Timed out reading game input capabilities."); }
+    catch { gameInputCapabilities = []; }
+  }
+  const gameInputTools = gameInputDefinitions(gameInputCapabilities, bridge);
   const definitions = [
     ...guaWebMcpToolDefinitions.filter((definition) => definition.name !== "get_screenshot" || bridge.getScreenshot),
     ...(bridge.getWorldObjectTree ? worldObservationTools.filter((definition) => definition.name === "get_world_object_tree") : []),
     ...(bridge.findWorldObjects ? worldObservationTools.filter((definition) => definition.name !== "get_world_object_tree") : []),
+    ...gameInputTools,
   ];
   try {
     const pollIntervalMs = timerDelay(options.pollIntervalMs ?? 25, "pollIntervalMs");
-    const defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs");
     for (const definition of definitions) {
       await modelContext.registerTool({
         ...definition,
@@ -179,7 +230,30 @@ export async function registerGuaWebMcp(
       error: error instanceof GuaWebError ? error : new GuaWebError("webmcp_unsupported", message),
     };
   }
-  return { supported: true, registeredTools, unregister: () => controller.abort() };
+  return {
+    supported: true,
+    registeredTools,
+    unregister: () => {
+      if (bridge.performGameInput && gameInputCapabilities.length > 0) {
+        void bridge.performGameInput({ type: "release_all_game_inputs" }).catch(() => undefined);
+      }
+      controller.abort();
+    },
+  };
+}
+
+function gameInputDefinitions(capabilities: GuaGameInputCapability[], bridge: GuaBrowserBridge) {
+  const enabled = new Set<string>();
+  if (capabilities.includes("semantic_game_input_v1") && bridge.getGameInputActions) {
+    for (const name of ["get_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action"]) enabled.add(name);
+  }
+  if (capabilities.length > 0) enabled.add("release_all_game_inputs");
+  if (capabilities.length > 0 && bridge.getGameInputState) enabled.add("get_game_input_state");
+  if (capabilities.includes("raw_keyboard_input_v1")) for (const name of ["key_down", "key_up", "press_physical_key"]) enabled.add(name);
+  if (capabilities.includes("raw_pointer_input_v1")) for (const name of ["pointer_move", "pointer_button_down", "pointer_button_up", "pointer_wheel"]) enabled.add(name);
+  if (capabilities.includes("raw_gamepad_input_v1")) for (const name of ["gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad"]) enabled.add(name);
+  if (capabilities.includes("text_input_v1")) enabled.add("text_input");
+  return guaGameInputToolDefinitions.filter((definition) => enabled.has(definition.name));
 }
 
 async function executeTool(
@@ -240,6 +314,36 @@ async function executeTool(
         "Timed out reading the latest Gua screenshot.",
       ));
     }
+    if (name === "get_game_input_actions") {
+      rejectUnknownArguments(input, new Set());
+      if (!bridge.getGameInputActions) throw new GuaWebError("engine_unsupported", "The engine bridge does not support semantic game input.");
+      return toolResult(await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out reading the game input action map."));
+    }
+    if (name === "get_game_input_state") {
+      rejectUnknownArguments(input, new Set());
+      if (!bridge.getGameInputState) throw new GuaWebError("engine_unsupported", "The engine bridge does not expose page-owned game input state.");
+      return toolResult(await withTimeout(bridge.getGameInputState(), defaultTimeoutMs, signal, "Timed out reading page-owned game input state."));
+    }
+    if (isGameInputTool(name)) {
+      if (!bridge.performGameInput) throw new GuaWebError("engine_unsupported", "The engine bridge does not support game input.");
+      const request = gameInputRequest(name, input);
+      if ((request.type === "press_game_input_action" || request.type === "set_game_input_action") && bridge.getGameInputActions) {
+        const map = await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out validating the game input action map.");
+        const action = map.actions.find((candidate) => candidate.id === request.actionId);
+        if (!action) throw new GuaWebError("invalid_request", `Unknown game input action: ${request.actionId}`);
+        if (action.requiresConfirmation && request.confirmed !== true) {
+          throw new GuaWebError("invalid_request", `Game input action '${request.actionId}' requires confirmed=true.`);
+        }
+      }
+      const completion = await performGameInputWithCancellation(bridge, request, defaultTimeoutMs, signal);
+      if (!completion.completed || !Number.isInteger(completion.requestId) || completion.requestId < 1) {
+        throw new GuaWebError("invalid_request", "The engine bridge returned no request-correlated game input completion.");
+      }
+      if (!completion.succeeded) throw new GuaWebError("action_failed", `The host rejected ${request.type}.`, {
+        requestId: completion.requestId, hostError: completion.errorCode,
+      });
+      return toolResult(completion);
+    }
     if (name === "wait_for_node") {
       const nodeId = requiredString(input, "nodeId");
       const timeoutMs = optionalInteger(input, "timeoutMs", defaultTimeoutMs, 0, maxBrowserTimerDelayMs);
@@ -269,7 +373,15 @@ async function executeTool(
       : completion;
     return toolResult(safeCompletion);
   } catch (error) {
-    const normalized = normalizeError(error, input.sensitive === undefined || input.sensitive === false ? undefined : String(input.value ?? ""));
+    if (name === "text_input" && input.sensitive === true) {
+      const code = error instanceof GuaWebError ? error.code : "action_failed";
+      const normalized = new GuaWebError(code, "Sensitive text input failed; engine details were [REDACTED].");
+      return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
+    }
+    const secret = input.sensitive === true
+      ? String(name === "text_input" ? input.text ?? "" : input.value ?? "")
+      : undefined;
+    const normalized = normalizeError(error, secret);
     return { content: [{ type: "text", text: JSON.stringify({ error: normalized.toJSON() }) }], isError: true };
   }
 }
@@ -419,6 +531,92 @@ function actionRequest(name: string, input: Record<string, unknown>): GuaWebActi
   }
 }
 
+const gameInputToolNames = new Set<string>(guaGameInputToolDefinitions.map((definition) => definition.name));
+
+function isGameInputTool(name: string): boolean {
+  return gameInputToolNames.has(name) && name !== "get_game_input_actions" && name !== "get_game_input_state";
+}
+
+function gameInputRequest(name: string, input: Record<string, unknown>): GuaGameInputRequest {
+  const leaseMs = () => optionalInteger(input, "leaseMs", 5000, 1, 60000);
+  const gamepadIndex = () => optionalInteger(input, "gamepadIndex", 0, 0, 3);
+  switch (name) {
+    case "press_game_input_action":
+      rejectUnknownArguments(input, new Set(["actionId", "confirmed"]));
+      return { type: name, actionId: requiredString(input, "actionId"), confirmed: optionalBoolean(input, "confirmed", false) };
+    case "set_game_input_action":
+      rejectUnknownArguments(input, new Set(["actionId", "value", "leaseMs", "confirmed", "sensitive"]));
+      if (!Object.prototype.hasOwnProperty.call(input, "value")) throw new GuaWebError("invalid_request", "value is required.");
+      return { type: name, actionId: requiredString(input, "actionId"), value: input.value, leaseMs: leaseMs(),
+        confirmed: optionalBoolean(input, "confirmed", false), sensitive: optionalBoolean(input, "sensitive", false) };
+    case "release_game_input_action":
+      rejectUnknownArguments(input, new Set(["actionId"]));
+      return { type: name, actionId: requiredString(input, "actionId") };
+    case "release_all_game_inputs":
+      rejectUnknownArguments(input, new Set());
+      return { type: name };
+    case "key_down": case "key_up": case "press_physical_key":
+      rejectUnknownArguments(input, new Set(["code", "leaseMs"]));
+      return { type: name, code: requiredString(input, "code"), leaseMs: leaseMs() };
+    case "pointer_move": {
+      rejectUnknownArguments(input, new Set(["mode", "coordinateSpace", "x", "y"]));
+      const mode = requiredEnum(input, "mode", ["absolute", "delta"] as const);
+      const coordinateSpace = input.coordinateSpace === undefined ? "viewport_pixels" : requiredEnum(input, "coordinateSpace", ["viewport_normalized", "viewport_pixels"] as const);
+      if (mode === "delta" && input.coordinateSpace !== undefined) throw new GuaWebError("invalid_request", "coordinateSpace is valid only for absolute pointer moves.");
+      const x = requiredNumber(input, "x"), y = requiredNumber(input, "y");
+      if (mode === "absolute" && coordinateSpace === "viewport_normalized" && (x < 0 || x > 1 || y < 0 || y > 1)) {
+        throw new GuaWebError("invalid_request", "Normalized pointer coordinates must be within 0 and 1.");
+      }
+      return { type: name, mode, ...(mode === "absolute" ? { coordinateSpace } : {}), x, y };
+    }
+    case "pointer_button_down": case "pointer_button_up":
+      rejectUnknownArguments(input, new Set(["button", "leaseMs"]));
+      return { type: name, button: requiredEnum(input, "button", ["primary", "secondary", "auxiliary", "back", "forward"] as const), leaseMs: leaseMs() };
+    case "pointer_wheel":
+      rejectUnknownArguments(input, new Set(["deltaX", "deltaY", "wheelUnit"]));
+      if (input.deltaX === undefined && input.deltaY === undefined) throw new GuaWebError("invalid_request", "deltaX or deltaY is required.");
+      return { type: name, deltaX: optionalNumber(input, "deltaX", 0), deltaY: optionalNumber(input, "deltaY", 0),
+        wheelUnit: input.wheelUnit === undefined ? "pixels" : requiredEnum(input, "wheelUnit", ["pixels", "lines"] as const) };
+    case "gamepad_button_down": case "gamepad_button_up":
+      rejectUnknownArguments(input, new Set(["gamepadIndex", "button", "leaseMs"]));
+      return { type: name, gamepadIndex: gamepadIndex(), button: requiredString(input, "button"), leaseMs: leaseMs() };
+    case "set_gamepad_axis": {
+      rejectUnknownArguments(input, new Set(["gamepadIndex", "axis", "value", "leaseMs"]));
+      const value = requiredNumber(input, "value");
+      if (value < -1 || value > 1) throw new GuaWebError("invalid_request", "value must be from -1 to 1.");
+      return { type: name, gamepadIndex: gamepadIndex(), axis: requiredEnum(input, "axis", ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"] as const), value, leaseMs: leaseMs() };
+    }
+    case "reset_gamepad":
+      rejectUnknownArguments(input, new Set(["gamepadIndex"]));
+      return { type: name, gamepadIndex: gamepadIndex() };
+    case "text_input":
+      rejectUnknownArguments(input, new Set(["text", "sensitive"]));
+      return { type: name, text: boundedTextInput(input, "text"), sensitive: optionalBoolean(input, "sensitive", false) };
+    default:
+      throw new GuaWebError("invalid_request", `Unknown Gua game input tool: ${name}`);
+  }
+}
+
+async function performGameInputWithCancellation(
+  bridge: GuaBrowserBridge, request: GuaGameInputRequest, timeoutMs: number, signal?: AbortSignal,
+): Promise<GuaGameInputCompletion> {
+  throwIfAborted(signal);
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+  try {
+    return await withTimeout(
+      bridge.performGameInput!(request, { signal: controller.signal, timeoutMs }), timeoutMs, signal,
+      `Timed out waiting for ${request.type} host completion.`,
+    );
+  } catch (error) {
+    controller.abort();
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
 function toolResult(value: unknown) { return { content: [{ type: "text", text: JSON.stringify(value) }] }; }
 function requiredString(input: Record<string, unknown>, key: string, allowEmpty = false): string {
   if (typeof input[key] !== "string" || (!allowEmpty && (input[key] as string).length === 0)) {
@@ -430,9 +628,25 @@ function requiredBoolean(input: Record<string, unknown>, key: string): boolean {
   if (typeof input[key] !== "boolean") throw new GuaWebError("invalid_request", `${key} must be a boolean.`);
   return input[key] as boolean;
 }
+function optionalBoolean(input: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  return input[key] === undefined ? fallback : requiredBoolean(input, key);
+}
+function requiredEnum<const T extends readonly string[]>(input: Record<string, unknown>, key: string, values: T): T[number] {
+  const value = requiredString(input, key);
+  if (!values.includes(value)) throw new GuaWebError("invalid_request", `${key} must be one of ${values.join(", ")}.`);
+  return value as T[number];
+}
 function requiredNumber(input: Record<string, unknown>, key: string): number {
   if (typeof input[key] !== "number" || !Number.isFinite(input[key])) throw new GuaWebError("invalid_request", `${key} must be a finite number.`);
   return input[key] as number;
+}
+function boundedTextInput(input: Record<string, unknown>, key: string): string {
+  const value = requiredString(input, key, true);
+  if ([...value].length > 40) throw new GuaWebError("invalid_request", `${key} must contain at most 40 Unicode code points.`);
+  return value;
+}
+function optionalNumber(input: Record<string, unknown>, key: string, fallback: number): number {
+  return input[key] === undefined ? fallback : requiredNumber(input, key);
 }
 function optionalInteger(input: Record<string, unknown>, key: string, fallback: number, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
   const value = input[key] ?? fallback;

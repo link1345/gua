@@ -2,6 +2,7 @@ class_name GuaAutoAdapter
 extends RefCounted
 
 signal clock_tick(delta: float)
+signal game_input_action_changed(action_id: String, value: Variant)
 
 const META_ID := "gua_id"
 const META_SENSITIVE := "gua_sensitive"
@@ -46,6 +47,18 @@ const REQUIRED_CONTEXT_METHODS := [
 	"consume_clock_step",
 	"consume_clock_steps",
 	"enable_virtual_clock_adapter",
+	"publish_game_input_actions",
+	"get_game_input_actions_json",
+	"enable_game_input_adapter",
+	"get_game_input_capabilities",
+	"create_game_input_owner",
+	"release_game_input_owner",
+	"enqueue_game_input",
+	"get_game_input_state_json",
+	"get_game_input_result_json",
+	"consume_game_input_request",
+	"complete_game_input_request",
+	"tick_game_input_leases",
 	"begin_world_frame",
 	"register_world_object",
 	"end_world_frame",
@@ -81,12 +94,30 @@ var clock_run_active := false
 var clock_run_callbacks_remaining := CLOCK_CALLBACK_LIMIT
 var clock_run_generation := -1
 var clock_execution_limit_reached := false
+var game_input_values: Dictionary = {}
+var semantic_values_by_owner: Dictionary = {}
+var held_physical_keys: Dictionary = {}
+var held_pointer_buttons: Dictionary = {}
+var synthetic_pointer_position := Vector2.ZERO
+var held_gamepad_buttons: Dictionary = {}
+var held_gamepad_axes: Dictionary = {}
+var game_input_sequence := 0
+var raw_input_enabled := false
+var semantic_input_enabled := false
+var player_semantic_input_allowed := false
+var player_raw_input_allowed := false
+var last_game_input_ticks_ms := Time.get_ticks_msec()
+var disposed := false
 
 
 func attach(root_control: Control) -> void:
+	if disposed:
+		push_error("GuaAutoAdapter.attach called after dispose.")
+		return
 	_detach_webmcp_bridge()
 	root = root_control
 	last_clock_ticks_ms = Time.get_ticks_msec()
+	last_game_input_ticks_ms = last_clock_ticks_ms
 	if _ensure_context() and OS.has_feature("web"):
 		var bridge_script := load("res://addons/gua/gua_webmcp_bridge.gd")
 		if bridge_script != null:
@@ -95,8 +126,9 @@ func attach(root_control: Control) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE:
+	if what == NOTIFICATION_PREDELETE and not disposed:
 		_detach_webmcp_bridge()
+		_release_all_injected_inputs()
 
 
 func _detach_webmcp_bridge() -> void:
@@ -105,10 +137,39 @@ func _detach_webmcp_bridge() -> void:
 	webmcp_bridge = null
 
 
+func dispose() -> void:
+	if disposed:
+		return
+	disposed = true
+	_detach_webmcp_bridge()
+	_release_all_injected_inputs()
+	_disconnect_buttons()
+	for signal_name in [&"clock_tick", &"game_input_action_changed"]:
+		for connection in get_signal_connection_list(signal_name):
+			var callback: Callable = connection.get("callable", Callable())
+			if callback.is_valid() and is_connected(signal_name, callback):
+				disconnect(signal_name, callback)
+	clock_schedules.clear()
+	screenshot_capture_scheduled = false
+	buttons_by_id.clear()
+	tabs_by_id.clear()
+	list_items_by_id.clear()
+	controls_by_id.clear()
+	suppressed_clicks.clear()
+	root = null
+	if context != null:
+		context.stop_inspector_bridge()
+	context = null
+	gdextension_resource = null
+
+
 func update(screen: String) -> void:
 	if not _ensure_context():
 		return
 	var ticks_ms := Time.get_ticks_msec()
+	var game_input_elapsed_ms := maxi(0, ticks_ms - last_game_input_ticks_ms)
+	last_game_input_ticks_ms = ticks_ms
+	context.tick_game_input_leases(game_input_elapsed_ms)
 	var clock_status: Dictionary = context.get_clock()
 	_bind_pending_clock_schedules(clock_status)
 	var clock_installed := bool(clock_status.get("installed", false))
@@ -158,10 +219,46 @@ func update(screen: String) -> void:
 	_publish_world_frame(screen)
 	_dispatch_click_requests()
 	_dispatch_action_requests()
+	_dispatch_game_input_requests()
 	_schedule_screenshot_capture()
 
 
-func _publish_world_frame(scene: String) -> void:
+func configure_game_input_actions(input_context: String, actions: Array[Dictionary], allow_player_agents := false) -> bool:
+	if not _ensure_context():
+		return false
+	var published := bool(context.publish_game_input_actions(input_context, actions))
+	if published:
+		semantic_input_enabled = true
+		player_semantic_input_allowed = allow_player_agents
+		_update_game_input_capabilities()
+	return published
+
+
+func enable_raw_input(allow_player_agents := false) -> bool:
+	if not _ensure_context():
+		return false
+	raw_input_enabled = true
+	player_raw_input_allowed = allow_player_agents
+	_update_game_input_capabilities()
+	return true
+
+
+func _update_game_input_capabilities() -> void:
+	var capabilities := (1 if semantic_input_enabled else 0) | (30 if raw_input_enabled else 0)
+	var player_capabilities := (1 if semantic_input_enabled and player_semantic_input_allowed else 0) | \
+		(30 if raw_input_enabled and player_raw_input_allowed else 0)
+	context.enable_game_input_adapter(capabilities, player_capabilities)
+
+
+func get_game_input_capabilities(observation_profile := 0) -> int:
+	return int(context.get_game_input_capabilities(observation_profile)) if _ensure_context() else 0
+
+
+func get_game_input_action_value(action_id: String, fallback: Variant = null) -> Variant:
+	return game_input_values.get(action_id, fallback)
+
+
+func _publish_world_frame(scene: String, report_errors: bool = true) -> void:
 	if root == null or root.get_tree() == null or not context.begin_world_frame(scene):
 		return
 	var objects := root.get_tree().get_nodes_in_group(&"gua_world_object")
@@ -170,12 +267,12 @@ func _publish_world_frame(scene: String) -> void:
 		if not (node is Node2D or node is Node3D):
 			continue
 		if not node.has_meta(&"gua_world_id"):
-			push_error("Gua world object requires gua_world_id metadata: %s" % node.get_path())
+			_report_world_frame_error("Gua world object requires gua_world_id metadata: %s" % node.get_path(), report_errors)
 			context.abort_world_frame()
 			return
 		var object_id := str(node.get_meta(&"gua_world_id", ""))
 		if object_id.is_empty():
-			push_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path())
+			_report_world_frame_error("Gua world object requires a non-empty gua_world_id: %s" % node.get_path(), report_errors)
 			context.abort_world_frame()
 			return
 		var parent_id := ""
@@ -198,7 +295,7 @@ func _publish_world_frame(scene: String) -> void:
 		var visible_to_player = node.get_meta(&"gua_world_visible_to_player", false)
 		var active = node.get_meta(&"gua_world_active", true)
 		if typeof(visible_to_player) != TYPE_BOOL or typeof(active) != TYPE_BOOL:
-			push_error("Gua world visibility/active metadata must be boolean: %s" % object_id)
+			_report_world_frame_error("Gua world visibility/active metadata must be boolean: %s" % object_id, report_errors)
 			context.abort_world_frame()
 			return
 		var descriptor := {
@@ -221,15 +318,22 @@ func _publish_world_frame(scene: String) -> void:
 			"related_ui_node_id": str(node.get_meta(&"gua_world_related_ui_node_id", "")),
 		}
 		if not context.register_world_object(descriptor):
-			push_error("Failed to register Gua world object: %s" % object_id)
+			_report_world_frame_error("Failed to register Gua world object: %s" % object_id, report_errors)
 			context.abort_world_frame()
 			return
 	if not context.end_world_frame():
-		push_error("Gua world frame was rejected")
+		_report_world_frame_error("Gua world frame was rejected", report_errors)
+
+
+func _report_world_frame_error(message: String, report_errors: bool) -> void:
+	if report_errors:
+		push_error(message)
 
 
 func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
 	for connection in get_signal_connection_list(&"clock_tick"):
+		if disposed or context == null:
+			return
 		if int(context.get_clock().get("generation", -1)) != step_generation:
 			return
 		var callback: Callable = connection.get("callable", Callable())
@@ -246,6 +350,8 @@ func _dispatch_clock_tick(delta_seconds: float, step_generation: int) -> void:
 
 
 func _dispatch_deferred_clock_tick(callback: Callable, delta_seconds: float, step_generation: int) -> void:
+	if disposed or context == null:
+		return
 	if int(context.get_clock().get("generation", -1)) == step_generation and callback.is_valid():
 		callback.call(delta_seconds)
 
@@ -264,7 +370,7 @@ func capture_viewport_screenshot(image_override: Image = null) -> Dictionary:
 
 
 func _schedule_screenshot_capture() -> void:
-	if screenshot_capture_scheduled:
+	if disposed or context == null or screenshot_capture_scheduled:
 		return
 	var request: Dictionary = context.consume_screenshot_request()
 	if request.is_empty():
@@ -277,14 +383,23 @@ func _schedule_screenshot_capture() -> void:
 
 
 func _capture_requested_screenshot(request: Dictionary) -> void:
+	if disposed or context == null or not is_instance_valid(root):
+		screenshot_capture_scheduled = false
+		return
 	while context.get_context_status().get("session_epoch", 0) == request.get("session_epoch", 0) and context.get_context_status().get("frame_sequence", 0) <= request.get("after_frame_sequence", 0):
 		await root.get_tree().process_frame
+		if disposed or context == null or not is_instance_valid(root):
+			screenshot_capture_scheduled = false
+			return
 	if context.get_context_status().get("session_epoch", 0) != request.get("session_epoch", 0):
 		context.complete_screenshot_request({"request_id": request.get("request_id", 0), "unavailable": "unsupported"})
 		screenshot_capture_scheduled = false
 		_schedule_screenshot_capture()
 		return
 	await RenderingServer.frame_post_draw
+	if disposed or context == null or not is_instance_valid(root):
+		screenshot_capture_scheduled = false
+		return
 	var result := {"request_id": request.get("request_id", 0)}
 	if DisplayServer.get_name() == "headless":
 		result["unavailable"] = "headless"
@@ -321,6 +436,38 @@ func get_ui_tree_json() -> String:
 		return ""
 
 	return context.get_ui_tree_json()
+
+
+func get_version_json() -> String:
+	if not _ensure_context():
+		return "{}"
+	return context.get_version_json()
+
+
+func get_game_input_actions_json() -> String:
+	if not _ensure_context():
+		return "{}"
+	return context.get_game_input_actions_json()
+
+
+func create_game_input_owner() -> int:
+	return int(context.create_game_input_owner()) if _ensure_context() else 0
+
+
+func release_game_input_owner(owner_id: int) -> bool:
+	return context.release_game_input_owner(owner_id) if _ensure_context() else false
+
+
+func enqueue_game_input(request: Dictionary) -> Dictionary:
+	return context.enqueue_game_input(request) if _ensure_context() else {"error_code": -1, "request_id": 0}
+
+
+func get_game_input_state_json(owner_id: int) -> String:
+	return context.get_game_input_state_json(owner_id) if _ensure_context() else "{}"
+
+
+func get_game_input_result_json(owner_id: int, request_id: int) -> String:
+	return context.get_game_input_result_json(owner_id, request_id) if _ensure_context() else "{}"
 
 
 func get_player_ui_tree_json() -> String:
@@ -529,6 +676,7 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 		resolved["expected_session_epoch"] = context.get_context_status().get("session_epoch", 0)
 	var report: Dictionary = context.reset_context(resolved)
 	if report.get("result", -1) == 1:
+		_disconnect_buttons()
 		buttons_by_id.clear()
 		tabs_by_id.clear()
 		list_items_by_id.clear()
@@ -548,6 +696,8 @@ func reset_context(options: Dictionary = {}) -> Dictionary:
 
 
 func _ensure_context() -> bool:
+	if disposed:
+		return false
 	if context != null:
 		return not unavailable
 	if unavailable:
@@ -908,6 +1058,432 @@ func _apply_action(control: Control, action: String, request: Dictionary) -> int
 	return 0
 
 
+func _dispatch_game_input_requests() -> void:
+	while true:
+		var request: Dictionary = context.consume_game_input_request()
+		if request.is_empty():
+			break
+		var error_code := _apply_game_input(request)
+		context.complete_game_input_request({
+			"request_id": request.get("request_id", 0),
+			"succeeded": error_code == 0,
+			"error_code": error_code,
+		})
+
+
+func _apply_game_input(request: Dictionary) -> int:
+	var kind := int(request.get("kind", 0))
+	var operation := int(request.get("operation", 0))
+	var target := str(request.get("target", ""))
+	var owner_id := int(request.get("owner_id", 0))
+	if kind == 6 or operation == 10:
+		_release_owner_injected_inputs(owner_id)
+		return 0
+	if kind == 1:
+		var value = JSON.parse_string(str(request.get("value_json", "null")))
+		if operation == 1:
+			_pulse_semantic_input(target, true)
+		elif operation == 2:
+			if value is Dictionary and value.has("x") and value.has("y"):
+				value = Vector2(float(value.x), float(value.y))
+			if value is String:
+				_pulse_semantic_input(target, value)
+			else:
+				_set_semantic_input_owner(owner_id, target, value)
+		elif operation == 3:
+			_release_semantic_input_owner(owner_id, target)
+		else:
+			return -4
+		return 0
+	if kind == 2:
+		var keycode := _keycode_from_w3c(target)
+		var key_location := _key_location_from_w3c(target)
+		if keycode == KEY_NONE:
+			return -6
+		if operation == 1:
+			var restore_pressed := _has_physical_key_holder(target)
+			if restore_pressed:
+				_inject_key(keycode, false, key_location)
+			_inject_key(keycode, true, key_location)
+			_inject_key(keycode, false, key_location)
+			if restore_pressed:
+				_inject_key(keycode, true, key_location)
+		elif operation == 4:
+			held_physical_keys["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "keycode": keycode, "location": key_location}
+			_inject_key(keycode, true, key_location)
+		elif operation in [3, 5]:
+			held_physical_keys.erase("%d:%s" % [owner_id, target])
+			_inject_key(keycode, _has_physical_key_holder(target), key_location)
+		else:
+			return -4
+		return 0
+	if kind == 3:
+		if operation in [6, 7]:
+			var motion := InputEventMouseMotion.new()
+			var coordinates := target.split(":")
+			var point := Vector2(float(request.get("x", 0.0)), float(request.get("y", 0.0)))
+			if operation == 6:
+				if coordinates.size() > 1 and coordinates[1] == "viewport_normalized" and root != null:
+					point *= root.get_viewport().get_visible_rect().size
+				synthetic_pointer_position = point
+			else:
+				motion.relative = point
+				synthetic_pointer_position += point
+			motion.position = synthetic_pointer_position
+			motion.global_position = synthetic_pointer_position
+			Input.parse_input_event(motion)
+			return 0
+		if operation == 8:
+			var horizontal := float(request.get("x", 0.0))
+			var vertical := float(request.get("y", 0.0))
+			if horizontal != 0.0:
+				_inject_wheel(MOUSE_BUTTON_WHEEL_RIGHT if horizontal > 0.0 else MOUSE_BUTTON_WHEEL_LEFT, absf(horizontal))
+			if vertical != 0.0:
+				_inject_wheel(MOUSE_BUTTON_WHEEL_DOWN if vertical > 0.0 else MOUSE_BUTTON_WHEEL_UP, absf(vertical))
+			return 0
+		var button := _mouse_button(target)
+		if button == MOUSE_BUTTON_NONE:
+			return -6
+		var pressed := operation == 4
+		if operation not in [3, 4, 5]:
+			return -4
+		if pressed:
+			held_pointer_buttons["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "button": button}
+		else:
+			held_pointer_buttons.erase("%d:%s" % [owner_id, target])
+		var mouse := InputEventMouseButton.new()
+		mouse.button_index = button
+		mouse.pressed = _has_pointer_button_holder(target)
+		mouse.position = synthetic_pointer_position
+		mouse.global_position = synthetic_pointer_position
+		Input.parse_input_event(mouse)
+		return 0
+	if kind == 4:
+		var device := int(request.get("device_index", 0))
+		if operation == 9:
+			_release_owner_gamepad(owner_id, device)
+			return 0
+		if operation == 2:
+			var axis := _gamepad_axis(target)
+			if axis < 0 or target in ["left_trigger", "right_trigger"]:
+				return -6
+			var value := clampf(float(JSON.parse_string(str(request.get("value_json", "0")))), -1.0, 1.0)
+			_set_owner_gamepad_axis(owner_id, device, target, axis, value)
+			return 0
+		if operation == 3 and _gamepad_axis(target) >= 0:
+			_release_owner_gamepad_axis(owner_id, device, target)
+			return 0
+		if target in ["left_trigger", "right_trigger"]:
+			if operation == 4:
+				_set_owner_gamepad_axis(owner_id, device, target, _gamepad_axis(target), 1.0)
+			elif operation == 5:
+				_release_owner_gamepad_axis(owner_id, device, target)
+			else:
+				return -4
+			return 0
+		var button_index := _gamepad_button(target)
+		if button_index < 0:
+			return -6
+		var pressed := operation == 4
+		if operation not in [3, 4, 5]:
+			return -4
+		var button_key := "%d:%d:%s" % [owner_id, device, target]
+		if pressed:
+			held_gamepad_buttons[button_key] = {"owner": owner_id, "device": device, "target": target, "button": button_index}
+		else:
+			held_gamepad_buttons.erase(button_key)
+		var joy := InputEventJoypadButton.new()
+		joy.device = device
+		joy.button_index = button_index
+		joy.pressed = _has_gamepad_button_holder(device, target)
+		Input.parse_input_event(joy)
+		return 0
+	if kind == 5:
+		var text = JSON.parse_string(str(request.get("value_json", "\"\"")))
+		if not text is String:
+			return -6
+		for index in text.length():
+			var character := InputEventKey.new()
+			character.unicode = text.unicode_at(index)
+			character.pressed = true
+			Input.parse_input_event(character)
+		return 0
+	return -4
+
+
+func _set_semantic_input(action_id: String, value: Variant) -> void:
+	game_input_values[action_id] = value
+	game_input_action_changed.emit(action_id, value)
+
+
+func _neutral_semantic_input(value: Variant) -> Variant:
+	if value is Vector2:
+		return Vector2.ZERO
+	if value is float or value is int:
+		return 0.0
+	if value is String:
+		return ""
+	return false
+
+
+func _pulse_semantic_input(action_id: String, value: Variant) -> void:
+	var previous = game_input_values.get(action_id, _neutral_semantic_input(value))
+	_set_semantic_input(action_id, value)
+	_set_semantic_input(action_id, previous)
+
+
+func _set_semantic_input_owner(owner_id: int, action_id: String, value: Variant) -> void:
+	if not semantic_values_by_owner.has(action_id):
+		semantic_values_by_owner[action_id] = {}
+	game_input_sequence += 1
+	var owners: Dictionary = semantic_values_by_owner[action_id]
+	owners[owner_id] = {"value": value, "sequence": game_input_sequence}
+	_set_semantic_input(action_id, value)
+
+
+func _release_semantic_input_owner(owner_id: int, action_id: String) -> void:
+	if not semantic_values_by_owner.has(action_id):
+		return
+	var owners: Dictionary = semantic_values_by_owner[action_id]
+	owners.erase(owner_id)
+	var sequence := -1
+	var value = _neutral_semantic_input(game_input_values.get(action_id, false))
+	for owned in owners.values():
+		if int(owned.get("sequence", -1)) > sequence:
+			sequence = int(owned.get("sequence", -1))
+			value = owned.get("value")
+	if owners.is_empty():
+		semantic_values_by_owner.erase(action_id)
+	_set_semantic_input(action_id, value)
+
+
+func _inject_key(keycode: Key, pressed: bool, location: KeyLocation = KEY_LOCATION_UNSPECIFIED) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = keycode
+	event.keycode = keycode
+	event.location = location
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+
+func _has_physical_key_holder(target: String) -> bool:
+	for held in held_physical_keys.values():
+		if str(held.get("target", "")) == target:
+			return true
+	return false
+
+
+func _has_pointer_button_holder(target: String) -> bool:
+	for held in held_pointer_buttons.values():
+		if str(held.get("target", "")) == target:
+			return true
+	return false
+
+
+func _has_gamepad_button_holder(device: int, target: String) -> bool:
+	for held in held_gamepad_buttons.values():
+		if int(held.get("device", -1)) == device and str(held.get("target", "")) == target:
+			return true
+	return false
+
+
+func _keycode_from_w3c(code: String) -> Key:
+	if code.begins_with("Key") and code.length() == 4:
+		return OS.find_keycode_from_string(code.substr(3, 1))
+	if code.begins_with("Digit") and code.length() == 6:
+		return OS.find_keycode_from_string(code.substr(5, 1))
+	if code.begins_with("F") and code.substr(1).is_valid_int():
+		var function_index := int(code.substr(1))
+		if function_index >= 1 and function_index <= 24:
+			return KEY_F1 + function_index - 1
+	if code.begins_with("Numpad") and code.length() == 7 and code.substr(6, 1).is_valid_int():
+		return KEY_KP_0 + int(code.substr(6, 1))
+	var names := {
+		"ArrowUp": KEY_UP, "ArrowDown": KEY_DOWN, "ArrowLeft": KEY_LEFT, "ArrowRight": KEY_RIGHT,
+		"Space": KEY_SPACE, "Enter": KEY_ENTER, "Escape": KEY_ESCAPE, "Tab": KEY_TAB,
+		"ShiftLeft": KEY_SHIFT, "ShiftRight": KEY_SHIFT, "ControlLeft": KEY_CTRL,
+		"ControlRight": KEY_CTRL, "AltLeft": KEY_ALT, "AltRight": KEY_ALT,
+		"MetaLeft": KEY_META, "MetaRight": KEY_META, "Backquote": KEY_QUOTELEFT,
+		"Backslash": KEY_BACKSLASH, "Backspace": KEY_BACKSPACE, "BracketLeft": KEY_BRACKETLEFT,
+		"BracketRight": KEY_BRACKETRIGHT, "CapsLock": KEY_CAPSLOCK, "Comma": KEY_COMMA,
+		"ContextMenu": KEY_MENU, "Delete": KEY_DELETE, "End": KEY_END, "Equal": KEY_EQUAL,
+		"Home": KEY_HOME, "Insert": KEY_INSERT, "Minus": KEY_MINUS, "NumLock": KEY_NUMLOCK,
+		"PageDown": KEY_PAGEDOWN, "PageUp": KEY_PAGEUP, "Pause": KEY_PAUSE, "Period": KEY_PERIOD,
+		"Quote": KEY_APOSTROPHE, "ScrollLock": KEY_SCROLLLOCK, "Semicolon": KEY_SEMICOLON,
+		"Slash": KEY_SLASH, "PrintScreen": KEY_PRINT, "NumpadAdd": KEY_KP_ADD,
+		"NumpadDecimal": KEY_KP_PERIOD, "NumpadDivide": KEY_KP_DIVIDE, "NumpadEnter": KEY_KP_ENTER,
+		"NumpadMultiply": KEY_KP_MULTIPLY, "NumpadSubtract": KEY_KP_SUBTRACT,
+	}
+	return names.get(code, KEY_NONE)
+
+
+func _key_location_from_w3c(code: String) -> KeyLocation:
+	if code in ["ShiftLeft", "ControlLeft", "AltLeft", "MetaLeft"]:
+		return KEY_LOCATION_LEFT
+	if code in ["ShiftRight", "ControlRight", "AltRight", "MetaRight"]:
+		return KEY_LOCATION_RIGHT
+	return KEY_LOCATION_UNSPECIFIED
+
+
+func _mouse_button(name: String) -> MouseButton:
+	return {
+		"primary": MOUSE_BUTTON_LEFT, "secondary": MOUSE_BUTTON_RIGHT, "auxiliary": MOUSE_BUTTON_MIDDLE,
+		"back": MOUSE_BUTTON_XBUTTON1, "forward": MOUSE_BUTTON_XBUTTON2,
+	}.get(name, MOUSE_BUTTON_NONE)
+
+
+func _inject_wheel(button: MouseButton, factor: float) -> void:
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = button
+	wheel.pressed = true
+	wheel.factor = factor
+	wheel.position = synthetic_pointer_position
+	wheel.global_position = synthetic_pointer_position
+	Input.parse_input_event(wheel)
+
+
+func _gamepad_button(name: String) -> int:
+	return {
+		"south": JOY_BUTTON_A, "east": JOY_BUTTON_B, "west": JOY_BUTTON_X, "north": JOY_BUTTON_Y,
+		"back": JOY_BUTTON_BACK, "start": JOY_BUTTON_START,
+		"left_stick": JOY_BUTTON_LEFT_STICK, "right_stick": JOY_BUTTON_RIGHT_STICK,
+		"left_shoulder": JOY_BUTTON_LEFT_SHOULDER, "right_shoulder": JOY_BUTTON_RIGHT_SHOULDER,
+		"dpad_up": JOY_BUTTON_DPAD_UP, "dpad_down": JOY_BUTTON_DPAD_DOWN,
+		"dpad_left": JOY_BUTTON_DPAD_LEFT, "dpad_right": JOY_BUTTON_DPAD_RIGHT,
+	}.get(name, -1)
+
+
+func _gamepad_axis(name: String) -> int:
+	return {
+		"left_stick_x": JOY_AXIS_LEFT_X, "left_stick_y": JOY_AXIS_LEFT_Y,
+		"right_stick_x": JOY_AXIS_RIGHT_X, "right_stick_y": JOY_AXIS_RIGHT_Y,
+		"left_trigger": JOY_AXIS_TRIGGER_LEFT, "right_trigger": JOY_AXIS_TRIGGER_RIGHT,
+	}.get(name, -1)
+
+
+func _set_owner_gamepad_axis(owner_id: int, device: int, target: String, axis: int, value: float) -> void:
+	game_input_sequence += 1
+	var axis_key := "%d:%d:%s" % [owner_id, device, target]
+	held_gamepad_axes[axis_key] = {"owner": owner_id, "device": device, "target": target, "axis": axis, "value": value, "sequence": game_input_sequence}
+	var motion := InputEventJoypadMotion.new()
+	motion.device = device
+	motion.axis = axis
+	motion.axis_value = value
+	Input.parse_input_event(motion)
+
+
+func _release_gamepad(device: int) -> void:
+	for key in held_gamepad_buttons.keys():
+		var held: Dictionary = held_gamepad_buttons[key]
+		if int(held.device) != device:
+			continue
+		var event := InputEventJoypadButton.new()
+		event.device = device
+		event.button_index = int(held.button)
+		event.pressed = false
+		Input.parse_input_event(event)
+		held_gamepad_buttons.erase(key)
+	for key in held_gamepad_axes.keys():
+		var held: Dictionary = held_gamepad_axes[key]
+		if int(held.device) != device:
+			continue
+		var event := InputEventJoypadMotion.new()
+		event.device = device
+		event.axis = int(held.axis)
+		event.axis_value = 0.0
+		Input.parse_input_event(event)
+		held_gamepad_axes.erase(key)
+
+
+func _release_owner_gamepad_axis(owner_id: int, device: int, target: String) -> void:
+	held_gamepad_axes.erase("%d:%d:%s" % [owner_id, device, target])
+	var selected_value := 0.0
+	var selected_sequence := -1
+	var axis := _gamepad_axis(target)
+	for held in held_gamepad_axes.values():
+		if int(held.get("device", -1)) != device or str(held.get("target", "")) != target:
+			continue
+		if int(held.get("sequence", -1)) > selected_sequence:
+			selected_sequence = int(held.get("sequence", -1))
+			selected_value = float(held.get("value", 0.0))
+	var event := InputEventJoypadMotion.new()
+	event.device = device
+	event.axis = axis
+	event.axis_value = selected_value
+	Input.parse_input_event(event)
+
+
+func _release_owner_gamepad(owner_id: int, device: int) -> void:
+	for key in held_gamepad_buttons.keys():
+		var held: Dictionary = held_gamepad_buttons[key]
+		if int(held.get("owner", 0)) != owner_id or int(held.get("device", -1)) != device:
+			continue
+		var target := str(held.get("target", ""))
+		var button := int(held.get("button", -1))
+		held_gamepad_buttons.erase(key)
+		var event := InputEventJoypadButton.new()
+		event.device = device
+		event.button_index = button
+		event.pressed = _has_gamepad_button_holder(device, target)
+		Input.parse_input_event(event)
+	for key in held_gamepad_axes.keys():
+		var held: Dictionary = held_gamepad_axes[key]
+		if int(held.get("owner", 0)) == owner_id and int(held.get("device", -1)) == device:
+			_release_owner_gamepad_axis(owner_id, device, str(held.get("target", "")))
+
+
+func _release_owner_injected_inputs(owner_id: int) -> void:
+	for key in held_physical_keys.keys():
+		var held: Dictionary = held_physical_keys[key]
+		if int(held.get("owner", 0)) != owner_id:
+			continue
+		var target := str(held.get("target", ""))
+		var keycode: Key = int(held.get("keycode", KEY_NONE))
+		var location: KeyLocation = int(held.get("location", KEY_LOCATION_UNSPECIFIED))
+		held_physical_keys.erase(key)
+		_inject_key(keycode, _has_physical_key_holder(target), location)
+	for key in held_pointer_buttons.keys():
+		var held: Dictionary = held_pointer_buttons[key]
+		if int(held.get("owner", 0)) != owner_id:
+			continue
+		var target := str(held.get("target", ""))
+		var button: MouseButton = int(held.get("button", MOUSE_BUTTON_NONE))
+		held_pointer_buttons.erase(key)
+		var event := InputEventMouseButton.new()
+		event.button_index = button
+		event.pressed = _has_pointer_button_holder(target)
+		event.position = synthetic_pointer_position
+		event.global_position = synthetic_pointer_position
+		Input.parse_input_event(event)
+	for device in range(4):
+		_release_owner_gamepad(owner_id, device)
+	for action_id in semantic_values_by_owner.keys():
+		_release_semantic_input_owner(owner_id, str(action_id))
+
+
+func _release_all_injected_inputs() -> void:
+	for held in held_physical_keys.values():
+		var keycode: Key = int(held.get("keycode", KEY_NONE))
+		var location: KeyLocation = int(held.get("location", KEY_LOCATION_UNSPECIFIED))
+		_inject_key(keycode, false, location)
+	held_physical_keys.clear()
+	for held in held_pointer_buttons.values():
+		var event := InputEventMouseButton.new()
+		var button: MouseButton = int(held.get("button", MOUSE_BUTTON_NONE))
+		event.button_index = button
+		event.pressed = false
+		event.position = synthetic_pointer_position
+		event.global_position = synthetic_pointer_position
+		Input.parse_input_event(event)
+	held_pointer_buttons.clear()
+	for device in range(4):
+		_release_gamepad(device)
+	semantic_values_by_owner.clear()
+	for action_id in game_input_values.keys():
+		var current = game_input_values[action_id]
+		_set_semantic_input(action_id, _neutral_semantic_input(current))
+
+
 func _semantic_scroll_extent(control: Control, horizontal: bool) -> float:
 	if control is ItemList:
 		var item_list := control as ItemList
@@ -999,8 +1575,18 @@ func _connect_button(button: BaseButton, id: String) -> void:
 	if connected_buttons.has(instance_id):
 		return
 
-	connected_buttons[instance_id] = true
-	button.pressed.connect(_on_button_pressed.bind(id))
+	var callback := _on_button_pressed.bind(id)
+	connected_buttons[instance_id] = {"button": button, "callback": callback}
+	button.pressed.connect(callback)
+
+
+func _disconnect_buttons() -> void:
+	for connection in connected_buttons.values():
+		var button := connection.get("button") as BaseButton
+		var callback: Callable = connection.get("callback", Callable())
+		if is_instance_valid(button) and callback.is_valid() and button.pressed.is_connected(callback):
+			button.pressed.disconnect(callback)
+	connected_buttons.clear()
 
 
 func _on_button_pressed(id: String) -> void:

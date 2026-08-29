@@ -63,12 +63,21 @@ recognition.
 Godot Web Export and Unity WebGL pages can expose the same live Semantic UI Tree
 through the experimental browser `document.modelContext` API. The
 `gua-webmcp` package registers `get_ui_tree`, semantic actions, waits, the
-read-only World Object Tree observation tools, and an optional screenshot tool
+read-only World Object Tree observation tools, capability-gated Semantic Game
+Action / Raw Input tools, and an optional screenshot tool
 against an engine-owned same-page bridge. Shared world types and selector
 definitions are published as `gua-world-tools`. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
 custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
+Game input is owned by the current page, waits for request-correlated host
+completion, and is released on timeout, cancellation, unregister, or engine
+shutdown. Raw tools remain absent until the host explicitly initializes their
+input pump and cleanup path.
+Player/Public Agent game input is denied separately by default: enabling a
+Debug Inspector input path does not expose it to WebMCP. Godot hosts opt in with
+the `allow_player_agents` argument and Unity hosts use the corresponding
+`AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput` map flags.
 The current Godot Web addon supports debug Web exports only; release export
 support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
 
@@ -89,7 +98,7 @@ for setup details.
 The Unity package automatically starts the runtime adapter and reflects UI
 Toolkit, uGUI, and TextMeshPro controls without manual semantic-node
 registration. `Gua.Testing.Unity` can launch Editor Play Mode or a built Mono
-Player from ordinary .NET tests. The first supported scope is Unity 6000.0+ on
+Player from ordinary .NET tests. The first supported scope is Unity 6000.5+ on
 Windows x64 with Mono; IL2CPP, non-Windows targets, Unity IMGUI, and EditorWindow
 automation are not currently supported. See [Unity 6 Windows x64](#unity-6-windows-x64)
 for installation and verification details.
@@ -156,6 +165,26 @@ wired to GuaClock schedules or ticks. Engine-native timers, physics, animations,
 audio, OS time, and networking continue normally.
 The bridge, MCP, and Inspector expose `get_clock`, `clock_install`,
 `clock_pause`, `clock_run_for`, and `clock_resume`.
+
+### Semantic game actions and raw input
+
+Hosts can publish an explicit game-action map independent of the UI tree, then
+drive buttons, axes, vectors, or text through `press_game_input_action`,
+`set_game_input_action`, and `release_game_input_action`. Opt-in raw tools cover
+the cross-adapter W3C physical keyboard code subset enumerated by the command
+schema, pointer motion/buttons/wheel, Standard Gamepad controls, and text input.
+Stateful input is isolated per connection, defaults
+to a five-second lease (maximum 60 seconds), and is neutralized on expiry,
+disconnect, reset, replay failure, or session disposal. Inspector shows action
+metadata, held leases, raw controls, and an emergency **Release all** button.
+Local C++ and .NET sessions poll the returned request ID for host completion;
+enqueue acceptance alone does not prove that the adapter injected the input.
+
+Unity 6000.5 integration uses `com.unity.inputsystem@1.20.0` virtual devices;
+Godot injects main-thread `InputEvent` values through `Input.parse_input_event`.
+Adapters advertise each input capability only after its pump and cleanup path
+are initialized. The existing semantic UI `press_key` API remains unchanged;
+raw keyboard gestures use `press_physical_key`.
 
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   A thin MCP server that exposes Gua runtime actions to AI agents through the
@@ -465,7 +494,7 @@ TextMeshPro runtime UI. `GuaId` and `GuaScreen` are optional overrides; game
 code does not register semantic nodes manually. `Gua.Testing.Unity` provides
 Editor Play Mode and Mono Windows Player hosts. See
 [`examples/unity-smoke`](examples/unity-smoke/README.md) for the verified Unity
-6000.5.3f1 fixture. Windows x64, Unity 6000.0+, and Mono are supported in this
+6000.5.3f1 fixture. Windows x64, Unity 6000.5+, and Mono are supported in this
 initial release; IL2CPP, other operating systems, IMGUI, and EditorWindow UI
 automation are not.
 
@@ -707,8 +736,15 @@ $Door.set_meta(&"gua_world_state", {"locked": true})
 Run the GDScript smoke check with:
 
 ```powershell
-C:\Users\testk\.local\bin\Godot_v4.7-stable_win64_console.exe --headless --path examples/godot-gdscript --script res://scripts/gua_smoke.gd
+.\scripts\run-godot-smoke.ps1 -GodotExecutable 'C:\path\to\Godot_v4.7-stable_win64_console.exe'
 ```
+
+The wrapper places Godot's temporary `user://` data under the ignored `build/`
+directory. This also prevents a Godot 4.7 Windows access violation when the
+normal `%APPDATA%` location is unavailable in a restricted test environment.
+The sample also disables Godot's built-in file logging because smoke output is
+collected from stdout and Godot 4.7 can crash while creating `user://logs` when
+that location is unavailable.
 
 ## Repository Layout
 

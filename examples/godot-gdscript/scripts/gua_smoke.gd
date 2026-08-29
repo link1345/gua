@@ -1,4 +1,4 @@
-extends SceneTree
+extends Node
 
 const GuaAutoAdapterScript := preload("res://addons/gua/gua_auto_adapter.gd")
 
@@ -6,17 +6,32 @@ var pressed_count := 0
 var adapter: Variant
 var expected_click_request_id := 0
 var click_completed_before_handler := false
+var smoke_root: Control
+var finishing := false
+var observed_wheel_buttons: Array[int] = []
+var observed_shift_locations: Array[int] = []
+var observed_pointer_button_positions: Array[Vector2] = []
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	call_deferred("_run")
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT, MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		observed_wheel_buttons.append(event.button_index)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		observed_pointer_button_positions.append(event.position)
+	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_SHIFT:
+		observed_shift_locations.append(event.location)
 
 
 func _run() -> void:
 	var screen := Control.new()
+	smoke_root = screen
 	screen.name = "screen"
 	screen.size = Vector2(1280, 720)
-	root.add_child(screen)
+	get_tree().root.add_child(screen)
 
 	var button := Button.new()
 	button.name = "start"
@@ -119,12 +134,17 @@ func _run() -> void:
 	scroll.add_child(scroll_content)
 	screen.add_child(scroll)
 
-	await process_frame
+	await get_tree().process_frame
 	var extension := load("res://addons/gua/gua.gdextension")
 	var bare_context: Object = ClassDB.instantiate("GuaContext")
 	if extension == null or bare_context == null or bare_context.get_version_json().contains("virtual_clock_v1") \
 			or bare_context.get_version_json().contains("world_object_tree_v1"):
 		_fail("A bare Godot GuaContext advertised a capability without its adapter pump.")
+		return
+	if bare_context.publish_game_input_actions("invalid", [{
+		"id": "invalid_type", "description": "Invalid type", "value_type": "axis1D",
+	}]):
+		_fail("GuaContext accepted an unknown game input action value_type.")
 		return
 	if not bare_context.has_method("get_observation_profile") or bare_context.get_observation_profile() != 0 \
 			or not bare_context.get_version_json().contains("agent_projection_v1"):
@@ -167,7 +187,105 @@ func _run() -> void:
 	screen.add_child(door)
 
 	ui.attach(screen)
+	if ui.get_game_input_capabilities(1) != 0:
+		_fail("Gua Player game input must be denied before explicit host opt-in.")
+		return
+	if not ui.configure_game_input_actions("gameplay", [
+		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"]},
+		{"id": "throttle", "description": "Throttle", "value_type": "axis1d", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "move", "description": "Move", "value_type": "vector2", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "chat", "description": "Chat", "value_type": "text"},
+	], true) or not ui.enable_raw_input(true):
+		_fail("Gua smoke failed to initialize game input capabilities.")
+		return
+	if ui.get_game_input_capabilities(1) != 31:
+		_fail("Gua Player game input did not expose only the explicitly allowed capabilities.")
+		return
 	ui.update("title")
+	var game_input_actions: String = ui.context.get_game_input_actions_json()
+	if not game_input_actions.contains("\"button\"") or not game_input_actions.contains("\"axis1d\"") or not game_input_actions.contains("\"vector2\"") or not game_input_actions.contains("\"text\""):
+		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
+		return
+	var web_input_bridge = load("res://addons/gua/gua_webmcp_bridge.gd").new()
+	var wheel_request: Dictionary = web_input_bridge._native_game_input_request({
+		"type": "pointer_wheel", "deltaX": -4.0, "deltaY": 120.0, "wheelUnit": "pixels"
+	})
+	if wheel_request.get("x", 0.0) != -4.0 or wheel_request.get("y", 0.0) != 120.0:
+		_fail("Gua WebMCP wheel mapping lost deltaX/deltaY: %s" % wheel_request)
+		return
+	web_input_bridge.adapter_ref = weakref(ui)
+	var released_owner_id: int = ui.create_game_input_owner()
+	web_input_bridge.game_input_owner_id = released_owner_id
+	if web_input_bridge._release_game_input_owner(["1"]) != 1 \
+			or web_input_bridge.game_input_owner_id == 0 \
+			or web_input_bridge.game_input_owner_id == released_owner_id:
+		_fail("Gua WebMCP did not replace a released page-local game input owner.")
+		return
+	web_input_bridge._release_game_input_owner([])
+	web_input_bridge.adapter_ref = null
+	for code in ["Backspace", "ContextMenu", "F1", "F24", "Numpad0", "Numpad9",
+			"NumpadEnter", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadMultiply",
+			"NumpadSubtract", "PrintScreen", "Quote", "ScrollLock"]:
+		if ui._keycode_from_w3c(code) == KEY_NONE:
+			_fail("Gua raw-keyboard capability did not implement protocol-valid code %s." % code)
+			return
+	if ui._key_location_from_w3c("ShiftLeft") != KEY_LOCATION_LEFT \
+			or ui._key_location_from_w3c("ShiftRight") != KEY_LOCATION_RIGHT:
+		_fail("Gua raw-keyboard capability lost left/right modifier locations.")
+		return
+	observed_shift_locations.clear()
+	ui._inject_key(KEY_SHIFT, true, KEY_LOCATION_LEFT)
+	ui._inject_key(KEY_SHIFT, false, KEY_LOCATION_LEFT)
+	ui._inject_key(KEY_SHIFT, true, KEY_LOCATION_RIGHT)
+	ui._inject_key(KEY_SHIFT, false, KEY_LOCATION_RIGHT)
+	await get_tree().process_frame
+	if not observed_shift_locations.has(KEY_LOCATION_LEFT) or not observed_shift_locations.has(KEY_LOCATION_RIGHT):
+		_fail("Gua raw-keyboard events did not preserve left/right modifier locations: %s" % observed_shift_locations)
+		return
+	if ui._gamepad_button("left_shoulder") != JOY_BUTTON_LEFT_SHOULDER \
+			or ui._gamepad_button("start") != JOY_BUTTON_START \
+			or ui._gamepad_button("dpad_right") != JOY_BUTTON_DPAD_RIGHT:
+		_fail("Gua Standard Gamepad buttons do not map to Godot JoyButton constants.")
+		return
+	observed_wheel_buttons.clear()
+	ui._apply_game_input({"kind": 3, "operation": 8, "owner_id": 303, "target": "pixels", "x": 20.0, "y": 0.0})
+	await get_tree().process_frame
+	if not observed_wheel_buttons.has(MOUSE_BUTTON_WHEEL_RIGHT):
+		_fail("Gua raw pointer input lost a horizontal-only wheel event: %s" % observed_wheel_buttons)
+		return
+	observed_pointer_button_positions.clear()
+	ui._apply_game_input({"kind": 3, "operation": 6, "owner_id": 303, "target": "absolute:viewport_pixels", "x": 640.0, "y": 360.0})
+	ui._apply_game_input({"kind": 3, "operation": 4, "owner_id": 303, "target": "primary"})
+	await get_tree().process_frame
+	if observed_pointer_button_positions.is_empty() or observed_pointer_button_positions.back() != Vector2(640.0, 360.0):
+		_fail("Gua raw pointer button lost the synthetic pointer position: %s" % observed_pointer_button_positions)
+		return
+	ui._apply_game_input({"kind": 3, "operation": 5, "owner_id": 303, "target": "primary"})
+	ui._apply_game_input({"kind": 4, "operation": 4, "owner_id": 303, "target": "left_trigger", "device_index": 0})
+	var trigger_state: Dictionary = ui.held_gamepad_axes.get("303:0:left_trigger", {})
+	if int(trigger_state.get("axis", -1)) != JOY_AXIS_TRIGGER_LEFT or float(trigger_state.get("value", 0.0)) != 1.0:
+		_fail("Gua Standard Gamepad trigger was not injected through the Godot trigger axis.")
+		return
+	ui._apply_game_input({"kind": 4, "operation": 5, "owner_id": 303, "target": "left_trigger", "device_index": 0})
+	if ui.held_gamepad_axes.has("303:0:left_trigger"):
+		_fail("Gua Standard Gamepad trigger remained held after button up.")
+		return
+	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 101, "target": "move", "value_json": "{\"x\":1,\"y\":0}"}) != 0:
+		_fail("Gua smoke could not inject the first owner-scoped semantic value.")
+		return
+	if ui._apply_game_input({"kind": 1, "operation": 2, "owner_id": 202, "target": "move", "value_json": "{\"x\":0,\"y\":1}"}) != 0:
+		_fail("Gua smoke could not inject the second owner-scoped semantic value.")
+		return
+	ui._apply_game_input({"kind": 6, "operation": 10, "owner_id": 101})
+	if ui.get_game_input_action_value("move") != Vector2(0, 1):
+		_fail("Gua smoke released another owner's semantic value: %s" % ui.get_game_input_action_value("move"))
+		return
+	ui._apply_game_input({"kind": 4, "operation": 2, "owner_id": 202, "target": "left_stick_x", "value_json": "1", "device_index": 0})
+	ui._apply_game_input({"kind": 4, "operation": 3, "owner_id": 202, "target": "left_stick_x", "device_index": 0})
+	if not ui.held_gamepad_axes.is_empty():
+		_fail("Gua smoke retained a released gamepad axis.")
+		return
+	ui._apply_game_input({"kind": 6, "operation": 10, "owner_id": 202})
 	if not ui.context.get_version_json().contains("virtual_clock_v1"):
 		_fail("GuaAutoAdapter did not enable its pumped virtual-clock capability.")
 		return
@@ -192,7 +310,7 @@ func _run() -> void:
 		_fail("Gua Godot status omitted World Object Tree metadata: %s" % world_status)
 		return
 	door.set_meta(&"gua_world_visible_to_player", "false")
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var rejected_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(rejected_world_tree, "door-a") == null \
 			or rejected_world_tree.get("frameSequence", 0) != 1:
@@ -201,7 +319,7 @@ func _run() -> void:
 	door.set_meta(&"gua_world_visible_to_player", true)
 	ui._publish_world_frame("title")
 	door.set_meta(&"gua_world_id", "")
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var missing_id_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(missing_id_world_tree, "door-a") == null \
 			or missing_id_world_tree.get("frameSequence", 0) != 2:
@@ -210,14 +328,14 @@ func _run() -> void:
 	door.set_meta(&"gua_world_id", "door-a")
 	ui._publish_world_frame("title")
 	door.set_meta(&"gua_world_state", {"code": 9007199254740993})
-	ui._publish_world_frame("title")
+	ui._publish_world_frame("title", false)
 	var imprecise_integer_world_tree = JSON.parse_string(ui.context.get_world_object_tree_json())
 	if _find_world_object(imprecise_integer_world_tree, "door-a") == null \
 			or imprecise_integer_world_tree.get("frameSequence", 0) != 3:
 		_fail("Gua accepted a world state integer that loses precision in the C ABI: %s" % imprecise_integer_world_tree)
 		return
 	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
-	await process_frame
+	await get_tree().process_frame
 	var smoke_image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
 	smoke_image.fill(Color(0.2, 0.4, 0.6, 1.0))
 	var capture := ui.capture_viewport_screenshot(smoke_image)
@@ -633,7 +751,7 @@ func _run() -> void:
 		return
 
 	print("Gua GDScript smoke passed.")
-	quit(0)
+	call_deferred("_finish", 0)
 
 
 func _on_start_pressed() -> void:
@@ -659,4 +777,18 @@ func _find_world_object(tree: Dictionary, id: String) -> Variant:
 
 func _fail(message: String) -> void:
 	push_error(message)
-	quit(1)
+	call_deferred("_finish", 1)
+
+
+func _finish(exit_code: int) -> void:
+	if finishing:
+		return
+	finishing = true
+	if adapter != null:
+		adapter.dispose()
+	adapter = null
+	if is_instance_valid(smoke_root):
+		smoke_root.queue_free()
+	smoke_root = null
+	await get_tree().process_frame
+	get_tree().quit(exit_code)

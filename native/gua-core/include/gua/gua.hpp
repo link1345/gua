@@ -5,12 +5,20 @@
 #include <stdexcept>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 #include <unordered_set>
 
 namespace gua {
+
+class Context;
+
+struct ContextLifetime {
+    Context* context = nullptr;
+};
 
 struct Rect {
     float x;
@@ -96,6 +104,26 @@ struct ActionEvent {
     bool sensitive = false;
 };
 
+enum class GameInputValueType { button = GUA_GAME_INPUT_BUTTON, axis1d = GUA_GAME_INPUT_AXIS1D, vector2 = GUA_GAME_INPUT_VECTOR2, text = GUA_GAME_INPUT_TEXT };
+struct GameInputAction {
+    std::string id, description;
+    GameInputValueType value_type = GameInputValueType::button;
+    std::optional<double> minimum, maximum;
+    bool holdable = false, active = true;
+    std::string bindings_json = "[]";
+    std::string risk = "safe";
+    bool requires_confirmation = false;
+};
+struct GameInputRequest {
+    std::uint64_t request_id = 0, owner_id = 0;
+    int kind = 0, operation = 0;
+    std::string target, value_json;
+    double x = 0, y = 0;
+    std::uint32_t lease_ms = 0;
+    int device_index = 0;
+    bool sensitive = false;
+};
+
 struct NodeProperties {
     std::optional<std::string_view> parent_id;
     std::optional<std::string_view> text;
@@ -114,19 +142,22 @@ struct NodeProperties {
 class Context {
 public:
     Context()
-        : context_(gua_create_context())
+        : context_(gua_create_context()), lifetime_(std::make_shared<ContextLifetime>())
     {
         if (context_ == nullptr) {
             throw std::runtime_error("Failed to create Gua context");
         }
+        lifetime_->context = this;
     }
 
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
     Context(Context&& other) noexcept
-        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_))
+        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_)),
+          lifetime_(std::move(other.lifetime_))
     {
+        if (lifetime_ != nullptr) lifetime_->context = this;
         other.context_ = nullptr;
     }
 
@@ -136,6 +167,8 @@ public:
             reset();
             context_ = other.context_;
             sensitive_node_ids_ = std::move(other.sensitive_node_ids_);
+            lifetime_ = std::move(other.lifetime_);
+            if (lifetime_ != nullptr) lifetime_->context = this;
             other.context_ = nullptr;
         }
         return *this;
@@ -447,7 +480,61 @@ public:
         return true;
     }
 
+    void publish_game_input_actions(std::string_view input_context, const std::vector<GameInputAction>& actions)
+    {
+        std::string context(input_context);
+        if (!gua_begin_game_input_frame(context_, context.c_str())) throw std::runtime_error("Failed to begin game input frame");
+        for (const auto& action : actions) {
+            const bool has_range = action.minimum.has_value() || action.maximum.has_value();
+            if (has_range && (!action.minimum.has_value() || !action.maximum.has_value())) {
+                gua_abort_game_input_frame(context_);
+                throw std::invalid_argument("Game input range requires minimum and maximum");
+            }
+            gua_game_input_action_descriptor_v1_t descriptor { sizeof(descriptor), action.id.c_str(), action.description.c_str(),
+                static_cast<int>(action.value_type), action.minimum.value_or(0), action.maximum.value_or(0), has_range ? 1 : 0,
+                action.holdable ? 1 : 0, action.active ? 1 : 0, action.bindings_json.c_str(), action.risk.c_str(),
+                action.requires_confirmation ? 1 : 0 };
+            if (!gua_register_game_input_action_v1(context_, &descriptor)) {
+                gua_abort_game_input_frame(context_);
+                throw std::invalid_argument("Invalid game input action: " + action.id);
+            }
+        }
+        if (!gua_end_game_input_frame(context_)) throw std::runtime_error("Failed to commit game input frame");
+    }
+    [[nodiscard]] std::string game_input_actions_json() const
+    { return copy_json([](auto* context, char* output, int size) { return gua_copy_game_input_actions_json(context, output, size); }); }
+    [[nodiscard]] std::uint64_t create_game_input_owner() { return gua_create_game_input_owner(context_); }
+    bool release_game_input_owner(std::uint64_t owner_id) { return gua_release_game_input_owner(context_, owner_id) != 0; }
+    [[nodiscard]] std::string game_input_state_json(std::uint64_t owner_id) const
+    { return copy_json([owner_id](auto* context, char* output, int size) { return gua_copy_game_input_state_json(context, owner_id, output, size); }); }
+    [[nodiscard]] std::string game_input_result_json(std::uint64_t owner_id, std::uint64_t request_id) const
+    { return copy_json([owner_id, request_id](auto* context, char* output, int size) { return gua_copy_game_input_result_json(context, owner_id, request_id, output, size); }); }
+    [[nodiscard]] std::uint64_t enqueue_game_input(std::uint64_t owner_id, int kind, int operation,
+        std::string_view target, std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
+        double x = 0, double y = 0, int device_index = 0, bool sensitive = false, bool confirmed = false)
+    {
+        std::string target_value(target), json(value_json);
+        gua_game_input_request_descriptor_v2_t descriptor { sizeof(descriptor), owner_id, kind, operation,
+            target_value.c_str(), json.c_str(), x, y, lease_ms, device_index, sensitive ? 1 : 0, confirmed ? 1 : 0 };
+        std::uint64_t request_id = 0;
+        const int result = gua_enqueue_game_input_v2(context_, &descriptor, &request_id);
+        if (result != GUA_GAME_INPUT_OK) throw std::runtime_error("Game input request rejected: " + std::to_string(result));
+        return request_id;
+    }
+    [[nodiscard]] bool consume_game_input(GameInputRequest& out)
+    {
+        gua_game_input_request_v1_t request { sizeof(request) };
+        if (!gua_consume_game_input_request(context_, &request)) return false;
+        out = { request.request_id, request.owner_id, request.kind, request.operation, request.target, request.value_json,
+            request.x, request.y, request.lease_ms, request.device_index, request.sensitive != 0 };
+        return true;
+    }
+    bool complete_game_input(std::uint64_t request_id, bool succeeded, int error_code = 0)
+    { return gua_complete_game_input_request(context_, request_id, succeeded ? 1 : 0, error_code) != 0; }
+    int tick_game_input_leases(double elapsed_ms) { return gua_tick_game_input_leases(context_, elapsed_ms); }
+
 private:
+    friend class GameInputSession;
     static void check_clock(int result) { if (result != GUA_CLOCK_OK) throw std::runtime_error("Gua clock operation failed: " + std::to_string(result)); }
     template <typename CopyJson>
     [[nodiscard]] std::string copy_json(CopyJson copy) const
@@ -473,12 +560,14 @@ private:
 
     void reset() noexcept
     {
+        if (lifetime_ != nullptr) lifetime_->context = nullptr;
         gua_destroy_context(context_);
         context_ = nullptr;
         sensitive_node_ids_.clear();
     }
 
     gua_context_t* context_;
+    std::shared_ptr<ContextLifetime> lifetime_;
     mutable std::string id_buffer_;
     mutable std::string role_buffer_;
     mutable std::string label_buffer_;
@@ -491,6 +580,39 @@ private:
     std::string environment_buffer_;
     std::string screen_buffer_;
     std::unordered_set<std::string> sensitive_node_ids_;
+};
+
+class GameInputSession {
+public:
+    explicit GameInputSession(Context& context) : context_(context.lifetime_), owner_id_(context.create_game_input_owner())
+    { if (owner_id_ == 0) throw std::runtime_error("Failed to create game input session"); }
+    ~GameInputSession() { reset(); }
+    GameInputSession(const GameInputSession&) = delete;
+    GameInputSession& operator=(const GameInputSession&) = delete;
+    GameInputSession(GameInputSession&& other) noexcept
+        : context_(std::move(other.context_)), owner_id_(std::exchange(other.owner_id_, 0)) {}
+    GameInputSession& operator=(GameInputSession&& other) noexcept
+    { if (this != &other) { reset(); context_ = std::move(other.context_); owner_id_ = std::exchange(other.owner_id_, 0); } return *this; }
+    [[nodiscard]] std::uint64_t owner_id() const noexcept { return owner_id_; }
+    [[nodiscard]] std::uint64_t send(int kind, int operation, std::string_view target,
+        std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
+        double x = 0, double y = 0, int device_index = 0, bool sensitive = false, bool confirmed = false)
+    { return context().enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive, confirmed); }
+    [[nodiscard]] std::string state_json() const
+    { return context().game_input_state_json(owner_id_); }
+    [[nodiscard]] std::string result_json(std::uint64_t request_id) const
+    { return context().game_input_result_json(owner_id_, request_id); }
+    void reset() noexcept { if (const auto lifetime = context_.lock(); lifetime != nullptr && lifetime->context != nullptr) lifetime->context->release_game_input_owner(owner_id_); context_.reset(); owner_id_ = 0; }
+private:
+    [[nodiscard]] Context& context() const
+    {
+        const auto lifetime = context_.lock();
+        if (owner_id_ == 0 || lifetime == nullptr || lifetime->context == nullptr)
+            throw std::runtime_error("Game input session is disposed");
+        return *lifetime->context;
+    }
+    std::weak_ptr<ContextLifetime> context_;
+    std::uint64_t owner_id_ = 0;
 };
 
 inline void begin_frame(Context& context, std::string_view screen)

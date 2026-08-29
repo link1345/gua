@@ -320,6 +320,13 @@ button:disabled {
   grid-area: automation;
 }
 
+.gua-game-input-panel { grid-column: 1 / -1; }
+.gua-game-action, .gua-game-raw { align-items: center; border-top: 1px solid #2b333d; display: flex; gap: 8px; padding: 8px 0; }
+.gua-game-action > span { display: grid; margin-right: auto; }
+.gua-game-action small { color: #96a3b3; }
+.gua-held-inputs { color: #c8d2df; margin: 8px 0 0; }
+.gua-danger { border-color: #9b4b4b; color: #ffb0a8; }
+
 .gua-automation-grid {
   display: grid;
   gap: 24px;

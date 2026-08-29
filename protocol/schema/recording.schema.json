@@ -1,17 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gua.dev/schema/recording.schema.json",
-  "title": "Gua UI operation recording v1",
+  "title": "Gua operation recording",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "steps"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "enum": [1, 2] },
     "steps": {
       "type": "array",
       "items": { "$ref": "#/$defs/step" }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "schemaVersion": { "const": 1 } }, "required": ["schemaVersion"] },
+    "then": {
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] }
+            }
+          }
+        }
+      }
+    }
+  }],
   "$defs": {
     "target": {
       "type": "object",
@@ -37,7 +53,7 @@
       "additionalProperties": false,
       "required": ["action", "relativeMilliseconds", "preRevision", "postRevision", "sensitive"],
       "properties": {
-        "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key"] },
+        "action": { "enum": ["click", "focus", "set_value", "set_checked", "select", "scroll", "press_key", "game_input"] },
         "requestId": { "type": "integer", "minimum": 0 },
         "eventId": { "type": "integer", "minimum": 0 },
         "target": { "$ref": "#/$defs/target" },
@@ -52,16 +68,42 @@
         "deltaX": { "type": "number" },
         "deltaY": { "type": "number" },
         "scrollUnit": { "type": "integer", "minimum": 0, "maximum": 1 },
-        "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 }
+        "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "operation": { "enum": [
+          "press_game_input_action", "set_game_input_action", "release_game_input_action",
+          "key_down", "key_up", "press_physical_key", "pointer_move",
+          "pointer_button_down", "pointer_button_up", "pointer_wheel",
+          "gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad",
+          "text_input", "release_all_game_inputs"
+        ] },
+        "arguments": { "type": "object" }
       },
       "allOf": [
-        { "oneOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] },
+        {
+          "if": { "properties": { "action": { "const": "game_input" } }, "required": ["action"] },
+          "then": {
+            "required": ["operation", "arguments"],
+            "not": { "anyOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] }
+          },
+          "else": { "oneOf": [{ "required": ["target"] }, { "required": ["coordinateFallback"] }] }
+        },
         {
           "if": { "properties": { "sensitive": { "const": true } }, "required": ["sensitive"] },
           "then": {
-            "properties": { "action": { "const": "set_value" } },
+            "properties": { "action": { "enum": ["set_value", "game_input"] } },
             "required": ["secretKey"],
             "not": { "required": ["value"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "game_input" }, "sensitive": { "const": true } },
+            "required": ["action", "sensitive"]
+          },
+          "then": {
+            "properties": {
+              "arguments": { "not": { "anyOf": [{ "required": ["value"] }, { "required": ["text"] }] } }
+            }
           }
         },
         {

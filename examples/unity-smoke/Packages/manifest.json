@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "com.link1345.gua": "file:../../../bindings/unity",
+    "com.unity.inputsystem": "1.20.0",
     "com.unity.ugui": "2.5.0",
     "com.unity.modules.uielements": "1.0.0",
     "com.unity.modules.screencapture": "1.0.0",

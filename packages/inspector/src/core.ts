@@ -62,6 +62,24 @@ export interface GuaScreenshot {
 }
 export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completedOperationSequence: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
 export interface GuaContextStatus { sessionEpoch: number; frameSequence: number; revision: number; nodeCount: number; pendingRequestCount: number; inFlightRequestCount: number; unconsumedEventCount: number; logCount: number; hasScreenshot: boolean; firstPendingAction: number; firstPendingNodeId: string; firstEventAction: number; firstEventNodeId: string; }
+export type GuaGameInputValueType = "button" | "axis1d" | "vector2" | "text";
+export interface GuaGameInputAction { id: string; description?: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number }; holdable: boolean; active: boolean; bindings: unknown[]; risk: string; requiresConfirmation: boolean; }
+export interface GuaGameInputActions { schemaVersion: 1; sessionEpoch: number; revision: number; context: string; actions: GuaGameInputAction[]; }
+export interface GuaHeldGameInput { kind: number; target: string; deviceIndex: number; value: unknown; remainingLeaseMs: number; }
+export interface GuaGameInputState { schemaVersion: 1; held: GuaHeldGameInput[]; }
+export type GameInputCommandInput =
+  | { type: "press_game_input_action"; actionId: string; confirmed?: boolean }
+  | { type: "release_game_input_action"; actionId: string }
+  | { type: "set_game_input_action"; actionId: string; value: unknown; leaseMs?: number; confirmed?: boolean; sensitive?: boolean; secretKey?: string }
+  | { type: "key_down" | "key_up" | "press_physical_key"; code: string; leaseMs?: number }
+  | { type: "pointer_move"; mode: "absolute" | "delta"; coordinateSpace?: "viewport_normalized" | "viewport_pixels"; x: number; y: number }
+  | { type: "pointer_button_down" | "pointer_button_up"; button: string; leaseMs?: number }
+  | { type: "pointer_wheel"; deltaX: number; deltaY: number; wheelUnit?: "pixels" | "lines" }
+  | { type: "gamepad_button_down" | "gamepad_button_up"; button: string; gamepadIndex?: number; leaseMs?: number }
+  | { type: "set_gamepad_axis"; axis: string; value: number; gamepadIndex?: number; leaseMs?: number }
+  | { type: "reset_gamepad"; gamepadIndex?: number }
+  | { type: "text_input"; text: string; sensitive?: boolean; secretKey?: string }
+  | { type: "release_all_game_inputs" };
 
 export interface InspectorPanel {
   id: "tree" | "node" | "screenshot" | "logs";
@@ -93,6 +111,9 @@ export interface GuaInspectorClient {
   pauseClock(): Promise<GuaClockStatus>;
   runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus>;
   resumeClock(): Promise<GuaClockStatus>;
+  getGameInputActions(): Promise<GuaGameInputActions>;
+  getGameInputState(): Promise<GuaGameInputState>;
+  performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }>;
 }
 
 export type GuaInspectorCommand =
@@ -111,7 +132,10 @@ export type GuaInspectorCommand =
   | { id: number; type: "set_checked"; nodeId: string; checked: boolean }
   | { id: number; type: "select"; nodeId: string; value: string }
   | { id: number; type: "scroll"; nodeId: string; deltaX: number; deltaY: number; scrollUnit?: number }
-  | { id: number; type: "press_key"; nodeId?: string; key: string; modifiers?: number };
+  | { id: number; type: "press_key"; nodeId?: string; key: string; modifiers?: number }
+  | ({ id: number } & GameInputCommandInput)
+  | { id: number; type: "get_game_input_actions" | "get_game_input_state" }
+  | { id: number; type: "poll_game_input"; requestId: number };
 
 type GuaInspectorCommandInput =
   | { type: "get_ui_tree" }
@@ -129,7 +153,10 @@ type GuaInspectorCommandInput =
   | { type: "set_checked"; nodeId: string; checked: boolean }
   | { type: "select"; nodeId: string; value: string }
   | { type: "scroll"; nodeId: string; deltaX: number; deltaY: number; scrollUnit?: number }
-  | { type: "press_key"; nodeId?: string; key: string; modifiers?: number };
+  | { type: "press_key"; nodeId?: string; key: string; modifiers?: number }
+  | GameInputCommandInput
+  | { type: "get_game_input_actions" | "get_game_input_state" }
+  | { type: "poll_game_input"; requestId: number };
 
 export type GuaInspectorResponse =
   | { id: number; ok: true; result: unknown }
@@ -399,6 +426,12 @@ export class MockInspectorClient implements GuaInspectorClient {
   async pauseClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "paused" }; return this.clock; }
   async runClockFor(durationMs: number, stepMs?: number) { if (this.clock.state !== "paused") throw new Error("invalid_state"); if (stepMs !== undefined && stepMs <= 0) throw new Error("invalid_duration"); this.clock = { ...this.clock, nowMs: this.clock.nowMs + durationMs }; return this.clock; }
   async resumeClock() { if (!this.clock.installed) throw new Error("not_installed"); this.clock = { ...this.clock, state: "running" }; return this.clock; }
+  async getGameInputActions(): Promise<GuaGameInputActions> { return { schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "gameplay", actions: [
+    { id: "jump", description: "Jump", valueType: "button", holdable: true, active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false },
+    { id: "move", description: "Move", valueType: "vector2", range: { minimum: -1, maximum: 1 }, holdable: true, active: true, bindings: ["Gamepad.leftStick"], risk: "safe", requiresConfirmation: false },
+  ] }; }
+  async getGameInputState(): Promise<GuaGameInputState> { return { schemaVersion: 1, held: [] }; }
+  async performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }> { this.logs = [...this.logs, { sequence: this.logs.length + 1, level: "info", message: `game_input(${command.type})` }]; return { requestId: this.logs.length }; }
 }
 
 function actionCommand(action: SemanticActionInput): GuaInspectorCommandInput {
@@ -417,6 +450,7 @@ function actionCommand(action: SemanticActionInput): GuaInspectorCommandInput {
     case "press_key": return {
       type: "press_key", nodeId: action.nodeId, key: action.key ?? "", modifiers: action.modifiers,
     };
+    case "game_input": throw new Error("Use performGameInput for game_input actions.");
   }
 }
 
@@ -505,6 +539,21 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
     throw new Error("Timed out waiting for Gua clock run_for host completion.");
   }
   async resumeClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_resume" }); }
+  async getGameInputActions(): Promise<GuaGameInputActions> { return this.request({ type: "get_game_input_actions" }); }
+  async getGameInputState(): Promise<GuaGameInputState> { return this.request({ type: "get_game_input_state" }); }
+  async performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }> {
+    const receipt = await this.request<{ requestId: number }>(command);
+    const started = Date.now();
+    while (Date.now() - started <= 10000) {
+      const result = await this.request<{ completed: boolean; succeeded?: boolean; errorCode?: number }>({ type: "poll_game_input", requestId: receipt.requestId });
+      if (result.completed) {
+        if (!result.succeeded) throw new Error(`Gua game input failed with error ${result.errorCode ?? "unknown"}.`);
+        return receipt;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 25));
+    }
+    throw new Error(`Timed out waiting for Gua game input request ${receipt.requestId}.`);
+  }
 
   async performAction(action: SemanticActionInput): Promise<ActionOutcome> {
     const command = actionCommand(action);

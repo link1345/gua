@@ -1,9 +1,11 @@
 #include "gua/gua.h"
+#include "gua/gua.hpp"
 #include "gua/testing.hpp"
 
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -24,6 +26,15 @@ void node(gua_context_t* context, const char* id, const char* parent, const char
 
 int main()
 {
+    std::optional<gua::GameInputSession> surviving_session;
+    {
+        gua::Context source;
+        surviving_session.emplace(source);
+        gua::Context moved(std::move(source));
+        assert(surviving_session->state_json().find("\"held\":[]") != std::string::npos);
+    }
+    surviving_session.reset();
+
     gua_context_t* context = gua_create_context();
     gua_begin_frame(context, "selectors");
     node(context, "left", nullptr, "panel", "Left", nullptr);

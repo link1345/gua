@@ -65,10 +65,17 @@ GuaはAIコーディングエージェントを補完します。AIがゲーム�
 Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Treeを実験的な
 ブラウザ`document.modelContext` APIから公開できます。`gua-webmcp`は、エンジンが
 所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、read-onlyの
-World Object Tree観測ツール、任意のscreenshotツールを登録します。world型とselector
+World Object Tree観測ツール、capabilityで制御されたSemantic Game Action / Raw Input、
+任意のscreenshotツールを登録します。world型とselector
 定義は`gua-world-tools`として公開します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
 ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
 独自のブラウザセッションルーターは持ちません。
+ゲーム入力は現在のページが所有し、request-correlatedなhost completionを待ちます。
+timeout、キャンセル、ツール登録解除、engine終了時には全入力を解放します。Raw toolは
+hostが入力pumpとcleanup経路を明示的に初期化するまで公開しません。
+Player/Public Agent向けゲーム入力は別権限として既定拒否です。Debug Inspector用の
+入力経路を有効化してもWebMCPには公開されません。Godotでは`allow_player_agents`引数、
+Unityでは`AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput`を明示指定します。
 組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
 現在のGodot WebアドオンはデバッグWeb Exportのみ対応しています。リリースExport対応は
 [Issue #75](https://github.com/link1345/gua/issues/75)で追跡しています。
@@ -88,7 +95,7 @@ regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテ
 Unityパッケージはランタイムアダプターを自動起動し、UI Toolkit、uGUI、TextMeshProの
 Controlを手動登録なしで収集します。`Gua.Testing.Unity`を使うと、通常の.NETテストから
 Editor Play Modeまたはビルド済みMono Playerを起動できます。現在の対応範囲は
-Unity 6000.0以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
+Unity 6000.5以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
 EditorWindowの自動化には未対応です。導入・検証手順は
 [Unity 6 Windows x64](#unity-6-windows-x64)を参照してください。
 
@@ -174,10 +181,10 @@ Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_labe
 ### 決定論的な仮想時間
 
 GuaClockを時刻源にしたゲームロジックは、停止したり、実時間を待たずに
-進めたりできる。既存のengine timerを自動的に置き換える機能ではない。
+進めたりできます。既存のengine timerを自動的に置き換える機能ではありません。
 まずゲーム本体の対象ロジックを、Godotの`Timer`、Unityの`Time.deltaTime`や
-Coroutineなどではなく、GuaClockのScheduleまたはTickを使う実装へ変更する。
-その後、テストから共有ClockをInstallして操作する。
+Coroutineなどではなく、GuaClockのScheduleまたはTickを使う実装へ変更します。
+その後、テストから共有ClockをInstallして操作します。
 
 ```csharp
 // ゲーム側の組み込み。production codeで一度行う。
@@ -191,11 +198,30 @@ clock.RunFor(TimeSpan.FromSeconds(2));
 ```
 
 ここで`Install`が行うのは共有仮想Clockの有効化であり、任意のgame objectへ
-Clockを自動注入することではない。`Pause`の対象は、あらかじめGuaClockの
-SchedulerまたはTickへ接続したゲームロジックだけだ。engine標準のTimer、
-物理、Animation、Audio、OS時刻、ネットワークは停止しない。
+Clockを自動注入することではありません。`Pause`の対象は、あらかじめGuaClockの
+SchedulerまたはTickへ接続したゲームロジックだけです。engine標準のTimer、
+物理、Animation、Audio、OS時刻、ネットワークは停止しません。
 bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
-`clock_run_for`、`clock_resume`を利用できる。
+`clock_run_for`、`clock_resume`を利用できます。
+
+### Semantic Game ActionとRaw Input
+
+ホストはUI Treeと独立したGame Action Mapを明示登録し、button、axis、vector、
+textを`press_game_input_action`、`set_game_input_action`、
+`release_game_input_action`で操作できます。明示opt-inのRaw toolはcommand schemaに
+列挙されたengine共通のW3C physical key code、pointer移動/button/wheel、
+Standard Gamepad、text inputを扱います。
+保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒です。満了、切断、
+reset、replay失敗、session disposeではneutral状態へ戻します。InspectorにはAction
+Map、保持lease、Raw操作、緊急`Release all`を表示します。
+ローカルC++/.NET sessionは返されたrequest IDをpollしてhost完了を確認します。
+enqueue受付だけではadapterが入力を注入したことを意味しません。
+
+Unity 6000.5では`com.unity.inputsystem@1.20.0`のvirtual deviceへ注入し、
+Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡します。
+adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開します。
+既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
+`press_physical_key`を使います。
 
 - **gui-mcp:** [![NPM Version](https://img.shields.io/npm/v/gui-mcp)](https://www.npmjs.com/package/gui-mcp) ![NPM Downloads](https://img.shields.io/npm/dw/gui-mcp)<br>
   Inspectorと同じWebSocketブリッジを通じて、Guaのランタイム操作を

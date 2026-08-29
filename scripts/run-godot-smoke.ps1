@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+
 if ([string]::IsNullOrWhiteSpace($GodotExecutable)) {
     $command = Get-Command "Godot_v4.7-stable_win64_console.exe" -ErrorAction SilentlyContinue
     if ($null -eq $command) { $command = Get-Command "godot" -ErrorAction SilentlyContinue }
@@ -24,21 +25,74 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 }
 
 $project = Join-Path $root "examples\godot-gdscript"
-$log = Join-Path $root "artifacts\godot-smoke.log"
-New-Item -ItemType Directory -Force (Split-Path -Parent $log) | Out-Null
+$artifactRoot = Join-Path $root "artifacts"
+$userDataRoot = Join-Path $root "build\godot-smoke-appdata"
+$log = Join-Path $artifactRoot "godot-smoke.log"
+$stdoutLog = Join-Path $artifactRoot "godot-smoke.stdout.log"
+$stderrLog = Join-Path $artifactRoot "godot-smoke.stderr.log"
+New-Item -ItemType Directory -Force $artifactRoot, $userDataRoot | Out-Null
+Remove-Item -LiteralPath $log, $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
 
 $arguments = @(
     "--disable-crash-handler",
     "--headless",
     "--path", "`"$project`"",
-    "--log-file", "`"$log`"",
-    "--script", "res://scripts/gua_smoke.gd"
+    "--scene", "res://GuaSmoke.tscn"
 )
-$process = Start-Process -FilePath $GodotExecutable -ArgumentList $arguments -NoNewWindow -PassThru
+$startParameters = @{
+    FilePath = $GodotExecutable
+    ArgumentList = $arguments
+    PassThru = $true
+    RedirectStandardOutput = $stdoutLog
+    RedirectStandardError = $stderrLog
+}
+if ($env:OS -eq "Windows_NT") { $startParameters.WindowStyle = "Hidden" }
+
+# Godot 4.7 can access-violate during startup when its ordinary APPDATA-backed
+# user:// location is unavailable. The child inherits this ignored writable path.
+$previousAppData = $env:APPDATA
+try {
+    $env:APPDATA = $userDataRoot
+    $process = Start-Process @startParameters
+}
+finally {
+    if ($null -eq $previousAppData) { Remove-Item Env:APPDATA -ErrorAction SilentlyContinue }
+    else { $env:APPDATA = $previousAppData }
+}
+
 if (-not $process.WaitForExit([int][Math]::Min([int]::MaxValue, $Timeout.TotalMilliseconds))) {
     Stop-ProcessTree $process
-    throw "Godot smoke timed out after $Timeout. Log: $log"
+    throw "Godot smoke timed out after $Timeout. Logs: $stdoutLog, $stderrLog"
 }
-if ($process.ExitCode -ne 0) { throw "Godot smoke failed with exit code $($process.ExitCode). Log: $log" }
+$godotOutput = @(
+    @(Get-Content -LiteralPath $stdoutLog -ErrorAction SilentlyContinue)
+    @(Get-Content -LiteralPath $stderrLog -ErrorAction SilentlyContinue)
+)
+Set-Content -LiteralPath $log -Value $godotOutput
+if ($process.ExitCode -ne 0) {
+    $godotOutput | Write-Host
+    throw "Godot smoke failed with exit code $($process.ExitCode). Log: $log"
+}
 
-Write-Host "Godot smoke passed. Log: $log"
+# A restricted Windows host may deny the system CA store. This offline smoke
+# does not use TLS, so suppress only Godot's exact fallback diagnostic.
+$filteredOutput = [System.Collections.Generic.List[string]]::new()
+for ($index = 0; $index -lt $godotOutput.Count; $index++) {
+    if ($godotOutput[$index] -eq "ERROR: Failed to read the root certificate store." -and
+        $index + 1 -lt $godotOutput.Count -and
+        $godotOutput[$index + 1].Trim() -like "at: get_system_ca_certificates*") {
+        $index++
+        continue
+    }
+    $filteredOutput.Add($godotOutput[$index])
+}
+
+if (-not ($filteredOutput -contains "Gua GDScript smoke passed.")) {
+    $godotOutput | Write-Host
+    throw "Godot GDScript smoke did not report successful completion. Log: $log"
+}
+if ($filteredOutput | Where-Object { $_ -match "^ERROR:" }) {
+    $godotOutput | Write-Host
+    throw "Godot GDScript smoke emitted an unexpected error. Log: $log"
+}
+$filteredOutput | Write-Host

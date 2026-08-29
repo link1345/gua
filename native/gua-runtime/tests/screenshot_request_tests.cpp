@@ -312,5 +312,52 @@ int main()
         assert(undersized_report_storage[index] == 0xA5);
     }
     gua_runtime_destroy(runtime);
+
+    runtime = gua_runtime_create();
+    gua_runtime_set_game_input_capabilities(runtime, GUA_RUNTIME_GAME_INPUT_KEYBOARD);
+    assert(gua_runtime_get_game_input_capabilities(runtime, GUA_OBSERVATION_PROFILE_DEBUG) == GUA_RUNTIME_GAME_INPUT_KEYBOARD);
+    assert(gua_runtime_get_game_input_capabilities(runtime, GUA_OBSERVATION_PROFILE_PLAYER) == 0);
+    const uint64_t input_owner = gua_runtime_create_game_input_owner(runtime);
+    const gua_game_input_request_descriptor_v2_t key_down {
+        sizeof(gua_game_input_request_descriptor_v2_t), input_owner, GUA_GAME_INPUT_KEYBOARD,
+        GUA_GAME_INPUT_DOWN, "KeyA", "null", 0, 0, 5000, 0, 0, 0
+    };
+    uint64_t input_request = 0;
+    assert(gua_runtime_enqueue_game_input_for_profile_v2(runtime, &key_down,
+        GUA_OBSERVATION_PROFILE_PLAYER, &input_request) == GUA_GAME_INPUT_ERROR_UNSUPPORTED);
+    gua_runtime_set_player_game_input_capabilities(runtime, GUA_RUNTIME_GAME_INPUT_KEYBOARD);
+    assert(gua_runtime_enqueue_game_input_for_profile_v2(runtime, &key_down,
+        GUA_OBSERVATION_PROFILE_PLAYER, &input_request) == GUA_GAME_INPUT_OK);
+    gua_runtime_set_player_game_input_capabilities(runtime, 0);
+    gua_game_input_request_v1_t input { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_runtime_consume_game_input_request(runtime, &input) == 0);
+    const int result_size = gua_runtime_copy_game_input_result_json(runtime, input_owner, input_request, nullptr, 0);
+    std::string input_result(static_cast<std::size_t>(result_size), '\0');
+    gua_runtime_copy_game_input_result_json(runtime, input_owner, input_request, input_result.data(), result_size);
+    assert(input_result.find("\"succeeded\":false") != std::string::npos);
+    assert(input_result.find("\"errorCode\":-4") != std::string::npos);
+    const gua_game_input_request_descriptor_v2_t release_all {
+        sizeof(gua_game_input_request_descriptor_v2_t), input_owner, GUA_GAME_INPUT_CLEANUP,
+        GUA_GAME_INPUT_RELEASE_ALL, "all", "null", 0, 0, 5000, 0, 0, 0
+    };
+    uint64_t cleanup_request = 0;
+    assert(gua_runtime_enqueue_game_input_for_profile_v2(runtime, &release_all,
+        GUA_OBSERVATION_PROFILE_PLAYER, &cleanup_request) == GUA_GAME_INPUT_OK);
+    input = { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_runtime_consume_game_input_request(runtime, &input) == 1 && input.request_id == cleanup_request);
+    assert(gua_runtime_complete_game_input_request(runtime, cleanup_request, 1, 0) == 1);
+    uint64_t debug_request = 0;
+    assert(gua_runtime_enqueue_game_input_for_profile_v2(runtime, &key_down,
+        GUA_OBSERVATION_PROFILE_DEBUG, &debug_request) == GUA_GAME_INPUT_OK);
+    input = { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_runtime_consume_game_input_request(runtime, &input) == 1 && input.request_id == debug_request);
+    assert(gua_runtime_complete_game_input_request(runtime, debug_request, 1, 0) == 1);
+    gua_runtime_set_game_input_capabilities(runtime, 0);
+    assert(gua_runtime_tick_game_input_leases(runtime, 5000.0) == 1);
+    input = { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_runtime_consume_game_input_request(runtime, &input) == 1);
+    assert(input.kind == GUA_GAME_INPUT_KEYBOARD && input.operation == GUA_GAME_INPUT_RELEASE);
+    assert(gua_runtime_complete_game_input_request(runtime, input.request_id, 1, 0) == 1);
+    gua_runtime_destroy(runtime);
     return 0;
 }

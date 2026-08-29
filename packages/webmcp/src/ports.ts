@@ -1,4 +1,8 @@
-import { GuaWebError, type GuaBridgeCallOptions, type GuaBrowserBridge, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest } from "./index.js";
+import {
+  GuaWebError, guaGameInputCapabilities, type GuaBridgeCallOptions, type GuaBrowserBridge,
+  type GuaGameInputActionMap, type GuaGameInputCapability, type GuaGameInputCompletion, type GuaGameInputRequest,
+  type GuaGameInputState, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest,
+} from "./index.js";
 import {
   parseWorldObjectTree,
   parseWorldQueryResult,
@@ -15,9 +19,13 @@ export type GuaInPageCommand =
   | { type: "get_world_object_tree" }
   | ({ type: "query_world_objects" } & GuaWorldWireSelector)
   | { type: "perform_action"; request: GuaWebActionRequest }
+  | { type: "get_game_input_capabilities" }
+  | { type: "get_game_input_actions" }
+  | { type: "get_game_input_state" }
+  | { type: "perform_game_input"; request: GuaGameInputRequest }
   | { type: "get_screenshot" };
 
-export interface GuaInPageBridgeOptions { screenshot?: boolean; world?: boolean }
+export interface GuaInPageBridgeOptions { screenshot?: boolean; world?: boolean; gameInput?: boolean }
 
 interface GuaWorldWireSelector {
   worldId?: string;
@@ -48,15 +56,23 @@ export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBri
     bridge.getWorldObjectTree = async (callOptions) => parseWorldObjectTree(await invoke(port, { type: "get_world_object_tree" }, callOptions));
     bridge.findWorldObjects = async (selector, callOptions) => parseWorldQueryResult(await invoke(port, worldQueryCommand(selector), callOptions));
   }
+  if (options.gameInput) {
+    bridge.getGameInputCapabilities = async () => parseGameInputCapabilities(await invoke(port, { type: "get_game_input_capabilities" }));
+    bridge.getGameInputActions = async () => parseGameInputActions(await invoke(port, { type: "get_game_input_actions" }));
+    bridge.getGameInputState = async () => parseGameInputState(await invoke(port, { type: "get_game_input_state" }));
+    bridge.performGameInput = async (request, callOptions) => parseGameInputCompletion(await invoke(
+      port, { type: "perform_game_input", request: validateGameInputRequest(request) }, callOptions,
+    ));
+  }
   return bridge;
 }
 
 export function createGodotWebBridge(portName = "__guaGodotWebPort", options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
-  return createGuaInPageBridge(globalPort(portName, "Godot Web Export"), { ...options, world: options.world ?? true });
+  return createGuaInPageBridge(globalPort(portName, "Godot Web Export"), { ...options, world: options.world ?? true, gameInput: options.gameInput ?? true });
 }
 
 export function createUnityWebGlBridge(portName = "__guaUnityWebPort", options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
-  return createGuaInPageBridge(globalPort(portName, "Unity WebGL"), { ...options, world: options.world ?? true });
+  return createGuaInPageBridge(globalPort(portName, "Unity WebGL"), { ...options, world: options.world ?? true, gameInput: options.gameInput ?? true });
 }
 
 function worldQueryCommand(selector: GuaWorldSelector): GuaInPageCommand {
@@ -305,6 +321,87 @@ function parseCompletion(value: unknown): GuaWebActionCompletion {
     throw new GuaWebError("invalid_request", "The engine returned an invalid action completion.");
   }
   return parsed as GuaWebActionCompletion;
+}
+
+function parseGameInputCapabilities(value: unknown): GuaGameInputCapability[] {
+  const parsed = parseJson(value);
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string" && guaGameInputCapabilities.includes(item as GuaGameInputCapability))) {
+    throw new GuaWebError("invalid_request", "The engine returned invalid game input capabilities.");
+  }
+  return [...new Set(parsed)] as GuaGameInputCapability[];
+}
+
+function parseGameInputActions(value: unknown): GuaGameInputActionMap {
+  const parsed = parseJson(value);
+  const record = asRecord(parsed);
+  if (!record || record.schemaVersion !== 1 || !Number.isInteger(record.sessionEpoch) || (record.sessionEpoch as number) < 1 ||
+      !Number.isInteger(record.revision) || (record.revision as number) < 0 || !isNonEmptyString(record.context) ||
+      !Array.isArray(record.actions) || !record.actions.every(isGameInputAction)) {
+    throw new GuaWebError("invalid_request", "The engine returned an invalid game input action map.");
+  }
+  return parsed as GuaGameInputActionMap;
+}
+
+function isGameInputAction(value: unknown): boolean {
+  const action = asRecord(value);
+  if (!action || !isNonEmptyString(action.id) || typeof action.description !== "string" ||
+      !["button", "axis1d", "vector2", "text"].includes(String(action.valueType)) ||
+      typeof action.holdable !== "boolean" || typeof action.active !== "boolean" ||
+      !Array.isArray(action.bindings) || !action.bindings.every(isNonEmptyString) ||
+      typeof action.risk !== "string" || typeof action.requiresConfirmation !== "boolean") return false;
+  if (action.minimum !== undefined || action.maximum !== undefined) return false;
+  if (action.range === undefined) return true;
+  const range = asRecord(action.range);
+  if (range === undefined) return false;
+  return Object.keys(range).every((key) => key === "minimum" || key === "maximum") &&
+    isFiniteNumber(range.minimum) && isFiniteNumber(range.maximum) && range.minimum <= range.maximum;
+}
+
+function parseGameInputState(value: unknown): GuaGameInputState {
+  const parsed = parseJson(value);
+  const record = asRecord(parsed);
+  if (!record || record.schemaVersion !== 1 || !Array.isArray(record.held)) {
+    throw new GuaWebError("invalid_request", "The engine returned invalid game input state.");
+  }
+  return parsed as GuaGameInputState;
+}
+
+function parseGameInputCompletion(value: unknown): GuaGameInputCompletion {
+  const parsed = parseJson(value);
+  const record = asRecord(parsed);
+  if (!record || record.completed !== true || !Number.isInteger(record.requestId) || (record.requestId as number) < 1 ||
+      typeof record.succeeded !== "boolean" || !Number.isInteger(record.errorCode)) {
+    throw new GuaWebError("invalid_request", "The engine returned an invalid game input completion.");
+  }
+  return parsed as GuaGameInputCompletion;
+}
+
+function validateGameInputRequest(value: unknown): GuaGameInputRequest {
+  const request = asRecord(value);
+  if (!request || typeof request.type !== "string" || !gameInputRequestTypes.has(request.type) || !isFiniteJsonValue(request)) {
+    throw new GuaWebError("invalid_request", "The browser supplied an invalid game input request.");
+  }
+  if (request.leaseMs !== undefined && (!Number.isInteger(request.leaseMs) || (request.leaseMs as number) < 1 || (request.leaseMs as number) > 60000)) {
+    throw new GuaWebError("invalid_request", "leaseMs must be an integer from 1 to 60000.");
+  }
+  if (request.gamepadIndex !== undefined && (!Number.isInteger(request.gamepadIndex) || (request.gamepadIndex as number) < 0 || (request.gamepadIndex as number) > 3)) {
+    throw new GuaWebError("invalid_request", "gamepadIndex must be an integer from 0 to 3.");
+  }
+  return value as GuaGameInputRequest;
+}
+
+const gameInputRequestTypes = new Set([
+  "press_game_input_action", "set_game_input_action", "release_game_input_action", "release_all_game_inputs",
+  "key_down", "key_up", "press_physical_key", "pointer_move", "pointer_button_down", "pointer_button_up",
+  "pointer_wheel", "gamepad_button_down", "gamepad_button_up", "set_gamepad_axis", "reset_gamepad", "text_input",
+]);
+
+function isFiniteJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isFiniteJsonValue);
+  const record = asRecord(value);
+  return !!record && Object.values(record).every(isFiniteJsonValue);
 }
 
 function parseScreenshot(value: unknown): GuaScreenshot {
