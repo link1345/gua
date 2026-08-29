@@ -35,6 +35,12 @@ set_target_properties(gua-runtime
         WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+if(EMSCRIPTEN)
+    # Godot loads the Web GDExtension as a side module. Every static archive
+    # linked into that module must use relocatable WebAssembly code.
+    set_target_properties(gua-runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 if(MSVC)
     target_compile_options(gua-runtime
         PRIVATE
