@@ -34,7 +34,7 @@ if (Test-Path -LiteralPath $OutputDirectory) {
     New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 }
 
-$windowsAddonArchive = Require-File (Join-Path $WindowsAssetsDirectory "gua-godot-plugin-windows-debug-v$Version.zip")
+$windowsAddonArchive = Require-File (Join-Path $WindowsAssetsDirectory "gua-godot-plugin-windows-v$Version.zip")
 $webAddonArchive = Require-File (Join-Path $WebNativeDirectory "gua-godot-plugin-web-v$Version.zip")
 $unityArchive = Require-File (Join-Path $UnityPackageDirectory "com.link1345.gua-$Version.tgz")
 
@@ -73,7 +73,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $webBin "gua_godot.web.debug.wasm32.wasm") -Destination $windowsBin
     Copy-Item -LiteralPath (Join-Path $webBin "gua_godot.web.release.wasm32.wasm") -Destination $windowsBin
 
-    Require-File (Join-Path $windowsBin "gua_godot.windows.debug.x86_64.dll") | Out-Null
+    & (Join-Path $root "scripts/verify-godot-windows-addon.ps1") -AddonDirectory $windowsAddon -RequireBinaries
     & (Join-Path $root "scripts/verify-godot-web-addon.ps1") -AddonDirectory $windowsAddon -RequireBinaries
 
     $godotArchive = Join-Path $OutputDirectory "gua-godot-addon-v$Version.zip"

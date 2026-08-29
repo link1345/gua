@@ -7,6 +7,59 @@ on:
       - main
 
 jobs:
+  godot-windows-addon-contract:
+    name: Godot Windows Debug / Release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Configure Debug and Release native builds
+        run: |
+          cmake --preset windows-msvc-debug
+          cmake --preset windows-msvc-release
+
+      - name: Build Debug and Release Godot GDExtensions
+        run: |
+          cmake --build --preset windows-msvc-debug --target gua-godot
+          cmake --build --preset windows-msvc-release --target gua-godot
+
+      - name: Verify Windows addon contract
+        shell: pwsh
+        run: scripts/verify-godot-windows-addon.ps1 -RequireBinaries
+
+      - name: Install Godot 4.7 editor and export templates
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_win64.exe.zip -OutFile godot.zip
+          Invoke-WebRequest https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz -OutFile templates.zip
+          Expand-Archive godot.zip -DestinationPath .godot-editor
+          Expand-Archive templates.zip -DestinationPath .godot-export-templates
+          $templateDirectory = Join-Path $env:APPDATA "Godot/export_templates/4.7.stable"
+          New-Item -ItemType Directory -Force $templateDirectory | Out-Null
+          Copy-Item ".godot-export-templates/templates/*" $templateDirectory -Recurse
+
+      - name: Export Windows Release player
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/godot-windows-release | Out-Null
+          $godot = (Resolve-Path ".godot-editor/Godot_v4.7-stable_win64.exe").Path
+          $output = Join-Path $env:GITHUB_WORKSPACE "artifacts/godot-windows-release/GuaGodotSample.exe"
+          & $godot --headless --path examples/godot-gdscript --export-release "Windows Desktop" $output
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            throw "Godot Windows Release export failed."
+          }
+
+      - name: Run external-control smoke against Windows Release
+        run: bun scripts/verify-godot-windows-release.ts artifacts/godot-windows-release/GuaGodotSample.exe
+
   godot-web-addon-contract:
     name: Godot Web Debug / Release
     runs-on: ubuntu-latest

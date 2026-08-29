@@ -466,15 +466,25 @@ GuaAssertions.GetByRole(host.Context, "button", "Create").ToBeVisible();
 これはGDScriptプロジェクトと.NET対応プロジェクトの両方に推奨するGodot統合です。
 標準Control向けアダプターは、現在Guaが文書化しているGodot機能一式を実装しています。
 
-`native/gua-godot`は、共有`native/gua-runtime`上に構築された薄いGDExtension
-アダプターです。GDScript側でランタイムコアを再実装しません。
+`native/gua-godot`は、`native/gua-runtime`上に構築された薄いGDExtension
+アダプターです。Windowsではランタイム実装をGDExtensionへ静的に組み込み、
+Debug・Release両方のアドオンバイナリが、構成を区別できない共通の
+`gua_runtime.dll`へ依存しないようにしています。GDScript側でランタイムコアを
+再実装しません。
 
-Windowsデバッグ版GDExtensionをビルドします。
+WindowsのDebug版とRelease版GDExtensionは、別々の構成済みビルドツリーで
+ビルドします。
 
 ```powershell
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug --target gua-godot
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release --target gua-godot
 ```
+
+構成別のDLLは`examples/godot-gdscript/addons/gua/bin`へ出力されます。Godotは
+エディターとDebug ExportではDebug DLL、最適化したWindows Exportでは
+Release DLLを読み込みます。
 
 ゲームスクリプトでは、自動収集アダプターを明示的にプリロードします。
 
@@ -504,8 +514,9 @@ Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
 
-`gua-godot-addon-v1.0.0.zip`には、Windows用GDExtension DLLとDebug・Release
-両方のWeb用GDExtension WASMを含む単一の`addons/gua`ツリーが入ります。
+`gua-godot-addon-v1.0.0.zip`には、Debug・Release両方のWindows用GDExtension
+DLLと、Debug・Release両方のWeb用GDExtension WASMを含む単一の
+`addons/gua`ツリーが入ります。
 アドオン内の各ファイル、Unity WebGL用静的ライブラリ、ImGui ZIPはGitHub
 Releaseへ個別公開しません。静的ライブラリはUnity Package Managerアーカイブに
 収録されます。

@@ -3,21 +3,25 @@
 This target exposes the shared Gua native runtime bridge to Godot 4.7 as a small
 GDExtension class usable from GDScript.
 
-Build the adapter:
+Build both Windows configurations in separate configured build trees:
 
 ```powershell
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug --target gua-godot
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release --target gua-godot
 ```
 
-The debug Windows DLL is emitted into:
+The Debug and Release Windows DLLs are emitted into:
 
 ```text
 examples/godot-gdscript/addons/gua/bin/
 ```
 
-On Windows, the adapter links `gua-runtime`, which owns both the core Gua context
-and the shared WebSocket bridge. A GDScript runtime can call
+On Windows, the adapter statically embeds the `gua-runtime` implementation,
+which owns both the core Gua context and the WebSocket bridge. This lets the
+Debug and Release GDExtensions coexist in one addon without a shared
+configuration-specific runtime DLL. A GDScript runtime can call
 `start_inspector_bridge(8765)` on `GuaContext` so Gua Inspector can connect to
 the running Godot game at `ws://127.0.0.1:8765`.
 
