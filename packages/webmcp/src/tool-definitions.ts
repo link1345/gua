@@ -125,7 +125,9 @@ export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInpu
     actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
   }, ["actionId"]) },
   { name: "set_game_input_action", description: "Set and optionally hold a semantic game action value.", inputSchema: objectSchema({
-    actionId: stringProperty("Stable host-published action id."), value: {}, leaseMs: leaseProperty(), confirmed: { type: "boolean" },
+    actionId: stringProperty("Stable host-published action id."),
+    value: { anyOf: [{ type: "boolean" }, { type: "number" }, { type: "string", maxLength: 40 }, { type: "object" }] },
+    leaseMs: leaseProperty(), confirmed: { type: "boolean" },
     sensitive: { type: "boolean" },
   }, ["actionId", "value"]) },
   { name: "release_game_input_action", description: "Release a held semantic game action.", inputSchema: objectSchema({
@@ -147,9 +149,10 @@ export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInpu
     inputSchema: objectSchema({ button: { type: "string", enum: ["primary", "secondary", "auxiliary", "back", "forward"] },
       leaseMs: leaseProperty() }, ["button"]),
   })),
-  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: objectSchema({
-    deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] },
-  }, ["deltaX", "deltaY"]) },
+  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: {
+    ...objectSchema({ deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] } }),
+    anyOf: [{ required: ["deltaX"] }, { required: ["deltaY"] }],
+  } },
   ...(["gamepad_button_down", "gamepad_button_up"] as const).map((name) => ({
     name, description: `${name} using Standard Gamepad mapping names.`,
     inputSchema: objectSchema({ gamepadIndex: gamepadIndexProperty(), button: stringProperty("Standard Gamepad button name."),
@@ -162,7 +165,7 @@ export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInpu
   }, ["axis", "value"]) },
   { name: "reset_gamepad", description: "Reset one virtual gamepad to neutral.", inputSchema: objectSchema({ gamepadIndex: gamepadIndexProperty() }) },
   { name: "text_input", description: "Inject text through the engine input route.", inputSchema: objectSchema({
-    text: { type: "string" }, sensitive: { type: "boolean" },
+    text: { type: "string", maxLength: 40 }, sensitive: { type: "boolean" },
   }, ["text"]) },
 ];
 

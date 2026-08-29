@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -12,6 +13,12 @@
 #include <unordered_set>
 
 namespace gua {
+
+class Context;
+
+struct ContextLifetime {
+    Context* context = nullptr;
+};
 
 struct Rect {
     float x;
@@ -135,19 +142,22 @@ struct NodeProperties {
 class Context {
 public:
     Context()
-        : context_(gua_create_context())
+        : context_(gua_create_context()), lifetime_(std::make_shared<ContextLifetime>())
     {
         if (context_ == nullptr) {
             throw std::runtime_error("Failed to create Gua context");
         }
+        lifetime_->context = this;
     }
 
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
     Context(Context&& other) noexcept
-        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_))
+        : context_(other.context_), sensitive_node_ids_(std::move(other.sensitive_node_ids_)),
+          lifetime_(std::move(other.lifetime_))
     {
+        if (lifetime_ != nullptr) lifetime_->context = this;
         other.context_ = nullptr;
     }
 
@@ -157,6 +167,8 @@ public:
             reset();
             context_ = other.context_;
             sensitive_node_ids_ = std::move(other.sensitive_node_ids_);
+            lifetime_ = std::move(other.lifetime_);
+            if (lifetime_ != nullptr) lifetime_->context = this;
             other.context_ = nullptr;
         }
         return *this;
@@ -522,6 +534,7 @@ public:
     int tick_game_input_leases(double elapsed_ms) { return gua_tick_game_input_leases(context_, elapsed_ms); }
 
 private:
+    friend class GameInputSession;
     static void check_clock(int result) { if (result != GUA_CLOCK_OK) throw std::runtime_error("Gua clock operation failed: " + std::to_string(result)); }
     template <typename CopyJson>
     [[nodiscard]] std::string copy_json(CopyJson copy) const
@@ -547,12 +560,14 @@ private:
 
     void reset() noexcept
     {
+        if (lifetime_ != nullptr) lifetime_->context = nullptr;
         gua_destroy_context(context_);
         context_ = nullptr;
         sensitive_node_ids_.clear();
     }
 
     gua_context_t* context_;
+    std::shared_ptr<ContextLifetime> lifetime_;
     mutable std::string id_buffer_;
     mutable std::string role_buffer_;
     mutable std::string label_buffer_;
@@ -569,27 +584,34 @@ private:
 
 class GameInputSession {
 public:
-    explicit GameInputSession(Context& context) : context_(&context), owner_id_(context.create_game_input_owner())
+    explicit GameInputSession(Context& context) : context_(context.lifetime_), owner_id_(context.create_game_input_owner())
     { if (owner_id_ == 0) throw std::runtime_error("Failed to create game input session"); }
     ~GameInputSession() { reset(); }
     GameInputSession(const GameInputSession&) = delete;
     GameInputSession& operator=(const GameInputSession&) = delete;
     GameInputSession(GameInputSession&& other) noexcept
-        : context_(std::exchange(other.context_, nullptr)), owner_id_(std::exchange(other.owner_id_, 0)) {}
+        : context_(std::move(other.context_)), owner_id_(std::exchange(other.owner_id_, 0)) {}
     GameInputSession& operator=(GameInputSession&& other) noexcept
-    { if (this != &other) { reset(); context_ = std::exchange(other.context_, nullptr); owner_id_ = std::exchange(other.owner_id_, 0); } return *this; }
+    { if (this != &other) { reset(); context_ = std::move(other.context_); owner_id_ = std::exchange(other.owner_id_, 0); } return *this; }
     [[nodiscard]] std::uint64_t owner_id() const noexcept { return owner_id_; }
     [[nodiscard]] std::uint64_t send(int kind, int operation, std::string_view target,
         std::string_view value_json = "null", std::uint32_t lease_ms = 5000,
         double x = 0, double y = 0, int device_index = 0, bool sensitive = false, bool confirmed = false)
-    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive, confirmed); }
+    { return context().enqueue_game_input(owner_id_, kind, operation, target, value_json, lease_ms, x, y, device_index, sensitive, confirmed); }
     [[nodiscard]] std::string state_json() const
-    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->game_input_state_json(owner_id_); }
+    { return context().game_input_state_json(owner_id_); }
     [[nodiscard]] std::string result_json(std::uint64_t request_id) const
-    { if (context_ == nullptr) throw std::runtime_error("Game input session is disposed"); return context_->game_input_result_json(owner_id_, request_id); }
-    void reset() noexcept { if (context_ != nullptr) context_->release_game_input_owner(owner_id_); context_ = nullptr; owner_id_ = 0; }
+    { return context().game_input_result_json(owner_id_, request_id); }
+    void reset() noexcept { if (const auto lifetime = context_.lock(); lifetime != nullptr && lifetime->context != nullptr) lifetime->context->release_game_input_owner(owner_id_); context_.reset(); owner_id_ = 0; }
 private:
-    Context* context_ = nullptr;
+    [[nodiscard]] Context& context() const
+    {
+        const auto lifetime = context_.lock();
+        if (owner_id_ == 0 || lifetime == nullptr || lifetime->context == nullptr)
+            throw std::runtime_error("Game input session is disposed");
+        return *lifetime->context;
+    }
+    std::weak_ptr<ContextLifetime> context_;
     std::uint64_t owner_id_ = 0;
 };
 

@@ -35,6 +35,7 @@ public sealed partial class GuaUnityRuntime
 #if ENABLE_INPUT_SYSTEM
     private Keyboard? virtualKeyboard;
     private Mouse? virtualMouse;
+    private Vector2 syntheticPointerPosition;
     private readonly Gamepad?[] virtualGamepads = new Gamepad?[4];
     private readonly Dictionary<ButtonControl, HashSet<ulong>> buttonOwners = new();
     private readonly Dictionary<AxisControl, Dictionary<ulong, (float Value, long Sequence)>> axisValuesByOwner = new();
@@ -162,9 +163,21 @@ public sealed partial class GuaUnityRuntime
             var control = virtualKeyboard[key];
             if (request.Operation == GuaGameInputOperation.Press)
             {
+                var restorePressed = ButtonIsHeld(control);
+                if (restorePressed)
+                {
+                    InputSystem.QueueDeltaStateEvent(control, 0f);
+                    InputSystem.Update();
+                }
                 InputSystem.QueueDeltaStateEvent(control, 1f);
                 InputSystem.Update();
-                InputSystem.QueueDeltaStateEvent(control, ButtonIsHeld(control) ? 1f : 0f);
+                InputSystem.QueueDeltaStateEvent(control, 0f);
+                InputSystem.Update();
+                if (restorePressed)
+                {
+                    InputSystem.QueueDeltaStateEvent(control, 1f);
+                    InputSystem.Update();
+                }
             }
             else
             {
@@ -180,7 +193,21 @@ public sealed partial class GuaUnityRuntime
                 var position = new Vector2((float)request.X, (float)request.Y);
                 if (request.Operation == GuaGameInputOperation.MoveAbsolute && request.Target.EndsWith("viewport_normalized", StringComparison.Ordinal))
                     position = Vector2.Scale(position, new Vector2(Screen.width, Screen.height));
-                InputSystem.QueueDeltaStateEvent(request.Operation == GuaGameInputOperation.MoveAbsolute ? virtualMouse.position : virtualMouse.delta, position);
+                if (request.Operation == GuaGameInputOperation.MoveAbsolute)
+                {
+                    position.y = Screen.height - position.y;
+                    syntheticPointerPosition = position;
+                    InputSystem.QueueDeltaStateEvent(virtualMouse.position, syntheticPointerPosition);
+                }
+                else
+                {
+                    position.y = -position.y;
+                    syntheticPointerPosition += position;
+                    syntheticPointerPosition.x = Mathf.Clamp(syntheticPointerPosition.x, 0f, Screen.width);
+                    syntheticPointerPosition.y = Mathf.Clamp(syntheticPointerPosition.y, 0f, Screen.height);
+                    InputSystem.QueueDeltaStateEvent(virtualMouse.delta, position);
+                    InputSystem.QueueDeltaStateEvent(virtualMouse.position, syntheticPointerPosition);
+                }
                 return true;
             }
             if (request.Operation == GuaGameInputOperation.Wheel)
@@ -302,7 +329,7 @@ public sealed partial class GuaUnityRuntime
         if (virtualMouse != null) InputSystem.RemoveDevice(virtualMouse);
         foreach (var gamepad in virtualGamepads)
             if (gamepad != null) InputSystem.RemoveDevice(gamepad);
-        virtualKeyboard = null; virtualMouse = null;
+        virtualKeyboard = null; virtualMouse = null; syntheticPointerPosition = Vector2.zero;
         Array.Clear(virtualGamepads, 0, virtualGamepads.Length);
 #endif
     }

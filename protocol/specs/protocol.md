@@ -334,8 +334,11 @@ Semantic commands are `get_game_input_actions`, `press_game_input_action`,
 `set_game_input_action`, `release_game_input_action`, `get_game_input_state`,
 and `release_all_game_inputs`. Raw commands are `key_down`, `key_up`,
 `press_physical_key`, pointer move/button/wheel operations, standard-mapping
-gamepad button/axis/reset operations, and `text_input`. The existing UI-tree
-`press_key` command is unchanged; physical keyboard input uses the supported
+gamepad button/axis/reset operations, and `text_input`. A `text_input` payload
+and a semantic `text` action value are limited to 40 Unicode code points so the
+stable v1 C ABI can carry the complete JSON string without truncation, including
+escaped input.
+The existing UI-tree `press_key` command is unchanged; physical keyboard input uses the supported
 W3C `KeyboardEvent.code` values enumerated by `commands.schema.json` through
 `press_physical_key`. This explicit cross-adapter subset includes standard
 alphanumeric, navigation, left/right modifier locations, F1-F24, numpad
@@ -373,7 +376,7 @@ cleanup after the final late completion.
 Local C++ sessions use `result_json(requestId)` and .NET sessions use
 `PollResult(requestId)` to distinguish pending, successful, and failed host
 injection. A completed result is acknowledged and removed after a successful
-full-buffer copy; implementations retain at most 1024 unacknowledged results
+full-buffer copy; implementations retain at most 1024 unacknowledged results per owner
 and discard results owned by a released session.
 
 Adapters advertise only initialized paths from `semantic_game_input_v1`,

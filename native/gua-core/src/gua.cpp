@@ -223,6 +223,7 @@ struct HeldGameInput {
     double remaining_ms = 0.0;
     bool sensitive = false;
     unsigned long long request_id = 0;
+    bool completed = false;
 };
 
 struct GameInputResult {
@@ -1121,6 +1122,18 @@ struct gua_context_t {
 
 namespace {
 
+void append_game_input_result(gua_context_t& ctx, GameInputResult result)
+{
+    const auto owner_count = std::count_if(ctx.game_input_results.begin(), ctx.game_input_results.end(),
+        [&](const auto& existing) { return existing.owner_id == result.owner_id; });
+    if (owner_count >= max_game_input_results) {
+        const auto oldest = std::find_if(ctx.game_input_results.begin(), ctx.game_input_results.end(),
+            [&](const auto& existing) { return existing.owner_id == result.owner_id; });
+        if (oldest != ctx.game_input_results.end()) ctx.game_input_results.erase(oldest);
+    }
+    ctx.game_input_results.push_back(result);
+}
+
 bool prepare_clock_operation(
     double now_ms, double duration_ms, double step_ms, double& target_ms, unsigned long long& step_count)
 {
@@ -1279,7 +1292,28 @@ bool valid_json_string_value(std::string_view value)
     std::size_t index = 0;
     if (!parse_json_string(value, index)) return false;
     skip_json_whitespace(value, index);
-    return index == value.size();
+    if (index != value.size()) return false;
+    std::size_t code_points = 0;
+    for (std::size_t cursor = 1; cursor + 1 < value.size();) {
+        const unsigned char character = static_cast<unsigned char>(value[cursor++]);
+        if (character == '\\') {
+            if (cursor >= value.size() - 1) return false;
+            if (value[cursor++] == 'u') {
+                if (cursor + 4 > value.size() - 1) return false;
+                const auto unit = static_cast<unsigned int>(std::strtoul(std::string(value.substr(cursor, 4)).c_str(), nullptr, 16));
+                cursor += 4;
+                if (unit >= 0xD800 && unit <= 0xDBFF && cursor + 6 <= value.size() - 1 &&
+                    value[cursor] == '\\' && value[cursor + 1] == 'u') {
+                    const auto low = static_cast<unsigned int>(std::strtoul(std::string(value.substr(cursor + 2, 4)).c_str(), nullptr, 16));
+                    if (low >= 0xDC00 && low <= 0xDFFF) cursor += 6;
+                }
+            }
+        } else if ((character & 0xC0U) == 0x80U) {
+            continue;
+        }
+        if (++code_points > 40) return false;
+    }
+    return true;
 }
 
 bool valid_json_string_array(std::string_view value)
@@ -1402,7 +1436,7 @@ int validate_semantic_game_input(const std::vector<GameInputAction>& actions, in
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     }
     if (action->value_type == GUA_GAME_INPUT_TEXT && operation == GUA_GAME_INPUT_SET &&
-        (value.empty() || value.front() != '"')) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
+        !valid_json_string_value(value)) return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     return GUA_GAME_INPUT_OK;
 }
 
@@ -3332,7 +3366,8 @@ extern "C" int gua_enqueue_game_input_v2(gua_context_t* ctx,
     if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(*descriptor) ||
         descriptor->owner_id == 0 || descriptor->kind < GUA_GAME_INPUT_SEMANTIC || descriptor->kind > GUA_GAME_INPUT_CLEANUP ||
         descriptor->operation < GUA_GAME_INPUT_PRESS || descriptor->operation > GUA_GAME_INPUT_RELEASE_ALL ||
-        descriptor->lease_ms > 60000 || !std::isfinite(descriptor->x) || !std::isfinite(descriptor->y))
+        descriptor->lease_ms > 60000 || !std::isfinite(descriptor->x) || !std::isfinite(descriptor->y) ||
+        (descriptor->kind != GUA_GAME_INPUT_GAMEPAD && descriptor->device_index != 0))
         return GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT;
     const std::lock_guard lock(ctx->mutex);
     if (!ctx->game_input_owners.contains(descriptor->owner_id)) return GUA_GAME_INPUT_ERROR_INVALID_ARGUMENT;
@@ -3406,8 +3441,7 @@ extern "C" int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input
         const int validation = validate_semantic_game_input(ctx->game_input_actions, request.operation,
             request.target, request.value_json, request.confirmed);
         if (validation == GUA_GAME_INPUT_OK) break;
-        if (ctx->game_input_results.size() >= max_game_input_results) ctx->game_input_results.pop_front();
-        ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, false, validation });
+        append_game_input_result(*ctx, GameInputResult { request.request_id, request.owner_id, false, validation });
         ctx->game_input_requests.pop_front();
     }
     if (ctx->game_input_cleanup_requests.empty() && ctx->game_input_requests.empty()) return 0;
@@ -3417,17 +3451,9 @@ extern "C" int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input
     request.creates_hold = request_creates_hold(request, ctx->game_input_actions);
     if (request.creates_hold) request.remaining_lease_ms = request.lease_ms;
     if (request.creates_hold) {
-        auto held = std::find_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
-            [&](const auto& item) { return held_key_matches(item, request.owner_id, request.kind, request.target, request.device_index); });
-        if (held == ctx->held_game_inputs.end()) ctx->held_game_inputs.push_back(HeldGameInput {
+        ctx->held_game_inputs.push_back(HeldGameInput {
             request.owner_id, request.kind, request.target, request.device_index, request.value_json,
-            static_cast<double>(request.lease_ms), request.sensitive, request.request_id });
-        else {
-            held->value_json = request.value_json;
-            held->remaining_ms = request.lease_ms;
-            held->sensitive = request.sensitive;
-            held->request_id = request.request_id;
-        }
+            static_cast<double>(request.lease_ms), request.sensitive, request.request_id, false });
     }
     ctx->consumed_game_input_requests.push_back(request);
     *out_request = gua_game_input_request_v1_t { sizeof(*out_request) };
@@ -3454,6 +3480,21 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
         ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
             [&](const auto& held) { return held.request_id == request.request_id; }), ctx->held_game_inputs.end());
     } else if (succeeded != 0 && owner_active) {
+        if (request.creates_hold) {
+            auto completed = std::find_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
+                [&](const auto& held) { return held.request_id == request.request_id; });
+            const bool superseded = std::any_of(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
+                [&](const auto& held) {
+                    return held.completed && held.request_id > request.request_id &&
+                        held_key_matches(held, request.owner_id, request.kind, request.target, request.device_index);
+                });
+            if (completed != ctx->held_game_inputs.end()) completed->completed = true;
+            ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
+                [&](const auto& held) {
+                    if (!held_key_matches(held, request.owner_id, request.kind, request.target, request.device_index)) return false;
+                    return held.request_id == request.request_id ? superseded : held.completed && held.request_id < request.request_id;
+                }), ctx->held_game_inputs.end());
+        }
         if (request.operation == GUA_GAME_INPUT_RELEASE_ALL) {
             ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
                 [&](const auto& held) { return held.owner_id == request.owner_id; }), ctx->held_game_inputs.end());
@@ -3470,17 +3511,21 @@ extern "C" int gua_complete_game_input_request(gua_context_t* ctx, uint64_t requ
         }
     }
     if (owner_active && !request.suppress_result) {
-        if (ctx->game_input_results.size() >= max_game_input_results) ctx->game_input_results.pop_front();
-        ctx->game_input_results.push_back(GameInputResult { request.request_id, request.owner_id, succeeded != 0, error_code });
+        append_game_input_result(*ctx, GameInputResult { request.request_id, request.owner_id, succeeded != 0, error_code });
     }
     if (request.lease_expired) {
+        const bool newer_live_hold = std::any_of(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
+            [&](const auto& held) {
+                return held.request_id > request.request_id && held.remaining_ms > 0.0 &&
+                    held_key_matches(held, request.owner_id, request.kind, request.target, request.device_index);
+            });
         const bool release_still_queued = std::any_of(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
             [&](const auto& cleanup) {
                 return cleanup.owner_id == request.owner_id && cleanup.kind == request.kind &&
                     cleanup.operation == GUA_GAME_INPUT_RELEASE && cleanup.target == request.target &&
                     cleanup.device_index == request.device_index;
             });
-        if (!release_still_queued)
+        if (!newer_live_hold && !release_still_queued)
             ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, request.owner_id,
                 request.kind, GUA_GAME_INPUT_RELEASE, request.target, "null", 0, 0, 0, request.device_index, false });
     }
@@ -3503,14 +3548,36 @@ extern "C" int gua_tick_game_input_leases(gua_context_t* ctx, double elapsed_ms)
     if (ctx == nullptr || !std::isfinite(elapsed_ms) || elapsed_ms < 0) return 0;
     const std::lock_guard lock(ctx->mutex);
     struct ExpiredKey { unsigned long long owner_id; int kind; std::string target; int device_index; };
-    std::vector<ExpiredKey> expired_in_flight;
     for (auto& request : ctx->consumed_game_input_requests) {
         if (!request.creates_hold || request.lease_expired) continue;
         request.remaining_lease_ms -= elapsed_ms;
-        if (request.remaining_lease_ms <= 0.0)
-            expired_in_flight.push_back(ExpiredKey { request.owner_id, request.kind, request.target, request.device_index });
     }
-    for (const auto& key : expired_in_flight) {
+    for (auto& held : ctx->held_game_inputs) {
+        const auto in_flight = std::find_if(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
+            [&](const auto& request) { return request.request_id == held.request_id; });
+        if (in_flight != ctx->consumed_game_input_requests.end()) held.remaining_ms = in_flight->remaining_lease_ms;
+        else held.remaining_ms -= elapsed_ms;
+    }
+    const auto release_queued = [&](const ExpiredKey& key) {
+        return std::any_of(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
+            [&](const auto& cleanup) {
+                return cleanup.owner_id == key.owner_id && cleanup.kind == key.kind &&
+                    cleanup.operation == GUA_GAME_INPUT_RELEASE && cleanup.target == key.target &&
+                    cleanup.device_index == key.device_index;
+            });
+    };
+    const auto enqueue_release = [&](const ExpiredKey& key) {
+        if (!release_queued(key))
+            ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, key.owner_id,
+                key.kind, GUA_GAME_INPUT_RELEASE, key.target, "null", 0, 0, 0, key.device_index, false });
+    };
+    const auto newer_live_hold = [&](const ExpiredKey& key, unsigned long long request_id) {
+        return std::any_of(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(), [&](const auto& held) {
+            return held_key_matches(held, key.owner_id, key.kind, key.target, key.device_index) &&
+                held.request_id > request_id && held.remaining_ms > 0.0;
+        });
+    };
+    const auto expire_key = [&](const ExpiredKey& key) {
         for (auto& request : ctx->consumed_game_input_requests) {
             if (request.creates_hold && request.owner_id == key.owner_id && request.kind == key.kind &&
                 request.target == key.target && request.device_index == key.device_index)
@@ -3519,34 +3586,41 @@ extern "C" int gua_tick_game_input_leases(gua_context_t* ctx, double elapsed_ms)
         ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
             [&](const auto& held) { return held_key_matches(held, key.owner_id, key.kind, key.target, key.device_index); }),
             ctx->held_game_inputs.end());
-        const bool release_queued = std::any_of(ctx->game_input_cleanup_requests.begin(), ctx->game_input_cleanup_requests.end(),
-            [&](const auto& cleanup) {
-                return cleanup.owner_id == key.owner_id && cleanup.kind == key.kind &&
-                    cleanup.operation == GUA_GAME_INPUT_RELEASE && cleanup.target == key.target &&
-                    cleanup.device_index == key.device_index;
-            });
-        if (!release_queued)
-            ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, key.owner_id,
-                key.kind, GUA_GAME_INPUT_RELEASE, key.target, "null", 0, 0, 0, key.device_index, false });
+        enqueue_release(key);
+    };
+
+    std::vector<unsigned long long> expired_in_flight;
+    for (const auto& request : ctx->consumed_game_input_requests) {
+        if (request.creates_hold && !request.lease_expired && request.remaining_lease_ms <= 0.0)
+            expired_in_flight.push_back(request.request_id);
     }
-    std::vector<HeldGameInput> expired;
-    for (auto& held : ctx->held_game_inputs) {
-        const auto in_flight = std::find_if(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
+    int expired_count = 0;
+    for (const auto request_id : expired_in_flight) {
+        const auto candidate = std::find_if(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
+            [&](const auto& request) { return request.request_id == request_id; });
+        if (candidate == ctx->consumed_game_input_requests.end() || candidate->lease_expired) continue;
+        const ExpiredKey key { candidate->owner_id, candidate->kind, candidate->target, candidate->device_index };
+        // The newest request is the aggregate host state. Retain an expired older
+        // request at zero until the newer request completes or fails; a later tick
+        // can then neutralize it without shortening the newer request's lease.
+        if (newer_live_hold(key, candidate->request_id)) continue;
+        expire_key(key);
+        ++expired_count;
+    }
+
+    std::vector<HeldGameInput> expired_completed;
+    for (const auto& held : ctx->held_game_inputs) {
+        const bool in_flight = std::any_of(ctx->consumed_game_input_requests.begin(), ctx->consumed_game_input_requests.end(),
             [&](const auto& request) { return request.request_id == held.request_id; });
-        if (in_flight != ctx->consumed_game_input_requests.end()) {
-            held.remaining_ms = in_flight->remaining_lease_ms;
-            continue;
-        }
-        held.remaining_ms -= elapsed_ms;
-        if (held.remaining_ms <= 0) expired.push_back(held);
+        if (!in_flight && held.remaining_ms <= 0.0) expired_completed.push_back(held);
     }
-    for (const auto& held : expired) {
-        ctx->game_input_cleanup_requests.push_back(GameInputRequest { ctx->next_game_input_request_id++, held.owner_id,
-            held.kind, GUA_GAME_INPUT_RELEASE, held.target, "null", 0, 0, 0, held.device_index, false });
+    for (const auto& held : expired_completed) {
+        const ExpiredKey key { held.owner_id, held.kind, held.target, held.device_index };
+        if (newer_live_hold(key, held.request_id)) continue;
+        expire_key(key);
+        ++expired_count;
     }
-    ctx->held_game_inputs.erase(std::remove_if(ctx->held_game_inputs.begin(), ctx->held_game_inputs.end(),
-        [](const auto& held) { return held.remaining_ms <= 0; }), ctx->held_game_inputs.end());
-    return static_cast<int>(expired.size() + expired_in_flight.size());
+    return expired_count;
 }
 
 extern "C" int gua_copy_game_input_state_json(gua_context_t* ctx, uint64_t owner_id, char* out_json, int out_json_size)

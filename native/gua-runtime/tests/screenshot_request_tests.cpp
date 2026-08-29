@@ -351,6 +351,13 @@ int main()
         GUA_OBSERVATION_PROFILE_DEBUG, &debug_request) == GUA_GAME_INPUT_OK);
     input = { sizeof(gua_game_input_request_v1_t) };
     assert(gua_runtime_consume_game_input_request(runtime, &input) == 1 && input.request_id == debug_request);
+    assert(gua_runtime_complete_game_input_request(runtime, debug_request, 1, 0) == 1);
+    gua_runtime_set_game_input_capabilities(runtime, 0);
+    assert(gua_runtime_tick_game_input_leases(runtime, 5000.0) == 1);
+    input = { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_runtime_consume_game_input_request(runtime, &input) == 1);
+    assert(input.kind == GUA_GAME_INPUT_KEYBOARD && input.operation == GUA_GAME_INPUT_RELEASE);
+    assert(gua_runtime_complete_game_input_request(runtime, input.request_id, 1, 0) == 1);
     gua_runtime_destroy(runtime);
     return 0;
 }

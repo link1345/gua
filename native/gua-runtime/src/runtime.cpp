@@ -1086,12 +1086,13 @@ extern "C" int gua_runtime_consume_game_input_request(gua_runtime_t* runtime, gu
     const std::lock_guard lock(runtime->context_mutex);
     while (gua_consume_game_input_request(runtime->context, out_request) != 0) {
         const auto profile = runtime->game_input_request_profiles.find(out_request->request_id);
+        const bool internal_cleanup = profile == runtime->game_input_request_profiles.end();
         const int observation_profile = profile == runtime->game_input_request_profiles.end()
             ? runtime->observation_profile : profile->second.observation_profile;
         if (profile != runtime->game_input_request_profiles.end()) profile->second.consumed = true;
         const uint32_t required = required_game_input_capability(out_request->kind);
         const uint32_t available = effective_game_input_capabilities(runtime, observation_profile);
-        if (required == 0 || (required != UINT32_MAX && (available & required) != 0)) return 1;
+        if (internal_cleanup || required == 0 || (required != UINT32_MAX && (available & required) != 0)) return 1;
         (void)gua_complete_game_input_request(runtime->context, out_request->request_id, 0, GUA_GAME_INPUT_ERROR_UNSUPPORTED);
         runtime->game_input_request_profiles.erase(out_request->request_id);
     }

@@ -222,7 +222,42 @@ describe("GuaAutomationManager", () => {
     controller.abort();
     resolveTree({ revision: 1, nodes: [] });
     await expect(replay).rejects.toThrow("cancelled");
-    expect(commands).toEqual([]);
+    expect(commands).toEqual(["release_all_game_inputs"]);
+  });
+
+  test("restores sensitive semantic game-input secrets with their published type", async () => {
+    const values: unknown[] = [];
+    const bridge = {
+      async getGameInputActions() { return { actions: [{ id: "move", valueType: "vector2", requiresConfirmation: false }] }; },
+      async performGameInput(input: { type: string; value?: unknown }) { values.push(input.value); return { requestId: 8 }; },
+      async waitForGameInput() { return { completed: true, requestId: 8, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    await replayRecording({ schemaVersion: 2, steps: [{
+      action: "game_input", operation: "set_game_input_action", arguments: { actionId: "move", sensitive: true },
+      relativeMilliseconds: 0, preRevision: 0, postRevision: 0, sensitive: true, secretKey: "move-secret",
+    }] }, bridge, { "move-secret": "{\"x\":1,\"y\":0}" }, "prefer_conditions", 1000);
+    expect(values[0]).toEqual({ x: 1, y: 0 });
+  });
+
+  test("does not expose malformed sensitive vector secrets in replay errors", async () => {
+    const bridge = {
+      async getGameInputActions() { return { actions: [{ id: "move", valueType: "vector2", requiresConfirmation: false }] }; },
+      async performGameInput() { return { requestId: 9 }; },
+      async waitForGameInput() { return { completed: true, requestId: 9, succeeded: true, errorCode: 0 }; },
+    } as unknown as GuaBridgeClient;
+    const marker = "topsecret-value";
+    let message = "";
+    try {
+      await replayRecording({ schemaVersion: 2, steps: [{
+        action: "game_input", operation: "set_game_input_action", arguments: { actionId: "move", sensitive: true },
+        relativeMilliseconds: 0, preRevision: 0, postRevision: 0, sensitive: true, secretKey: "move-secret",
+      }] }, bridge, { "move-secret": marker }, "prefer_conditions", 1000);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("finite vector2 JSON object");
+    expect(message).not.toContain(marker);
+    expect(message).not.toContain("topsecret");
   });
 
   test("creates an explicit baseline and emits diff artifacts on mismatch", async () => {

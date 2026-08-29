@@ -1101,8 +1101,13 @@ func _apply_game_input(request: Dictionary) -> int:
 		if keycode == KEY_NONE:
 			return -6
 		if operation == 1:
+			var restore_pressed := _has_physical_key_holder(target)
+			if restore_pressed:
+				_inject_key(keycode, false, key_location)
 			_inject_key(keycode, true, key_location)
-			_inject_key(keycode, _has_physical_key_holder(target), key_location)
+			_inject_key(keycode, false, key_location)
+			if restore_pressed:
+				_inject_key(keycode, true, key_location)
 		elif operation == 4:
 			held_physical_keys["%d:%s" % [owner_id, target]] = {"owner": owner_id, "target": target, "keycode": keycode, "location": key_location}
 			_inject_key(keycode, true, key_location)

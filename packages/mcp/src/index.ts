@@ -191,7 +191,9 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
     actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
   }, ["actionId"]) },
   { name: "set_game_input_action", description: "Set and optionally hold a semantic game action value.", inputSchema: objectSchema({
-    actionId: stringProperty("Stable host-published action id."), value: {}, leaseMs: { type: "integer", minimum: 1, maximum: 60000 },
+    actionId: stringProperty("Stable host-published action id."),
+    value: { anyOf: [{ type: "boolean" }, { type: "number" }, { type: "string", maxLength: 40 }, { type: "object" }] },
+    leaseMs: { type: "integer", minimum: 1, maximum: 60000 },
     confirmed: { type: "boolean" }, sensitive: { type: "boolean" }, secretKey: stringProperty("Secret used only for recording replay."),
   }, ["actionId", "value"]) },
   { name: "release_game_input_action", description: "Release a held semantic game action.", inputSchema: objectSchema({
@@ -213,9 +215,10 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
     inputSchema: objectSchema({ button: { type: "string", enum: ["primary", "secondary", "auxiliary", "back", "forward"] },
       leaseMs: { type: "integer", minimum: 1, maximum: 60000 } }, ["button"]),
   })),
-  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: objectSchema({
-    deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] },
-  }, ["deltaX", "deltaY"]) },
+  { name: "pointer_wheel", description: "Inject pointer wheel movement.", inputSchema: {
+    ...objectSchema({ deltaX: { type: "number" }, deltaY: { type: "number" }, wheelUnit: { type: "string", enum: ["pixels", "lines"] } }),
+    anyOf: [{ required: ["deltaX"] }, { required: ["deltaY"] }],
+  } },
   ...(["gamepad_button_down", "gamepad_button_up"] as const).map((name) => ({
     name, description: `${name} using Standard Gamepad mapping names.`,
     inputSchema: objectSchema({ gamepadIndex: { type: "integer", minimum: 0, maximum: 3 }, button: stringProperty("Standard Gamepad button name."),
@@ -230,7 +233,7 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
     gamepadIndex: { type: "integer", minimum: 0, maximum: 3 },
   }) },
   { name: "text_input", description: "Inject text through the engine input route.", inputSchema: objectSchema({
-    text: { type: "string" }, sensitive: { type: "boolean" }, secretKey: stringProperty("Secret used only for recording replay."),
+    text: { type: "string", maxLength: 40 }, sensitive: { type: "boolean" }, secretKey: stringProperty("Secret used only for recording replay."),
   }, ["text"]) },
   {
     name: "get_logs",
@@ -533,7 +536,7 @@ async function executeTool(
     case "get_game_input_state": return bridge.getGameInputState();
     case "press_game_input_action":
       return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId"),
-        confirmed: readBooleanArg(args, "confirmed", false) });
+        confirmed: readBooleanArg(args, "confirmed", false) }, 10000, signal);
     case "set_game_input_action": {
       if (!("value" in args)) throw new Error("set_game_input_action requires value.");
       const sensitive = readBooleanArg(args, "sensitive", false);
@@ -541,48 +544,50 @@ async function executeTool(
       if (sensitive && secretKey === undefined) throw new Error("Sensitive game input requires secretKey.");
       return performGameInput(bridge, automation, compactResult({ type: name, actionId: readStringArg(args, "actionId"),
         value: sensitive ? args.value : args.value, leaseMs: readIntegerArg(args, "leaseMs", 5000),
-        confirmed: readBooleanArg(args, "confirmed", false), sensitive, secretKey }) as GameInputCommandInput);
+        confirmed: readBooleanArg(args, "confirmed", false), sensitive, secretKey }) as GameInputCommandInput, 10000, signal);
     }
     case "release_game_input_action":
-      return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId") });
+      return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId") }, 10000, signal);
     case "release_all_game_inputs":
-      return performGameInput(bridge, automation, { type: name });
+      return performGameInput(bridge, automation, { type: name }, 10000, signal);
     case "key_down":
     case "key_up":
     case "press_physical_key":
       return performGameInput(bridge, automation, { type: name, code: readStringArg(args, "code"),
-        leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+        leaseMs: readIntegerArg(args, "leaseMs", 5000) }, 10000, signal);
     case "pointer_move": {
       const mode = readEnumArg(args, "mode", ["absolute", "delta"]);
       return performGameInput(bridge, automation, compactResult({ type: name, mode,
         coordinateSpace: mode === "absolute"
           ? readEnumArg(args, "coordinateSpace", ["viewport_normalized", "viewport_pixels"], "viewport_pixels")
           : undefined,
-        x: readNumberArg(args, "x", 0), y: readNumberArg(args, "y", 0) }) as GameInputCommandInput);
+        x: readNumberArg(args, "x", 0), y: readNumberArg(args, "y", 0) }) as GameInputCommandInput, 10000, signal);
     }
     case "pointer_button_down":
     case "pointer_button_up":
       return performGameInput(bridge, automation, { type: name,
         button: readEnumArg(args, "button", ["primary", "secondary", "auxiliary", "back", "forward"]),
-        leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+        leaseMs: readIntegerArg(args, "leaseMs", 5000) }, 10000, signal);
     case "pointer_wheel":
       return performGameInput(bridge, automation, { type: name, deltaX: readNumberArg(args, "deltaX", 0),
-        deltaY: readNumberArg(args, "deltaY", 0), wheelUnit: readEnumArg(args, "wheelUnit", ["pixels", "lines"], "pixels") });
+        deltaY: readNumberArg(args, "deltaY", 0), wheelUnit: readEnumArg(args, "wheelUnit", ["pixels", "lines"], "pixels") }, 10000, signal);
     case "gamepad_button_down":
     case "gamepad_button_up":
       return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0),
-        button: readStringArg(args, "button"), leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+        button: readStringArg(args, "button"), leaseMs: readIntegerArg(args, "leaseMs", 5000) }, 10000, signal);
     case "set_gamepad_axis":
       return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0),
         axis: readEnumArg(args, "axis", ["left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"]),
-        value: readNumberArg(args, "value", 0), leaseMs: readIntegerArg(args, "leaseMs", 5000) });
+        value: readNumberArg(args, "value", 0), leaseMs: readIntegerArg(args, "leaseMs", 5000) }, 10000, signal);
     case "reset_gamepad":
-      return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0) });
+      return performGameInput(bridge, automation, { type: name, gamepadIndex: readIntegerArg(args, "gamepadIndex", 0) }, 10000, signal);
     case "text_input": {
       const sensitive = readBooleanArg(args, "sensitive", false);
       const secretKey = readOptionalStringArg(args, "secretKey");
       if (sensitive && secretKey === undefined) throw new Error("Sensitive text_input requires secretKey.");
-      return performGameInput(bridge, automation, { type: name, text: readStringArg(args, "text", true), sensitive, secretKey });
+      const text = readStringArg(args, "text", true);
+      if ([...text].length > 40) throw new Error("text must contain at most 40 Unicode code points.");
+      return performGameInput(bridge, automation, { type: name, text, sensitive, secretKey }, 10000, signal);
     }
     case "wait_for_node":
       return bridge.waitForNode(
@@ -780,7 +785,6 @@ export async function replayRecording(
   validateRecording(recording);
   const results: Array<{ index: number; action: RecordedAction; requestId?: number }> = [];
   let previous = 0;
-  const hasGameInput = recording.steps.some((step) => step.action === "game_input");
   let replaySucceeded = false;
   try {
   for (const [index, step] of recording.steps.entries()) {
@@ -798,6 +802,8 @@ export async function replayRecording(
       if (step.sensitive) {
         const secret = readSecret(secrets, step.secretKey as string);
         if (step.operation === "text_input") argumentsValue.text = secret;
+        else if (step.operation === "set_game_input_action")
+          argumentsValue.value = await decodeGameInputSecret(bridge, String(argumentsValue.actionId), secret);
         else argumentsValue.value = secret;
       }
       throwIfAborted(signal);
@@ -825,12 +831,10 @@ export async function replayRecording(
   }
   replaySucceeded = true;
   } finally {
-    if (hasGameInput) {
-      try { await performGameInput(bridge, undefined, { type: "release_all_game_inputs" }, timeoutMs); }
-      catch (cleanupError) {
-        if (replaySucceeded) throw cleanupError;
-        // Preserve the original replay failure after best-effort cleanup.
-      }
+    try { await performGameInput(bridge, undefined, { type: "release_all_game_inputs" }, timeoutMs); }
+    catch (cleanupError) {
+      if (replaySucceeded) throw cleanupError;
+      // Preserve the original replay failure after best-effort cleanup.
     }
   }
   return { ok: true, steps: results };
@@ -913,6 +917,37 @@ function readSecret(secrets: Record<string, unknown>, key: string): string {
   const value = secrets[key];
   if (typeof value !== "string") throw new Error(`Replay requires a secret value for key '${key}'.`);
   return value;
+}
+
+async function decodeGameInputSecret(bridge: GuaBridgeClient, actionId: string, secret: string): Promise<unknown> {
+  const snapshot = await bridge.getGameInputActions();
+  if (!isRecord(snapshot) || !Array.isArray(snapshot.actions)) throw new Error("Gua returned an invalid game input action map.");
+  const action = snapshot.actions.find((candidate) => isRecord(candidate) && candidate.id === actionId);
+  if (!isRecord(action) || typeof action.valueType !== "string") throw new Error(`Unknown game input action '${actionId}'.`);
+  if (action.valueType === "text") return secret;
+  if (action.valueType === "axis1d") {
+    const value = Number(secret);
+    if (!Number.isFinite(value)) throw new Error(`Secret for '${actionId}' must be a finite number.`);
+    return value;
+  }
+  if (action.valueType === "button") {
+    if (secret === "true") return true;
+    if (secret === "false") return false;
+    throw new Error(`Secret for '${actionId}' must be true or false.`);
+  }
+  if (action.valueType === "vector2") {
+    let value: unknown;
+    try {
+      value = JSON.parse(secret) as unknown;
+    } catch {
+      throw new Error(`Secret for '${actionId}' must be a finite vector2 JSON object.`);
+    }
+    if (!isRecord(value) || typeof value.x !== "number" || !Number.isFinite(value.x) ||
+        typeof value.y !== "number" || !Number.isFinite(value.y))
+      throw new Error(`Secret for '${actionId}' must be a finite vector2 JSON object.`);
+    return { x: value.x, y: value.y };
+  }
+  throw new Error(`Unsupported value type for game input action '${actionId}'.`);
 }
 
 function compactResult<T extends Record<string, unknown>>(value: T): T {

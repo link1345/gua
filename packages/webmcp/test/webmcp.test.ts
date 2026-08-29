@@ -179,6 +179,34 @@ describe("registerGuaWebMcp", () => {
     expect(requests).toEqual([{ type: "release_all_game_inputs" }]);
   });
 
+  test("accepts a single pointer wheel axis", async () => {
+    const page = modelDocument();
+    const requests: unknown[] = [];
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getGameInputCapabilities: async () => ["raw_pointer_input_v1"],
+      performGameInput: async (request) => { requests.push(request); return { completed: true, requestId: 25, succeeded: true, errorCode: 0 }; },
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    await page.tools.get("pointer_wheel")!.execute({ deltaY: 20 });
+    expect(requests).toEqual([{ type: "pointer_wheel", deltaX: 0, deltaY: 20, wheelUnit: "pixels" }]);
+  });
+
+  test("bounds a stalled optional game-input capability probe", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      getGameInputCapabilities: async () => new Promise(() => {}),
+      performGameInput: async () => ({ completed: true, requestId: 1, succeeded: true, errorCode: 0 }),
+    };
+    const registration = await registerGuaWebMcp(bridge, { document: page.document, defaultTimeoutMs: 0 });
+    expect(registration.supported).toBe(true);
+    expect(registration.registeredTools).toContain("get_ui_tree");
+    expect(registration.registeredTools).not.toContain("release_all_game_inputs");
+  });
+
   test("redacts sensitive text input from engine failure messages and details", async () => {
     const page = modelDocument();
     const secret = 'alpha"beta';

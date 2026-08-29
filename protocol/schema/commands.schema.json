@@ -190,7 +190,14 @@
       "properties": {
         "type": { "enum": ["press_game_input_action", "set_game_input_action", "release_game_input_action"] },
         "actionId": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
-        "value": { "type": ["boolean", "number", "string", "object"] },
+        "value": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "number" },
+            { "type": "string", "maxLength": 40 },
+            { "type": "object" }
+          ]
+        },
         "leaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
         "confirmed": { "type": "boolean", "default": false },
         "sensitive": { "type": "boolean", "default": false }
@@ -339,7 +346,7 @@
       "additionalProperties": false,
       "properties": {
         "type": { "const": "text_input" },
-        "text": { "type": "string" },
+        "text": { "type": "string", "maxLength": 40 },
         "sensitive": { "type": "boolean", "default": false },
         "secretKey": { "type": "string", "minLength": 1 }
       }

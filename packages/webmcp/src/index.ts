@@ -180,9 +180,21 @@ export async function registerGuaWebMcp(
     };
   }
 
+  let defaultTimeoutMs: number;
+  try { defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs"); }
+  catch (error) {
+    return {
+      supported: false,
+      registeredTools,
+      unregister: () => controller.abort(),
+      error: error instanceof GuaWebError ? error : new GuaWebError("invalid_request", "Invalid WebMCP timeout."),
+    };
+  }
+
   let gameInputCapabilities: GuaGameInputCapability[] = [];
   if (bridge.getGameInputCapabilities && bridge.performGameInput) {
-    try { gameInputCapabilities = await bridge.getGameInputCapabilities(); }
+    try { gameInputCapabilities = await withTimeout(bridge.getGameInputCapabilities(), defaultTimeoutMs, controller.signal,
+      "Timed out reading game input capabilities."); }
     catch { gameInputCapabilities = []; }
   }
   const gameInputTools = gameInputDefinitions(gameInputCapabilities, bridge);
@@ -194,7 +206,6 @@ export async function registerGuaWebMcp(
   ];
   try {
     const pollIntervalMs = timerDelay(options.pollIntervalMs ?? 25, "pollIntervalMs");
-    const defaultTimeoutMs = timerDelay(options.defaultTimeoutMs ?? 5000, "defaultTimeoutMs");
     for (const definition of definitions) {
       await modelContext.registerTool({
         ...definition,
@@ -563,7 +574,8 @@ function gameInputRequest(name: string, input: Record<string, unknown>): GuaGame
       return { type: name, button: requiredEnum(input, "button", ["primary", "secondary", "auxiliary", "back", "forward"] as const), leaseMs: leaseMs() };
     case "pointer_wheel":
       rejectUnknownArguments(input, new Set(["deltaX", "deltaY", "wheelUnit"]));
-      return { type: name, deltaX: requiredNumber(input, "deltaX"), deltaY: requiredNumber(input, "deltaY"),
+      if (input.deltaX === undefined && input.deltaY === undefined) throw new GuaWebError("invalid_request", "deltaX or deltaY is required.");
+      return { type: name, deltaX: optionalNumber(input, "deltaX", 0), deltaY: optionalNumber(input, "deltaY", 0),
         wheelUnit: input.wheelUnit === undefined ? "pixels" : requiredEnum(input, "wheelUnit", ["pixels", "lines"] as const) };
     case "gamepad_button_down": case "gamepad_button_up":
       rejectUnknownArguments(input, new Set(["gamepadIndex", "button", "leaseMs"]));
@@ -579,7 +591,7 @@ function gameInputRequest(name: string, input: Record<string, unknown>): GuaGame
       return { type: name, gamepadIndex: gamepadIndex() };
     case "text_input":
       rejectUnknownArguments(input, new Set(["text", "sensitive"]));
-      return { type: name, text: requiredString(input, "text", true), sensitive: optionalBoolean(input, "sensitive", false) };
+      return { type: name, text: boundedTextInput(input, "text"), sensitive: optionalBoolean(input, "sensitive", false) };
     default:
       throw new GuaWebError("invalid_request", `Unknown Gua game input tool: ${name}`);
   }
@@ -627,6 +639,14 @@ function requiredEnum<const T extends readonly string[]>(input: Record<string, u
 function requiredNumber(input: Record<string, unknown>, key: string): number {
   if (typeof input[key] !== "number" || !Number.isFinite(input[key])) throw new GuaWebError("invalid_request", `${key} must be a finite number.`);
   return input[key] as number;
+}
+function boundedTextInput(input: Record<string, unknown>, key: string): string {
+  const value = requiredString(input, key, true);
+  if ([...value].length > 40) throw new GuaWebError("invalid_request", `${key} must contain at most 40 Unicode code points.`);
+  return value;
+}
+function optionalNumber(input: Record<string, unknown>, key: string, fallback: number): number {
+  return input[key] === undefined ? fallback : requiredNumber(input, key);
 }
 function optionalInteger(input: Record<string, unknown>, key: string, fallback: number, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
   const value = input[key] ?? fallback;
