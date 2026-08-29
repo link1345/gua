@@ -639,12 +639,16 @@ completion when the connected bridge supports it.
 
 Pushing a manually created `gua-vX.Y.Z` tag runs the release workflows. The
 Inspector, Godot plugin, and ImGui plugin are built together and attached to the
-matching GitHub Release, while the MCP and .NET packages publish the same
-version to npm and NuGet. Changes pushed to `main` do not publish packages.
+matching GitHub Release. `gua-world-tools`, `gua-webmcp`, `gui-mcp`, and the
+.NET packages publish the same tag-derived version to npm and NuGet. Changes
+pushed to `main` do not publish packages.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
-`gui-mcp` package must be configured on npm with this repository, the
-`.github/workflows/mcp-publish.yml` workflow, and the `release` environment.
+`gua-world-tools`, `gua-webmcp`, and `gui-mcp` packages must each be configured
+on npm with this repository, the `.github/workflows/mcp-publish.yml` workflow,
+and the `release` environment. npm releases are serialized across tags, and a
+rerun of an older tag is rejected before publication when any package already
+has a newer `latest` version.
 
 ## Godot 4.7 C# Sample
 

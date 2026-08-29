@@ -1,6 +1,6 @@
 {
   "name": "gua-world-tools",
-  "version": "0.19.2",
+  "version": "0.0.0",
   "description": "Shared World Object Tree types and observation tools for Gua MCP and WebMCP consumers.",
   "type": "module",
   "license": "MIT",

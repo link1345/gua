@@ -486,8 +486,15 @@ var ui := GuaAutoAdapterScript.new()
 
 手動で作成した`gua-vX.Y.Z`タグをpushすると、リリースワークフローが実行されます。
 Inspector・Godotプラグイン・ImGuiプラグインはまとめてビルドされ、対応する
-GitHub Releaseへ添付されます。MCPと.NETパッケージも同じバージョンでnpm・
-NuGetへ公開されます。`main`への変更だけではパッケージは公開されません。
+GitHub Releaseへ添付されます。`gua-world-tools`・`gua-webmcp`・`gui-mcp`と
+.NETパッケージも、タグから決定した同じバージョンでnpm・NuGetへ公開されます。
+`main`への変更だけではパッケージは公開されません。
+
+MCPワークフローはGitHub Actions OIDCによるnpm Trusted Publishingを使用します。
+`gua-world-tools`・`gua-webmcp`・`gui-mcp`の各パッケージには、npm側でこの
+リポジトリ、`.github/workflows/mcp-publish.yml`、`release`環境を設定する必要があります。
+npmリリースはタグをまたいで直列実行され、いずれかのパッケージの`latest`が新しい場合、
+古いタグの再実行は公開前に拒否されます。
 
 ## リポジトリ構成
 
