@@ -80,6 +80,8 @@ jobs:
 
       - name: Test Visual and Recording packages
         run: dotnet test bindings/dotnet/tests/Gua.Visual.Tests/Gua.Visual.Tests.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
+        env:
+          GUA_NATIVE_DIR: ${{ github.workspace }}\build\windows-msvc-release\native\gua-core\Release
 
       - name: Pack Gua.Core
         run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}

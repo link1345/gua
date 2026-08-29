@@ -63,7 +63,8 @@ GuaはAIコーディングエージェントを補完します。AIがゲーム�
 ### ブラウザネイティブWebMCP（実験的）
 
 Godot Web ExportとUnity WebGLのページは、実行中の同じSemantic UI Treeを実験的な
-ブラウザ`document.modelContext` APIから公開できます。`gua-webmcp`は、エンジンが
+ブラウザ`document.modelContext` APIから公開できます。
+[`gua-webmcp`パッケージ](https://www.npmjs.com/package/gua-webmcp)は、エンジンが
 所有する同一ページ内ブリッジに対して`get_ui_tree`、Semantic action、wait、read-onlyの
 World Object Tree観測ツール、capabilityで制御されたSemantic Game Action / Raw Input、
 任意のscreenshotツールを登録します。world型とselector
