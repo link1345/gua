@@ -92,7 +92,12 @@ async function runSmoke() {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   const port = globalThis.__guaGodotWebPort;
-  const initial = await port.invoke({ type: "get_ui_tree" });
+  let initial;
+  while (performance.now() < deadline) {
+    initial = await port.invoke({ type: "get_ui_tree" });
+    if (initial?.screen === "title") break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   if (initial?.screen !== "title" || !initial.nodes?.some((node: any) => node.id === "start" && node.actions?.includes("click"))) {
     throw new Error(`Godot Player UI tree did not expose the allowed start action: ${JSON.stringify(initial)}`);
   }
