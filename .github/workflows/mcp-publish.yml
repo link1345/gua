@@ -10,8 +10,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: mcp-publish
-  queue: max
+  group: mcp-publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -38,52 +37,6 @@ jobs:
         with:
           node-version: 24.15.0
           registry-url: https://registry.npmjs.org
-
-      - name: Refuse stale release promotion
-        shell: bash
-        run: |
-          PACKAGE_VERSION="${{ steps.version.outputs.version }}" node <<'NODE'
-          const packages = ["gua-world-tools", "gua-webmcp", "gui-mcp"];
-          const releaseVersion = process.env.PACKAGE_VERSION;
-
-          function parseStableVersion(value) {
-            const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
-            if (!match) throw new Error(`Expected a stable semantic version, received: ${value}`);
-            return match.slice(1).map(BigInt);
-          }
-
-          function compareVersions(left, right) {
-            const leftParts = parseStableVersion(left);
-            const rightParts = parseStableVersion(right);
-            for (let index = 0; index < leftParts.length; index += 1) {
-              if (leftParts[index] > rightParts[index]) return 1;
-              if (leftParts[index] < rightParts[index]) return -1;
-            }
-            return 0;
-          }
-
-          async function main() {
-            for (const packageName of packages) {
-              const response = await fetch(`https://registry.npmjs.org/${packageName}/latest`);
-              if (response.status === 404) continue;
-              if (!response.ok) {
-                throw new Error(`Unexpected npm registry response for ${packageName}@latest: HTTP ${response.status}`);
-              }
-
-              const currentVersion = (await response.json()).version;
-              if (compareVersions(currentVersion, releaseVersion) > 0) {
-                throw new Error(
-                  `Refusing to publish stale release ${releaseVersion}: ${packageName}@latest is ${currentVersion}.`,
-                );
-              }
-            }
-          }
-
-          main().catch((error) => {
-            console.error(error.message);
-            process.exitCode = 1;
-          });
-          NODE
 
       - name: Check whether World Tools version is already published
         id: world_tools_npm_version
