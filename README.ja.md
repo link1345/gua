@@ -489,9 +489,26 @@ var ui := GuaAutoAdapterScript.new()
 ## リリース自動化
 
 手動で作成した`gua-vX.Y.Z`タグをpushすると、リリースワークフローが実行されます。
-Inspector・Godotプラグイン・ImGuiプラグインはまとめてビルドされ、対応する
+Inspector・Godotアドオン・Unityパッケージはまとめてビルドされ、対応する
 GitHub Releaseへ添付されます。MCPと.NETパッケージも同じバージョンでnpm・
-NuGetへ公開されます。`main`への変更だけではパッケージは公開されません。
+NuGetへ公開されます。`main`への変更だけではパッケージは公開されません。ImGui
+アダプターは引き続きリポジトリ内のソースとして利用できますが、正式なRelease
+ファイルとしては公開しません。
+
+公開されるGitHub Releaseのファイルは、`1.0.0`を例にすると次の構成です。
+
+```text
+gua-godot-addon-v1.0.0.zip
+com.link1345.gua-1.0.0.tgz
+Gua.Inspector_<inspector-version>_x64-setup.exe
+Gua.Inspector_<inspector-version>_x64_en-US.msi
+```
+
+`gua-godot-addon-v1.0.0.zip`には、Windows用GDExtension DLLとDebug・Release
+両方のWeb用GDExtension WASMを含む単一の`addons/gua`ツリーが入ります。
+アドオン内の各ファイル、Unity WebGL用静的ライブラリ、ImGui ZIPはGitHub
+Releaseへ個別公開しません。静的ライブラリはUnity Package Managerアーカイブに
+収録されます。
 
 ## リポジトリ構成
 
