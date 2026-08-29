@@ -1,7 +1,25 @@
 include(FetchContent)
 
 set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for the Gua GDExtension." FORCE)
-set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
+set(GUA_GODOT_CONFIGURATION "Debug" CACHE STRING "Build configuration for the Gua GDExtension (Debug or Release).")
+set_property(CACHE GUA_GODOT_CONFIGURATION PROPERTY STRINGS Debug Release)
+string(TOLOWER "${GUA_GODOT_CONFIGURATION}" GUA_GODOT_CONFIGURATION_LOWER)
+if(NOT EMSCRIPTEN)
+    # The existing Windows addon remains a Debug GDExtension. Web is the first
+    # platform distributed in both configurations.
+    set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
+elseif(GUA_GODOT_CONFIGURATION_LOWER STREQUAL "debug")
+    set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
+elseif(GUA_GODOT_CONFIGURATION_LOWER STREQUAL "release")
+    set(GODOTCPP_TARGET "template_release" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
+else()
+    message(FATAL_ERROR "GUA_GODOT_CONFIGURATION must be Debug or Release, got '${GUA_GODOT_CONFIGURATION}'.")
+endif()
+if(EMSCRIPTEN)
+    # The distributed descriptor targets Godot's single-threaded Web template.
+    # Keep godot-cpp and the side module on the same thread ABI.
+    set(GODOTCPP_THREADS OFF CACHE BOOL "Enable threading support" FORCE)
+endif()
 set(GODOTCPP_USE_STATIC_CPP OFF CACHE BOOL "Use the same dynamic CRT policy as the rest of Gua." FORCE)
 set(GODOTCPP_ENABLE_TESTING OFF CACHE BOOL "Disable godot-cpp integration tests." FORCE)
 set(GODOTCPP_SYSTEM_HEADERS ON CACHE BOOL "Treat godot-cpp headers as external system headers." FORCE)
@@ -35,7 +53,7 @@ target_link_libraries(gua-godot
 target_compile_features(gua-godot PRIVATE cxx_std_20)
 
 if(EMSCRIPTEN)
-    set(GUA_GODOT_OUTPUT_NAME "gua_godot.web.debug.wasm32")
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.web.${GUA_GODOT_CONFIGURATION_LOWER}.wasm32")
 else()
     set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.debug.x86_64")
 endif()

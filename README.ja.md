@@ -77,8 +77,9 @@ Player/Public Agent向けゲーム入力は別権限として既定拒否です�
 入力経路を有効化してもWebMCPには公開されません。Godotでは`allow_player_agents`引数、
 Unityでは`AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput`を明示指定します。
 組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
-現在のGodot WebアドオンはデバッグWeb Exportのみ対応しています。リリースExport対応は
-[Issue #75](https://github.com/link1345/gua/issues/75)で追跡しています。
+Godot WebアドオンにはDebug用とRelease用のGDExtensionが個別に含まれます。
+Godot WebのExport presetで`Extension Support`を有効にすると、Godotが
+`web.wasm32.single.debug`または`web.wasm32.single.release`を選択します。
 
 ## Godot 4.7対応
 

@@ -5,20 +5,29 @@ type GodotWebPort = {
   invoke(command: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<unknown>;
 };
 
+type GodotResponse = { value?: string | number };
+type GodotCallback<TArgs extends unknown[] = []> = (response: GodotResponse, ...args: TArgs) => void;
+
+function godotCallback<TArgs extends unknown[], TResult extends string | number>(
+  callback: (...args: TArgs) => TResult,
+): GodotCallback<TArgs> {
+  return (response, ...args) => { response.value = callback(...args); };
+}
+
 const godotGlobals = globalThis as typeof globalThis & {
   __guaGodotWebPort?: GodotWebPort;
-  __guaGodotGetTree?: () => string;
-  __guaGodotGetWorldTree?: () => string;
-  __guaGodotQueryWorld?: (request: string) => string;
-  __guaGodotEnqueueAction?: (request: string) => string;
-  __guaGodotPollAction?: (requestId: string) => string;
-  __guaGodotCancelAction?: (requestId: string) => number;
-  __guaGodotGetGameInputCapabilities?: () => string;
-  __guaGodotGetGameInputActions?: () => string;
-  __guaGodotGetGameInputState?: () => string;
-  __guaGodotEnqueueGameInput?: (request: string) => string;
-  __guaGodotPollGameInput?: (requestId: string) => string;
-  __guaGodotReleaseGameInput?: (recreate?: string) => number;
+  __guaGodotGetTree?: GodotCallback;
+  __guaGodotGetWorldTree?: GodotCallback;
+  __guaGodotQueryWorld?: GodotCallback<[request: string]>;
+  __guaGodotEnqueueAction?: GodotCallback<[request: string]>;
+  __guaGodotPollAction?: GodotCallback<[requestId: string]>;
+  __guaGodotCancelAction?: GodotCallback<[requestId: string]>;
+  __guaGodotGetGameInputCapabilities?: GodotCallback;
+  __guaGodotGetGameInputActions?: GodotCallback;
+  __guaGodotGetGameInputState?: GodotCallback;
+  __guaGodotEnqueueGameInput?: GodotCallback<[request: string]>;
+  __guaGodotPollGameInput?: GodotCallback<[requestId: string]>;
+  __guaGodotReleaseGameInput?: GodotCallback<[recreate?: string]>;
 };
 
 afterEach(() => {
@@ -54,18 +63,18 @@ async function installGodotWebPort(
   )).text();
   const match = source.match(/JavaScriptBridge\.eval\("""([\s\S]*?)"""/);
   if (!match) throw new Error("Godot WebMCP install script was not found.");
-  godotGlobals.__guaGodotGetTree = () => JSON.stringify({ screen: "title", nodes: [] });
-  godotGlobals.__guaGodotGetWorldTree = () => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "level", objects: [] });
-  godotGlobals.__guaGodotQueryWorld = () => JSON.stringify({ valid: true, matches: [] });
-  godotGlobals.__guaGodotEnqueueAction = () => JSON.stringify({ requestId: 17 });
-  godotGlobals.__guaGodotPollAction = options.pollAction ?? (() => "null");
-  godotGlobals.__guaGodotCancelAction = (requestId) => { cancelled.push(requestId); return options.cancellationResult ?? 1; };
-  godotGlobals.__guaGodotGetGameInputCapabilities = () => JSON.stringify(["raw_keyboard_input_v1"]);
-  godotGlobals.__guaGodotGetGameInputActions = () => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "", actions: [] });
-  godotGlobals.__guaGodotGetGameInputState = () => JSON.stringify({ schemaVersion: 1, held: [] });
-  godotGlobals.__guaGodotEnqueueGameInput = options.enqueueGameInput ?? (() => JSON.stringify({ requestId: 23 }));
-  godotGlobals.__guaGodotPollGameInput = options.pollGameInput ?? (() => "null");
-  godotGlobals.__guaGodotReleaseGameInput = options.releaseGameInput ?? (() => 1);
+  godotGlobals.__guaGodotGetTree = godotCallback(() => JSON.stringify({ screen: "title", nodes: [] }));
+  godotGlobals.__guaGodotGetWorldTree = godotCallback(() => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "level", objects: [] }));
+  godotGlobals.__guaGodotQueryWorld = godotCallback(() => JSON.stringify({ valid: true, matches: [] }));
+  godotGlobals.__guaGodotEnqueueAction = godotCallback(() => JSON.stringify({ requestId: 17 }));
+  godotGlobals.__guaGodotPollAction = godotCallback(options.pollAction ?? (() => "null"));
+  godotGlobals.__guaGodotCancelAction = godotCallback((requestId) => { cancelled.push(requestId); return options.cancellationResult ?? 1; });
+  godotGlobals.__guaGodotGetGameInputCapabilities = godotCallback(() => JSON.stringify(["raw_keyboard_input_v1"]));
+  godotGlobals.__guaGodotGetGameInputActions = godotCallback(() => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "", actions: [] }));
+  godotGlobals.__guaGodotGetGameInputState = godotCallback(() => JSON.stringify({ schemaVersion: 1, held: [] }));
+  godotGlobals.__guaGodotEnqueueGameInput = godotCallback(options.enqueueGameInput ?? (() => JSON.stringify({ requestId: 23 })));
+  godotGlobals.__guaGodotPollGameInput = godotCallback(options.pollGameInput ?? (() => "null"));
+  godotGlobals.__guaGodotReleaseGameInput = godotCallback(options.releaseGameInput ?? (() => 1));
   new Function(match[1]!.replaceAll("%s", "test-owner"))();
   return godotGlobals.__guaGodotWebPort!;
 }

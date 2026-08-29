@@ -2,9 +2,27 @@
 
 This sample uses the Gua Godot GDExtension from GDScript.
 
-The packaged Godot Web GDExtension currently supports debug Web exports only.
-Release Web export support is tracked in
-[`link1345/gua#75`](https://github.com/link1345/gua/issues/75).
+The packaged Godot Web addon contains configuration-specific GDExtensions for
+both Debug and Release exports. The included `Web` export preset enables
+`Extension Support`, so Godot selects the matching
+`gua_godot.web.debug.wasm32.wasm` or `gua_godot.web.release.wasm32.wasm` file.
+
+Build either configuration with Emscripten available on `PATH`:
+
+```powershell
+scripts/build-web-native.ps1 -Configuration Debug
+scripts/build-web-native.ps1 -Configuration Release
+godot --headless --path examples/godot-gdscript --export-release Web build/web/index.html
+```
+
+Serve the export over HTTP(S) with cross-origin isolation headers when required
+by the browser. The loaded extension installs `window.__guaGodotWebPort` in the
+same page for `gua-webmcp`; semantic actions resolve only after their
+request-correlated host completion.
+The syntax workflow launches the Release export in headless Chromium and verifies
+that this port returns the Player UI tree, completes a correlated click on the
+explicitly allowed `start` button, exercises the Player-authorized `jump` game
+action added with the game-input API, and publishes the resulting `loading` screen.
 
 ## Opt-in visual capture
 

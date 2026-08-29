@@ -36,6 +36,7 @@ $configureArguments = @(
     "-DCMAKE_BUILD_TYPE=$Configuration",
     "-DGUA_BUILD_EXAMPLES=OFF",
     "-DGUA_BUILD_GODOT=$(if ($RuntimeOnly) { 'OFF' } else { 'ON' })",
+    "-DGUA_GODOT_CONFIGURATION=$Configuration",
     "-DGUA_VERSION=$Version",
     "-DGUA_GODOT_PLUGIN_VERSION=$Version",
     "-DGUA_BUILD_ID=$BuildId"
@@ -45,6 +46,17 @@ if ($null -ne $makeProgram) { $configureArguments += "-DCMAKE_MAKE_PROGRAM=$($ma
 & $emcmake.Source cmake @configureArguments
 if ($LASTEXITCODE -ne 0) { throw "Failed to configure the Gua Web native build." }
 
+if (-not $RuntimeOnly) {
+    $expectedGodotTarget = "template_$($Configuration.ToLowerInvariant())"
+    $cmakeCache = Get-Content -LiteralPath (Join-Path $build "CMakeCache.txt") -Raw
+    if ($cmakeCache -notmatch "(?m)^GODOTCPP_TARGET:STRING=$([regex]::Escape($expectedGodotTarget))\r?$") {
+        throw "godot-cpp target does not match $Configuration (expected $expectedGodotTarget)."
+    }
+    if ($cmakeCache -notmatch "(?m)^GODOTCPP_THREADS:BOOL=OFF\r?$") {
+        throw "godot-cpp threading must be OFF for the single-threaded Godot Web extension."
+    }
+}
+
 $targets = @("gua-runtime")
 if (-not $RuntimeOnly) { $targets += "gua-godot" }
 cmake --build $build --target @targets
@@ -53,5 +65,10 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to build the Gua Web native targets." }
 Write-Host "Unity WebGL runtime: $(Join-Path $build 'native/gua-runtime/libgua_runtime.a')"
 Write-Host "Unity WebGL core: $(Join-Path $build 'native/gua-core/libgua-core.a')"
 if (-not $RuntimeOnly) {
-    Write-Host "Godot Web extension: $(Join-Path $root 'examples/godot-gdscript/addons/gua/bin/gua_godot.web.debug.wasm32.wasm')"
+    $godotConfiguration = $Configuration.ToLowerInvariant()
+    $godotExtension = Join-Path $root "examples/godot-gdscript/addons/gua/bin/gua_godot.web.$godotConfiguration.wasm32.wasm"
+    if (-not (Test-Path -LiteralPath $godotExtension -PathType Leaf)) {
+        throw "Godot Web extension was not produced at the configuration-specific path: $godotExtension"
+    }
+    Write-Host "Godot Web extension: $godotExtension"
 }

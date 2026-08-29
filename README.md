@@ -78,8 +78,9 @@ Player/Public Agent game input is denied separately by default: enabling a
 Debug Inspector input path does not expose it to WebMCP. Godot hosts opt in with
 the `allow_player_agents` argument and Unity hosts use the corresponding
 `AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput` map flags.
-The current Godot Web addon supports debug Web exports only; release export
-support is tracked in [Issue #75](https://github.com/link1345/gua/issues/75).
+The Godot Web addon includes separate Debug and Release GDExtensions. Enable
+`Extension Support` in the Godot Web export preset; Godot then selects the
+matching `web.wasm32.single.debug` or `web.wasm32.single.release` library.
 
 ## Godot 4.7 support
 
