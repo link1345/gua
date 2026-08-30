@@ -70,7 +70,8 @@ against an engine-owned same-page bridge. Shared world types and selector
 definitions are published as `gua-world-tools`. It requires
 neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
-custom browser session router. See the [`gua-webmcp` package guide](packages/webmcp/README.md).
+custom browser session router. See the [browser-native WebMCP guide](https://gua.orizika.com/webmcp/)
+or the [`gua-webmcp` package reference](packages/webmcp/README.md).
 Game input is owned by the current page, waits for request-correlated host
 completion, and is released on timeout, cancellation, unregister, or engine
 shutdown. Raw tools remain absent until the host explicitly initializes their
@@ -123,11 +124,11 @@ for installation and verification details.
 - **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
   Records repeatable user journeys as semantic operations and replays every step with correlated host completion. Use it for regression flows, bug reproduction, and sharing a scenario without storing fragile coordinates or plaintext secrets.
 
-See the [.NET package guide](https://gua.orizika.com/en/docs/dotnet-packages/)
+See the [.NET package guide](https://gua.orizika.com/docs/dotnet-packages/)
 for package selection, then use the dedicated guides for
-[Gua.Runtime](https://gua.orizika.com/en/docs/gua-runtime/),
-[Visual testing](https://gua.orizika.com/en/visual-testing/), and
-[Recording](https://gua.orizika.com/en/recording/) for complete
+[Gua.Runtime](https://gua.orizika.com/docs/gua-runtime/),
+[Visual testing](https://gua.orizika.com/visual-testing/), and
+[Recording](https://gua.orizika.com/recording/) for complete
 workflows and diagrams.
 
 ## MCP and Inspector
@@ -141,6 +142,10 @@ The native bridge uses the debug view by default. Set `GUA_OBSERVATION_PROFILE=p
 `GuaAgentPolicy` can omit, redact, replace, or quantize public fields and restrict UI actions. Debug snapshots remain complete. In player mode the same projection is used by snapshots, queries, waits, diagnostics, and action authorization. Debug logs are unavailable, and screenshots are denied by default because semantic projection cannot safely redact rendered pixels; a host may explicitly opt in before starting the bridge.
 
 Godot metadata uses `gua_world_id` (required), `gua_world_kind`, `gua_world_label`, `gua_world_visible_to_player`, `gua_world_active`, `gua_world_agent_exposure`, `gua_world_tags`, and `gua_world_state`. UI controls use `gua_agent_exposure`, `gua_agent_field_rules`, and `gua_agent_allowed_actions`; World objects accept the corresponding `gua_world_agent_*` keys. State values must be strings, finite numbers, booleans, or null and must not contain secrets. Integer values must survive the v1 C ABI `double` representation exactly; JavaScript selector clients reject integers outside the safe-integer range.
+
+See the [World Object Tree](https://gua.orizika.com/world-object-tree/) and
+[Agent exposure policy](https://gua.orizika.com/agent-policy/) guides for
+engine setup, selector behavior, and Player-safe publication.
 
 ### Deterministic virtual time
 
@@ -177,8 +182,13 @@ the cross-adapter W3C physical keyboard code subset enumerated by the command
 schema, pointer motion/buttons/wheel, Standard Gamepad controls, and text input.
 Stateful input is isolated per connection, defaults
 to a five-second lease (maximum 60 seconds), and is neutralized on expiry,
-disconnect, reset, replay failure, or session disposal. Inspector shows action
-metadata, held leases, raw controls, and an emergency **Release all** button.
+disconnect, reset, replay failure, or session disposal. The Inspector's direct
+panel provides Semantic Game Action controls, one-shot physical-key presses,
+held-state inspection, and an emergency **Release all** button; pointer,
+gamepad, and text input are not direct Inspector controls. `gui-mcp` advertises
+its fixed input-tool surface and rejects unsupported calls at invocation time,
+while WebMCP registers only tools enabled by capabilities read during page-tool
+registration.
 Local C++ and .NET sessions poll the returned request ID for host completion;
 enqueue acceptance alone does not prove that the adapter injected the input.
 
@@ -187,6 +197,9 @@ Godot injects main-thread `InputEvent` values through `Input.parse_input_event`.
 Adapters advertise each input capability only after its pump and cleanup path
 are initialized. The existing semantic UI `press_key` API remains unchanged;
 raw keyboard gestures use `press_physical_key`.
+
+See the [Game input guide](https://gua.orizika.com/game-input/) for capability,
+ownership, lease, confirmation, and engine setup details.
 
 - **gua-webmcp:** [![NPM Version](https://img.shields.io/npm/v/gua-webmcp)](https://www.npmjs.com/package/gua-webmcp) ![NPM Downloads](https://img.shields.io/npm/dw/gua-webmcp)<br>
   A browser-native adapter that registers Gua semantic UI, World Object Tree,
@@ -622,9 +635,32 @@ set_checked
 select
 scroll
 press_key
+get_game_input_actions
+press_game_input_action
+set_game_input_action
+release_game_input_action
+get_game_input_state
+release_all_game_inputs
+key_down
+key_up
+press_physical_key
+pointer_move
+pointer_button_down
+pointer_button_up
+pointer_wheel
+gamepad_button_down
+gamepad_button_up
+set_gamepad_axis
+reset_gamepad
+text_input
 wait_for_node
 get_screenshot
 get_logs
+get_clock
+clock_install
+clock_pause
+clock_run_for
+clock_resume
 start_recording
 stop_recording
 save_recording
@@ -795,8 +831,22 @@ bindings/dotnet/src/Gua.Testing.Recording/
 packages/mcp/         Published MCP server package
 packages/inspector/   Browser and Tauri desktop Inspector UI
 examples/             Minimal demos and samples, including the Godot C# sample
-docs/                 Native toolchain guidance
+docs/                 Native toolchain and change-audit guidance
 ```
+
+## Change auditing for contributors
+
+After repository edits, Gua's Codex instructions run focused validation and one
+read-only `gua_auditor` pass over the cumulative diff, including relevant
+untracked files. For a deliberate pull-request-wide review, run:
+
+```powershell
+./scripts/run-local-pr-audit.ps1 -Base origin/main
+```
+
+The harness reports reproducible findings without committing, pushing, or
+posting GitHub comments. See [Bug-hunting subagent and local PR audit](docs/bug-hunting-subagent.md)
+or the [contributor audit guide](https://gua.orizika.com/docs/change-audit/).
 
 ## License
 
