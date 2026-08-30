@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/godot-windows-release | Out-Null
-          $godot = (Resolve-Path ".godot-editor/Godot_v4.7-stable_win64.exe").Path
+          $godot = (Resolve-Path ".godot-editor/Godot_v4.7-stable_win64_console.exe").Path
           $output = Join-Path $env:GITHUB_WORKSPACE "artifacts/godot-windows-release/GuaGodotSample.exe"
           & $godot --headless --path examples/godot-gdscript --export-release "Windows Desktop" $output
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
