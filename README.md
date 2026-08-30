@@ -658,8 +658,8 @@ Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
 
-`gua-godot-addon-v1.0.0.zip` contains one `addons/gua` tree with the Windows
-GDExtension DLL and both Debug and Release Web GDExtension WASM files. Files
+`gua-godot-addon-v1.0.0.zip` contains one `addons/gua` tree with both Debug and
+Release Windows GDExtension DLLs and both Debug and Release Web GDExtension WASM files. Files
 inside that addon, Unity WebGL static libraries, and an ImGui ZIP are not
 published as separate GitHub Release assets; the static libraries are already
 included in the Unity Package Manager archive.
@@ -702,8 +702,10 @@ This is the recommended Godot integration for both GDScript projects and
 Godot feature set currently documented by Gua.
 
 The GDScript-facing adapter lives in `native/gua-godot` and builds a thin
-GDExtension wrapper over `native/gua-runtime`. It exposes `GuaContext` to
-GDScript without reimplementing the runtime core or the Inspector bridge:
+GDExtension wrapper over `native/gua-runtime`. On Windows the GDExtension embeds
+that runtime implementation so Debug and Release addon binaries do not depend
+on a shared, configuration-ambiguous `gua_runtime.dll`. It exposes `GuaContext`
+to GDScript without reimplementing the runtime core or the Inspector bridge:
 
 ```gdscript
 var ui := GuaContext.new()
@@ -719,14 +721,18 @@ while true:
         break
 ```
 
-Build the Windows debug GDExtension:
+Build the Windows Debug and Release GDExtensions in separate configured build trees:
 
 ```powershell
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug --target gua-godot
+cmake --preset windows-msvc-release
+cmake --build --preset windows-msvc-release --target gua-godot
 ```
 
-The build writes the debug DLL into `examples/godot-gdscript/addons/gua/bin`.
+The builds write configuration-specific DLLs into
+`examples/godot-gdscript/addons/gua/bin`. Godot loads the Debug DLL in the
+editor and Debug exports, and the Release DLL in optimized Windows exports.
 Open `examples/godot-gdscript` with Godot 4.7 and run the project. The running
 game process starts an Inspector bridge on `ws://127.0.0.1:8765`, which Gua
 Inspector can connect to while the game is open. The addon includes `plugin.cfg`

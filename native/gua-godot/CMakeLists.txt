@@ -4,11 +4,7 @@ set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for the Gua GDExt
 set(GUA_GODOT_CONFIGURATION "Debug" CACHE STRING "Build configuration for the Gua GDExtension (Debug or Release).")
 set_property(CACHE GUA_GODOT_CONFIGURATION PROPERTY STRINGS Debug Release)
 string(TOLOWER "${GUA_GODOT_CONFIGURATION}" GUA_GODOT_CONFIGURATION_LOWER)
-if(NOT EMSCRIPTEN)
-    # The existing Windows addon remains a Debug GDExtension. Web is the first
-    # platform distributed in both configurations.
-    set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
-elseif(GUA_GODOT_CONFIGURATION_LOWER STREQUAL "debug")
+if(GUA_GODOT_CONFIGURATION_LOWER STREQUAL "debug")
     set(GODOTCPP_TARGET "template_debug" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
 elseif(GUA_GODOT_CONFIGURATION_LOWER STREQUAL "release")
     set(GODOTCPP_TARGET "template_release" CACHE STRING "Godot build target for the Gua GDExtension." FORCE)
@@ -44,18 +40,20 @@ target_include_directories(gua-godot
         include
 )
 
-target_link_libraries(gua-godot
-    PRIVATE
-        gua::runtime
-        godot::cpp
-)
+if(WIN32)
+    set(GUA_GODOT_RUNTIME_TARGET gua::runtime-godot)
+else()
+    set(GUA_GODOT_RUNTIME_TARGET gua::runtime)
+endif()
+
+target_link_libraries(gua-godot PRIVATE ${GUA_GODOT_RUNTIME_TARGET} godot::cpp)
 
 target_compile_features(gua-godot PRIVATE cxx_std_20)
 
 if(EMSCRIPTEN)
     set(GUA_GODOT_OUTPUT_NAME "gua_godot.web.${GUA_GODOT_CONFIGURATION_LOWER}.wasm32")
 else()
-    set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.debug.x86_64")
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.${GUA_GODOT_CONFIGURATION_LOWER}.x86_64")
 endif()
 
 set_target_properties(gua-godot

@@ -10,6 +10,16 @@ add_library(gua-runtime ${GUA_RUNTIME_LIBRARY_TYPE}
 
 add_library(gua::runtime ALIAS gua-runtime)
 
+if(WIN32 AND GUA_BUILD_GODOT)
+    # A distributed Godot addon contains Debug and Release GDExtensions side by
+    # side. Embed the runtime so they do not compete for one configuration-
+    # ambiguous gua_runtime.dll next to the addon binaries.
+    add_library(gua-runtime-godot STATIC
+        src/runtime.cpp
+    )
+    add_library(gua::runtime-godot ALIAS gua-runtime-godot)
+endif()
+
 target_include_directories(gua-runtime
     PUBLIC
         include
@@ -28,6 +38,18 @@ else()
 endif()
 
 target_compile_features(gua-runtime PUBLIC cxx_std_20)
+
+if(TARGET gua-runtime-godot)
+    target_include_directories(gua-runtime-godot PUBLIC include)
+    target_link_libraries(gua-runtime-godot PUBLIC gua::core)
+    if(TARGET gua-ws-bridge)
+        target_link_libraries(gua-runtime-godot PUBLIC gua::ws-bridge)
+        target_compile_definitions(gua-runtime-godot PRIVATE GUA_RUNTIME_WITH_WS=1)
+    else()
+        target_compile_definitions(gua-runtime-godot PRIVATE GUA_RUNTIME_WITH_WS=0)
+    endif()
+    target_compile_features(gua-runtime-godot PUBLIC cxx_std_20)
+endif()
 
 set_target_properties(gua-runtime
     PROPERTIES
@@ -49,6 +71,15 @@ if(MSVC)
             /Zc:__cplusplus
             /utf-8
     )
+    if(TARGET gua-runtime-godot)
+        target_compile_options(gua-runtime-godot
+            PRIVATE
+                /W4
+                /permissive-
+                /Zc:__cplusplus
+                /utf-8
+        )
+    endif()
 else()
     target_compile_options(gua-runtime
         PRIVATE
@@ -70,12 +101,8 @@ if(WIN32)
     add_custom_command(TARGET gua-runtime POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${CMAKE_SOURCE_DIR}/examples/dotnet-godot/addons/gua/bin"
-            "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:gua-runtime>"
             "${CMAKE_SOURCE_DIR}/examples/dotnet-godot/addons/gua/bin/$<TARGET_FILE_NAME:gua-runtime>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:gua-runtime>"
-            "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin/$<TARGET_FILE_NAME:gua-runtime>"
     )
 endif()

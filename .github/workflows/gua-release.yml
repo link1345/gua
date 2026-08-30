@@ -45,24 +45,37 @@ jobs:
       - name: Build Tauri inspector
         run: bun run --filter @gua/inspector tauri:build
 
-      - name: Configure native build
+      - name: Configure Debug native build
         run: cmake --preset windows-msvc-debug "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_GODOT_PLUGIN_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
 
-      - name: Verify injected release metadata
+      - name: Configure Release native build
+        run: cmake --preset windows-msvc-release "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_GODOT_PLUGIN_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Verify injected release metadata and Godot configurations
         shell: pwsh
         run: |
-          $cache = Get-Content build/windows-msvc-debug/CMakeCache.txt -Raw
-          if ($cache -notmatch 'GUA_VERSION:STRING=${{ steps.version.outputs.version }}' -or
-              $cache -notmatch 'GUA_GODOT_PLUGIN_VERSION:STRING=${{ steps.version.outputs.version }}' -or
-              $cache -notmatch 'GUA_BUILD_ID:STRING=${{ github.sha }}') {
-            throw 'Configured Gua version/build ID does not match the release tag and commit.'
+          $expected = @{
+            'build/windows-msvc-debug/CMakeCache.txt' = 'Debug'
+            'build/windows-msvc-release/CMakeCache.txt' = 'Release'
+          }
+          foreach ($entry in $expected.GetEnumerator()) {
+            $cache = Get-Content $entry.Key -Raw
+            if ($cache -notmatch 'GUA_VERSION:STRING=${{ steps.version.outputs.version }}' -or
+                $cache -notmatch 'GUA_GODOT_PLUGIN_VERSION:STRING=${{ steps.version.outputs.version }}' -or
+                $cache -notmatch 'GUA_BUILD_ID:STRING=${{ github.sha }}' -or
+                $cache -notmatch "GUA_GODOT_CONFIGURATION:STRING=$($entry.Value)") {
+              throw "Configured Gua metadata or Godot configuration is invalid: $($entry.Key)"
+            }
           }
 
-      - name: Build Godot GDExtension
-        run: cmake --build --preset windows-msvc-debug --target gua-godot
+      - name: Build Debug and Release Godot GDExtensions
+        run: |
+          cmake --build --preset windows-msvc-debug --target gua-godot
+          cmake --build --preset windows-msvc-release --target gua-godot
 
-      - name: Configure Unity native plugins
-        run: cmake --preset windows-msvc-release "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+      - name: Verify Windows Godot addon contract
+        shell: pwsh
+        run: scripts/verify-godot-windows-addon.ps1 -RequireBinaries
 
       - name: Build Unity native plugins
         run: cmake --build --preset windows-msvc-release --target gua gua-runtime --config Release
@@ -88,7 +101,7 @@ jobs:
           Copy-Item "examples/godot-gdscript/addons/gua/plugin.gd.uid" $godotTarget
           Copy-Item "examples/godot-gdscript/addons/gua/bin/*.dll" (Join-Path $godotTarget "bin")
 
-          Compress-Archive -Path (Join-Path $godotRoot "addons") -DestinationPath (Join-Path $assets "gua-godot-plugin-windows-debug-v$version.zip") -CompressionLevel Optimal
+          Compress-Archive -Path (Join-Path $godotRoot "addons") -DestinationPath (Join-Path $assets "gua-godot-plugin-windows-v$version.zip") -CompressionLevel Optimal
 
           Copy-Item "packages/inspector/src-tauri/target/release/bundle" (Join-Path $assets "inspector") -Recurse
           "assets=$assets" >> $env:GITHUB_OUTPUT

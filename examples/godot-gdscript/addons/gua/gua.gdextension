@@ -6,5 +6,6 @@ compatibility_minimum = "4.7"
 [libraries]
 
 windows.debug.x86_64 = "res://addons/gua/bin/gua_godot.windows.debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/gua/bin/gua_godot.windows.release.x86_64.dll"
 web.wasm32.single.debug = "res://addons/gua/bin/gua_godot.web.debug.wasm32.wasm"
 web.wasm32.single.release = "res://addons/gua/bin/gua_godot.web.release.wasm32.wasm"

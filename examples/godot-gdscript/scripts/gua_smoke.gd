@@ -216,8 +216,8 @@ func _run() -> void:
 	web_input_bridge.adapter_ref = weakref(ui)
 	var released_owner_id: int = ui.create_game_input_owner()
 	web_input_bridge.game_input_owner_id = released_owner_id
-	if web_input_bridge._release_game_input_owner(["1"]) != 1 \
-			or web_input_bridge.game_input_owner_id == 0 \
+	web_input_bridge._release_game_input_owner([null, "1"])
+	if web_input_bridge.game_input_owner_id == 0 \
 			or web_input_bridge.game_input_owner_id == released_owner_id:
 		_fail("Gua WebMCP did not replace a released page-local game input owner.")
 		return

@@ -13,6 +13,9 @@
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-debug",
+      "cacheVariables": {
+        "GUA_GODOT_CONFIGURATION": "Debug"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -26,6 +29,9 @@
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-release",
+      "cacheVariables": {
+        "GUA_GODOT_CONFIGURATION": "Release"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
