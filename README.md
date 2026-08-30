@@ -5,26 +5,39 @@ English | [日本語](README.ja.md)
 [![License](https://img.shields.io/github/license/link1345/gua)](https://github.com/link1345/gua/blob/main/LICENSE)
 [![Discord](https://img.shields.io/discord/1329272750099136552)](https://discord.gg/Zy65k8AxH2)
 
-> **Playwright-style UI automation for games, with Godot 4.7 and Unity 6
-> support plus MCP access for AI coding agents.**
+> **A game testing and automation protocol built around Playwright-like design
+> principles, with Godot 4.7 and Unity 6 support and semantic access to UI,
+> game-world information, and gameplay input.**
 
-**Gua** is a runtime UI automation protocol for games. It gives automated tests,
-inspectors, and AI agents a semantic interface to the UI of a running game.
-Instead of relying on fragile image recognition or screen coordinates, they can
-find controls by ID, role, text, and state; interact with them; wait for changes;
-read logs; capture screenshots; and verify results.
+**Gua** is a runtime automation protocol for games, built around Playwright-like
+design principles. Its core exposes a running game's UI as a Semantic UI Tree.
+Instead of relying on fragile image recognition or screen coordinates, automated
+tests, inspectors, and AI agents can find controls by ID, role, text, and state;
+interact with them; wait for changes; read logs; capture screenshots; and verify
+results.
+
+Around that UI automation core, Gua provides a set of capabilities optimized for
+game development: a World Object Tree for semantic game-world information,
+Semantic Game Actions and opt-in Raw Input for gameplay, MCP for native games,
+WebMCP for browser builds, an exposure policy that limits what AI players can see
+and which UI operations they may use, deterministic virtual time, Recording, and
+visual comparison. These capabilities share the same protocol boundary rather
+than becoming separate engine-specific automation systems.
 
 Gua provides runtime integrations for the **Godot 4.7 GDScript addon** and
 **Unity 6**. The Unity package automatically reflects UI Toolkit, uGUI, and
-TextMeshPro runtime UI on Windows x64 Mono builds. Its MCP server, `gui-mcp`,
-makes the same runtime UI available to MCP-enabled AI coding agents for
-AI-assisted game development and AI playtesting.
+TextMeshPro runtime UI on Windows x64 Mono builds. During development, AI coding
+agents can use Gua to implement and verify the game. In a release build, the game
+can expose only approved information and operations so an AI agent can play as a
+player.
 
 **Build → Run → Inspect → Test → Fix → Test again.**
 
-Think of Gua as a Playwright-style automation layer for game UI: the browser DOM
-becomes a Semantic UI Tree, while locators, actions, waits, assertions,
-screenshots, and visual comparisons operate against the live game runtime.
+Gua starts with the Playwright-like model: the browser DOM becomes a Semantic UI
+Tree, and locators, actions, waits, and assertions operate against the live game
+runtime. It then extends that model for game development with game-world
+observation, gameplay input, AI-facing transports and safety policy, deterministic
+time control, screenshots, Recording, and visual comparison.
 
 ## What can I do with Gua?
 
@@ -46,7 +59,7 @@ screenshots, and visual comparisons operate against the live game runtime.
 - Capture logs, screenshots, and diagnostics when a Unity test fails.
 - Build and test a Windows x64 Mono Player in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
 
-### AI coding and AI playtesting
+### AI-assisted game development and playtesting
 
 `gui-mcp` connects an MCP-enabled AI coding agent to the same bridge used by the
 Inspector. The agent can inspect the UI tree, operate semantic controls, wait for
@@ -57,6 +70,24 @@ Gua complements an AI coding agent: the agent edits the game, while Gua lets it
 observe, operate, and verify the running game. Gua does not replace the game
 engine or coding agent, and semantic targeting does not depend on image
 recognition.
+
+### AI agent players in release builds
+
+Gua also supports AI agents playing a released game as players, not only testing
+it during development. The game selects a Player profile that exposes approved UI
+and World Objects and permits selected UI operations. Gameplay actions such as
+jump or movement, plus keyboard and pointer input, require separate explicit
+authorization. The AI observes player-facing semantic information and uses only
+the permitted operations; it does not edit source code or receive the complete
+Debug view.
+
+Native games can use `gui-mcp`, while Godot Web Export and Unity WebGL builds can
+use `gua-webmcp` as the connection path. The World Object Tree can describe
+objectives, enemies, doors, and checkpoints, while Semantic UI Actions and game
+input operate menus and gameplay. The exposure policy removes private objects,
+internal values, and Debug logs, and screenshots remain denied by default. This
+lets a shipped game support AI players while the developer retains control over
+the boundaries of the game experience.
 
 ### Browser-native WebMCP (experimental)
 
