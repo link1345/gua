@@ -77,7 +77,8 @@ hostが入力pumpとcleanup経路を明示的に初期化するまで公開し�
 Player/Public Agent向けゲーム入力は別権限として既定拒否です。Debug Inspector用の
 入力経路を有効化してもWebMCPには公開されません。Godotでは`allow_player_agents`引数、
 Unityでは`AllowPlayerAgentSemanticInput` / `AllowPlayerAgentRawInput`を明示指定します。
-組み込み方法は[`gua-webmcp`パッケージガイド](packages/webmcp/README.md)を参照してください。
+組み込み方法は[ブラウザWebMCP編](https://gua.orizika.com/ja/webmcp/)、詳細なAPIは
+[`gua-webmcp`パッケージリファレンス](packages/webmcp/README.md)を参照してください。
 Godot WebアドオンにはDebug用とRelease用のGDExtensionが個別に含まれます。
 Godot WebのExport presetで`Extension Support`を有効にすると、Godotが
 `web.wasm32.single.debug`または`web.wasm32.single.release`を選択します。
@@ -178,6 +179,10 @@ native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_P
 
 `GuaAgentPolicy`は公開fieldのomit、redact、同型replace、数値quantizeとUI action allowlistを定義する。Debug snapshotは完全なtreeを維持し、Playerではsnapshot、query、wait、diagnostics、action認可に同じ投影を使う。debug logは公開せず、screenshotも既定で拒否する。hostが必要性を判断した場合に限り、bridge開始前に明示的に許可できる。
 
+engine設定、selector、Player向け公開方法は
+[World Object Tree](https://gua.orizika.com/ja/world-object-tree/)と
+[エージェント公開ポリシー](https://gua.orizika.com/ja/agent-policy/)を参照してください。
+
 Godot metadataは`gua_world_id`（必須）、`gua_world_kind`、`gua_world_label`、`gua_world_visible_to_player`、`gua_world_active`、`gua_world_agent_exposure`、`gua_world_tags`、`gua_world_state`を使う。state値は文字列、有限数値、真偽値、nullだけを許可し、秘密情報を含めてはならない。整数値はv1 C ABIの`double`表現を正確に往復できる必要があり、JavaScript selector clientはsafe integer範囲外の整数を拒否する。
 
 ### 決定論的な仮想時間
@@ -214,8 +219,11 @@ textを`press_game_input_action`、`set_game_input_action`、
 列挙されたengine共通のW3C physical key code、pointer移動/button/wheel、
 Standard Gamepad、text inputを扱います。
 保持入力は接続ごとに分離され、leaseは既定5秒・最大60秒です。満了、切断、
-reset、replay失敗、session disposeではneutral状態へ戻します。InspectorにはAction
-Map、保持lease、Raw操作、緊急`Release all`を表示します。
+reset、replay失敗、session disposeではneutral状態へ戻します。Inspectorの直接操作
+panelが提供するのは、Semantic Game Action、単発のphysical key入力、保持状態の確認、
+緊急`Release all`です。pointer、gamepad、text inputはInspectorから直接操作できません。
+`gui-mcp`は固定のinput tool群を公開して未対応操作を呼び出し時に拒否し、WebMCPは
+page tool登録時に読み取ったcapabilityで有効なtoolだけを登録します。
 ローカルC++/.NET sessionは返されたrequest IDをpollしてhost完了を確認します。
 enqueue受付だけではadapterが入力を注入したことを意味しません。
 
@@ -224,6 +232,9 @@ Godotではmain threadから`Input.parse_input_event`へ`InputEvent`を渡しま
 adapterはinput pumpとcleanup経路が初期化済みのcapabilityだけを公開します。
 既存のSemantic UI用`press_key`は変更せず、Raw Keyboard gestureには
 `press_physical_key`を使います。
+
+capability、owner、lease、confirmation、engine設定の詳細は
+[ゲーム入力編](https://gua.orizika.com/ja/game-input/)を参照してください。
 
 - **gua-webmcp:** [![NPM Version](https://img.shields.io/npm/v/gua-webmcp)](https://www.npmjs.com/package/gua-webmcp) ![NPM Downloads](https://img.shields.io/npm/dw/gua-webmcp)<br>
   ページのWebMCP APIを通じて、GuaのSemantic UI、World Object Tree、
@@ -412,9 +423,32 @@ set_checked
 select
 scroll
 press_key
+get_game_input_actions
+press_game_input_action
+set_game_input_action
+release_game_input_action
+get_game_input_state
+release_all_game_inputs
+key_down
+key_up
+press_physical_key
+pointer_move
+pointer_button_down
+pointer_button_up
+pointer_wheel
+gamepad_button_down
+gamepad_button_up
+set_gamepad_axis
+reset_gamepad
+text_input
 wait_for_node
 get_screenshot
 get_logs
+get_clock
+clock_install
+clock_pause
+clock_run_for
+clock_resume
 start_recording
 stop_recording
 save_recording
@@ -523,8 +557,22 @@ bindings/dotnet/      .NET P/InvokeバインディングとC#テストヘルパ�
 packages/mcp/         公開MCPサーバーパッケージ
 packages/inspector/   ブラウザー・TauriデスクトップInspector
 examples/             Godotサンプルを含む最小デモとサンプル
-docs/                 ネイティブツールチェーン資料
+docs/                 ネイティブツールチェーン・変更監査資料
 ```
+
+## Contributor向け変更監査
+
+repository fileを変更した後は、GuaのCodex instructionによりfocused validationと、
+関連untracked fileを含む累積diffへのread-onlyな`gua_auditor`監査を1回実行します。
+PR全体を意図的に監査する場合は次を実行します。
+
+```powershell
+./scripts/run-local-pr-audit.ps1 -Base origin/main
+```
+
+harnessは再現可能なfindingを報告しますが、commit、push、GitHub comment投稿は
+行いません。詳細は[Bug-hunting subagentとlocal PR audit](docs/bug-hunting-subagent.md)
+または[変更監査Docs](https://gua.orizika.com/ja/docs/change-audit/)を参照してください。
 
 ## ライセンス
 
