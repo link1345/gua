@@ -182,9 +182,9 @@ jobs:
 
       - name: Build and test release native targets
         run: |
-          cmake --build build/native --parallel
+          cmake --build build/native --parallel 2
           ctest --test-dir build/native --output-on-failure
-          cmake --build build/godot-debug --target gua-godot --parallel
+          cmake --build build/godot-debug --target gua-godot --parallel 2
 
       - name: Verify desktop Godot binaries
         shell: pwsh
@@ -386,7 +386,7 @@ jobs:
             $arm = @(Get-ChildItem artifacts/download/portable/gua-release-native-osx-arm64 -Recurse -File -Filter $file)
             if ($intel.Count -ne 1 -or $arm.Count -ne 1) { throw "Expected one dylib per macOS architecture for $file." }
             lipo -create $intel[0].FullName $arm[0].FullName -output (Join-Path $root "osx-universal/$file")
-            lipo -verify_arch x86_64 arm64 (Join-Path $root "osx-universal/$file")
+            lipo (Join-Path $root "osx-universal/$file") -verify_arch x86_64 arm64
             if ($LASTEXITCODE -ne 0) { throw "Universal 2 verification failed for $file." }
           }
 

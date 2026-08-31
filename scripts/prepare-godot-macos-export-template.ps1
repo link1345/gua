@@ -33,7 +33,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "lipo failed to extract $Architecture from '$universalName'."
         }
-        & /usr/bin/lipo -verify_arch $Architecture $slice
+        & /usr/bin/lipo $slice -verify_arch $Architecture
         if ($LASTEXITCODE -ne 0) {
             throw "The generated '$slice' does not contain $Architecture."
         }
