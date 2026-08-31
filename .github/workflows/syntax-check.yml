@@ -101,7 +101,19 @@ jobs:
           }
 
       - name: Run external-control smoke against desktop Release
-        run: bun scripts/verify-godot-desktop-release.ts '${{ matrix.smoke }}' '${{ matrix.rid }}'
+        shell: pwsh
+        run: |
+          $executable = '${{ matrix.smoke }}'
+          if ('${{ matrix.rid }}'.StartsWith('osx-')) {
+            $macOSDirectory = Join-Path '${{ matrix.output }}' 'Contents/MacOS'
+            $candidates = @(Get-ChildItem -LiteralPath $macOSDirectory -File)
+            if ($candidates.Count -ne 1) {
+              $candidateNames = $candidates.Name -join ', '
+              throw "Expected one macOS app executable in $macOSDirectory, found $($candidates.Count): $candidateNames"
+            }
+            $executable = $candidates[0].FullName
+          }
+          bun scripts/verify-godot-desktop-release.ts $executable '${{ matrix.rid }}'
 
   godot-web-addon-contract:
     name: Godot Web Debug / Release
