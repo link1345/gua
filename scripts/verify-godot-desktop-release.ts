@@ -18,7 +18,7 @@ const stderrTask = captureOutput(gameProcess.stderr, (chunk) => (stderr += chunk
 let client: GuaBridgeClient | undefined;
 try {
   const deadline = performance.now() + 20_000;
-  while (!stdout.includes(`Gua Inspector bridge listening on ws://127.0.0.1:${port}`)) {
+  while (!stdout.includes(`Gua WebSocket bridge listening on ws://127.0.0.1:${port}`)) {
     if (gameProcess.exitCode !== null) throw new Error(`Godot ${label} Release exited before starting its bridge (${gameProcess.exitCode}).`);
     if (performance.now() >= deadline) throw new Error(`Timed out waiting for the Godot ${label} Release bridge.`);
     await Bun.sleep(25);
