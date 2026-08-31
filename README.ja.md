@@ -313,14 +313,15 @@ Clangでもビルドできます。Godot・Unityのネイティブアダプタ�
 
 `Gua.Core`には`win-x64`、`linux-x64`、`osx-x64`、`osx-arm64`用のネイティブランタイムが含まれます。`Gua.Runtime`にも同じ4 RID用のInspectorブリッジランタイムが含まれ、通常の復元・ビルドによって現在の環境に合うライブラリが出力先へコピーされます。ローカルビルドを使う場合は`GUA_NATIVE_DIR`と`GUA_RUNTIME_NATIVE_DIR`で上書きできます。
 
-ローカルでパッケージを作る場合は、先にネイティブランタイムをビルドします。
+ローカルで`Gua.Core`または`Gua.Runtime`をpackする場合は、各package READMEに
+記載した4 RIDのディレクトリを先に揃え、その絶対パスを
+`GuaNativeAssetsRoot`として渡します。
 
 ```powershell
-cmake --preset windows-msvc-release
-cmake --build --preset windows-msvc-release --target gua
-dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
+$nativeAssets = "C:\absolute\path\to\native-assets"
+dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
-dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release

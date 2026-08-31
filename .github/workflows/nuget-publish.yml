@@ -24,7 +24,7 @@ jobs:
             rid: win-x64
             core-file: build/native/native/gua-core/Release/gua.dll
             runtime-file: build/native/native/gua-runtime/Release/gua_runtime.dll
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             rid: linux-x64
             core-file: build/native/native/gua-core/libgua.so
             runtime-file: build/native/native/gua-runtime/libgua_runtime.so
@@ -186,7 +186,7 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             rid: linux-x64
           - os: macos-15-intel
             rid: osx-x64

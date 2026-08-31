@@ -439,12 +439,16 @@ not currently supported targets.
 
 ## .NET Testing
 
-The .NET packages are published on NuGet and can also be packed locally:
+The .NET packages are published on NuGet and can also be packed locally. To
+pack `Gua.Core` or `Gua.Runtime` with native assets, first stage all four RID
+directories described in their package READMEs and pass the absolute staging
+path as `GuaNativeAssetsRoot`:
 
 ```powershell
-dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
+$nativeAssets = "C:\absolute\path\to\native-assets"
+dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
-dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release

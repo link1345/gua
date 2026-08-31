@@ -39,10 +39,15 @@
     <None Include="$(GuaNativeAssetsRoot)/osx-arm64/libgua.dylib" Pack="true" PackagePath="runtimes/osx-arm64/native/libgua.dylib" Visible="false" Condition="'$(GuaNativeAssetsRoot)' != '' And Exists('$(GuaNativeAssetsRoot)/osx-arm64/libgua.dylib')" />
   </ItemGroup>
 
-  <Target Name="ValidateGuaNativeAssets" BeforeTargets="Pack" Condition="'$(GuaNativeAssetsRoot)' != ''">
+  <Target Name="ValidateGuaNativeAssets" BeforeTargets="GenerateNuspec" Condition="'$(GuaNativeAssetsRoot)' != ''">
     <Error Condition="!Exists('$(GuaNativeAssetsRoot)/win-x64/gua.dll')" Text="Missing win-x64 Gua.Core native asset below $(GuaNativeAssetsRoot)." />
     <Error Condition="!Exists('$(GuaNativeAssetsRoot)/linux-x64/libgua.so')" Text="Missing linux-x64 Gua.Core native asset below $(GuaNativeAssetsRoot)." />
     <Error Condition="!Exists('$(GuaNativeAssetsRoot)/osx-x64/libgua.dylib')" Text="Missing osx-x64 Gua.Core native asset below $(GuaNativeAssetsRoot)." />
     <Error Condition="!Exists('$(GuaNativeAssetsRoot)/osx-arm64/libgua.dylib')" Text="Missing osx-arm64 Gua.Core native asset below $(GuaNativeAssetsRoot)." />
+  </Target>
+
+  <Target Name="RequireGuaNativeAssetsForPack" BeforeTargets="GenerateNuspec"
+          Condition="'$(GuaNativeAssetsRoot)' == '' And !Exists('..\..\..\..\build\windows-msvc-release\native\gua-core\Release\gua.dll')">
+    <Error Text="Packing Gua.Core requires GuaNativeAssetsRoot with all four RID assets, or the legacy Windows Release gua.dll build." />
   </Target>
 </Project>

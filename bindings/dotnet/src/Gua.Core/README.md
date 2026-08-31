@@ -45,14 +45,20 @@ At runtime the resolver checks:
 4. the current directory
 
 To pack only the legacy Windows local asset, build the release native runtime
-first. Release packaging supplies `GuaNativeAssetsRoot` with all four RID
-directories and fails if any required library is absent.
+first. For a distributable package, stage all four RID directories below one
+root and pass its absolute path as `GuaNativeAssetsRoot`; packing fails if the
+property is omitted without the legacy Windows DLL, or if any staged library is
+absent.
 
 ```powershell
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --target gua
 dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
 ```
+
+The complete staging layout is `win-x64/gua.dll`,
+`linux-x64/libgua.so`, `osx-x64/libgua.dylib`, and
+`osx-arm64/libgua.dylib`.
 
 `GuaContext.ConfigureDiagnostics` sets the bounded retained-history limit and
 environment JSON. `GetDiagnosticsJson` returns the versioned semantic failure

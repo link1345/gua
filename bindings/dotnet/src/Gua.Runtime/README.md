@@ -28,6 +28,12 @@ The NuGet package deploys `gua_runtime.dll`, `libgua_runtime.so`, or
 `osx-arm64` native assets. `GUA_RUNTIME_NATIVE_DIR` remains available for local
 build overrides.
 
+Local distributable packing requires an absolute `GuaNativeAssetsRoot` whose
+four RID directories contain `gua_runtime.dll`, `libgua_runtime.so`, or
+`libgua_runtime.dylib` as appropriate. Packing fails when that root is omitted
+without the legacy Windows Release DLL, or when any required RID asset is
+missing.
+
 Screenshot adapters should use `TryCompleteScreenshot`. It returns `false`
 when a timeout, cancellation, or context reset has already invalidated the
 request; such a late completion is benign and must not be retried.

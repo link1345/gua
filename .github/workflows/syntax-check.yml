@@ -122,7 +122,7 @@ jobs:
             runtime-dir: build/portable/native/gua-runtime/Release
             core-file: build/portable/native/gua-core/Release/gua.dll
             runtime-file: build/portable/native/gua-runtime/Release/gua_runtime.dll
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             rid: linux-x64
             core-dir: build/portable/native/gua-core
             runtime-dir: build/portable/native/gua-runtime
@@ -235,7 +235,7 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             rid: linux-x64
           - os: macos-15-intel
             rid: osx-x64
