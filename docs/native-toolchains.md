@@ -8,10 +8,11 @@ The project should still keep the native core portable:
 - Public native boundary: C ABI
 - C++ implementation: standard C++20
 - Windows: MSVC
-- macOS and iOS: Apple Clang
+- macOS: the native core, runtime, and WebSocket bridge are built with Apple Clang on Intel and Apple Silicon
+- iOS: Apple Clang when this target becomes active
 - Android: Android NDK Clang
-- Linux: portable native targets are built in CI with the default Ubuntu C++
-  toolchain; Windows-only examples remain excluded
+- Linux: the native core, runtime, WebSocket bridge, and native bridge example
+  are built in CI with the default Ubuntu C++ toolchain
 
 Do not put Windows API calls, MSVC-only extensions, or platform-specific behavior
 inside protocol-level code. If platform code becomes necessary, isolate it under
@@ -42,11 +43,14 @@ cmake -S . -B build/cpp -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/cpp --parallel
 ```
 
-This check protects the portable core. Windows remains the primary development
-and release target for native runtime artifacts and the Win32 examples.
+The portable native matrix also runs on Intel and Apple Silicon macOS. It builds
+the shared runtime and native bridge example, runs CTest, and exercises the
+Inspector WebSocket contract through the .NET selector suite. The Win32 DirectX
+11 ImGui example remains Windows-only.
 
 ## Apple And Android
 
-Apple and Android support should be added as separate CMake presets or toolchain
-files when those targets become active. The native API shape should not change
-for them; they should consume the same C ABI.
+Desktop macOS is validated with Apple Clang for both `osx-x64` and `osx-arm64`.
+iOS and Android should be added as separate CMake presets or toolchain files
+when those targets become active. The native API shape should not change for
+them; they should consume the same C ABI.

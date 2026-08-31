@@ -110,9 +110,37 @@ jobs:
       - name: Run Release Web in-page bridge smoke
         run: bun scripts/verify-godot-web-release.ts artifacts/godot-web-release
 
-  remote-clock:
-    name: .NET remote clock
-    runs-on: windows-latest
+  portable-native:
+    name: Native bridge / ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            core-dir: build/portable/native/gua-core/Release
+            runtime-dir: build/portable/native/gua-runtime/Release
+            core-file: build/portable/native/gua-core/Release/gua.dll
+            runtime-file: build/portable/native/gua-runtime/Release/gua_runtime.dll
+          - os: ubuntu-latest
+            rid: linux-x64
+            core-dir: build/portable/native/gua-core
+            runtime-dir: build/portable/native/gua-runtime
+            core-file: build/portable/native/gua-core/libgua.so
+            runtime-file: build/portable/native/gua-runtime/libgua_runtime.so
+          - os: macos-15-intel
+            rid: osx-x64
+            core-dir: build/portable/native/gua-core
+            runtime-dir: build/portable/native/gua-runtime
+            core-file: build/portable/native/gua-core/libgua.dylib
+            runtime-file: build/portable/native/gua-runtime/libgua_runtime.dylib
+          - os: macos-latest
+            rid: osx-arm64
+            core-dir: build/portable/native/gua-core
+            runtime-dir: build/portable/native/gua-runtime
+            core-file: build/portable/native/gua-core/libgua.dylib
+            runtime-file: build/portable/native/gua-runtime/libgua_runtime.dylib
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -122,19 +150,121 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Build native runtime
+      - name: Configure portable native targets
+        run: cmake -S . -B build/portable -DCMAKE_BUILD_TYPE=Release -DGUA_BUILD_GODOT=OFF -DGUA_BUILD_IMGUI_EXAMPLE=OFF
+
+      - name: Build portable native targets
         run: |
-          cmake -S . -B build/dotnet-clock -DGUA_BUILD_EXAMPLES=OFF -DGUA_BUILD_GODOT=OFF
-          cmake --build build/dotnet-clock --config Release --target gua gua-runtime --parallel
+          cmake --build build/portable --config Release --parallel
+          ctest --test-dir build/portable -C Release --output-on-failure
 
       - name: Restore selector tests
         run: dotnet restore bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj
 
-      - name: Test remote clock and selector contracts
+      - name: Test remote bridge and selector contracts
         run: dotnet test bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj --configuration Release --no-restore
         env:
-          GUA_NATIVE_DIR: ${{ github.workspace }}\build\dotnet-clock\native\gua-core\Release
-          GUA_RUNTIME_NATIVE_DIR: ${{ github.workspace }}\build\dotnet-clock\native\gua-runtime\Release
+          GUA_NATIVE_DIR: ${{ github.workspace }}/${{ matrix.core-dir }}
+          GUA_RUNTIME_NATIVE_DIR: ${{ github.workspace }}/${{ matrix.runtime-dir }}
+
+      - name: Stage native package assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "artifacts/native/${{ matrix.rid }}" | Out-Null
+          Copy-Item "${{ matrix.core-file }}" "artifacts/native/${{ matrix.rid }}/"
+          Copy-Item "${{ matrix.runtime-file }}" "artifacts/native/${{ matrix.rid }}/"
+
+      - name: Upload native package assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-native-${{ matrix.rid }}
+          path: artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+
+  pack-native-nuget:
+    name: Pack native NuGet contract
+    needs: portable-native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download native assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-native-*
+          path: artifacts/download
+
+      - name: Normalize native asset layout
+        shell: pwsh
+        run: |
+          foreach ($rid in 'win-x64', 'linux-x64', 'osx-x64', 'osx-arm64') {
+            $source = "artifacts/download/gua-native-$rid"
+            if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Missing native artifact: $rid" }
+            New-Item -ItemType Directory -Force "artifacts/native/$rid" | Out-Null
+            Copy-Item "$source/*" "artifacts/native/$rid/"
+          }
+
+      - name: Pack native packages
+        run: |
+          dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release -p:GuaPackageVersion=0.0.0-ci -p:PackageVersion=0.0.0-ci -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
+          dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release -p:GuaPackageVersion=0.0.0-ci -p:PackageVersion=0.0.0-ci -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
+
+      - name: Verify native package contents
+        shell: pwsh
+        run: scripts/verify-dotnet-native-packages.ps1 -PackageDirectory artifacts/packages -Version 0.0.0-ci
+
+      - name: Upload native NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-native-nuget
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+  package-smoke:
+    name: Package smoke / ${{ matrix.rid }}
+    needs: pack-native-nuget
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download native NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-native-nuget
+          path: artifacts/packages
+
+      - name: Restore package-only smoke
+        run: dotnet restore bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj -p:GuaPackageVersion=0.0.0-ci --source "${{ github.workspace }}/artifacts/packages"
+
+      - name: Run package-only smoke
+        run: dotnet run --project bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj --configuration Release --no-restore -p:GuaPackageVersion=0.0.0-ci
+        env:
+          GUA_NATIVE_DIR: ""
+          GUA_RUNTIME_NATIVE_DIR: ""
 
   cpp:
     name: C++ / CMake
@@ -147,7 +277,9 @@ jobs:
         run: cmake -S . -B build/cpp -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: cmake --build build/cpp --parallel
+        run: |
+          cmake --build build/cpp --parallel
+          ctest --test-dir build/cpp --output-on-failure
 
   csharp:
     name: C# / dotnet

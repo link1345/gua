@@ -147,7 +147,7 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
 
 - **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
   .NETからGuaのC ABIランタイムを利用するためのP/Invokeバインディングです。
-  Windows x64用ネイティブランタイムも含まれます。
+  Windows x64、Linux x64、Intel Mac、Apple Silicon Mac用ネイティブランタイムも含まれます。
 - **Gua.Testing:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing)](https://www.nuget.org/packages/Gua.Testing) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing)<br>
   通常の.NETテストに、Gua用のロケーター、待機、アサーション、アダプターの
   テストループを追加します。
@@ -158,7 +158,7 @@ reusable workflowはPlayer起動前にWindows test runnerの画面解像度を19
   Unityプロセスを起動し、Guaブリッジ経由で実行中のシーンを操作・検証する
   テストヘルパーです。
 - **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)](https://www.nuget.org/packages/Gua.Runtime) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
-  エンジンアダプター開発者向けの共有マネージドラッパーです。P/Invokeを重複実装せず、Semantic frameの公開、actionの処理、スクリーンショット要求の完了、Inspectorブリッジのホストに利用できます。通常のゲームテストでは各エンジン向けパッケージを使用します。
+  エンジンアダプター開発者向けの共有マネージドラッパーと、同じ4つのdesktop RID用ネイティブランタイムです。P/Invokeを重複実装せず、Semantic frameの公開、actionの処理、スクリーンショット要求の完了、Inspectorブリッジのホストに利用できます。通常のゲームテストでは各エンジン向けパッケージを使用します。
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
   Semantic assertionでは検出できないclipping、Controlの位置ずれ、asset間違い、予期しないoverlayなどの描画regressionをPNG baseline比較で検出します。失敗時はexpected、actual、diff、機械可読な比較結果を保存します。
 - **Gua.Testing.Recording:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Recording)](https://www.nuget.org/packages/Gua.Testing.Recording) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Recording)<br>
@@ -308,7 +308,7 @@ cmake --build --preset windows-msvc-debug
 <PackageReference Include="Gua.Testing" Version="0.5.0-preview.3" />
 ```
 
-`Gua.Core`には`runtimes/win-x64/native/gua.dll`としてWindows x64用ネイティブランタイムが含まれます。通常の復元・ビルドによって、アプリまたはテストの出力先へコピーされます。
+`Gua.Core`には`win-x64`、`linux-x64`、`osx-x64`、`osx-arm64`用のネイティブランタイムが含まれます。`Gua.Runtime`にも同じ4 RID用のInspectorブリッジランタイムが含まれ、通常の復元・ビルドによって現在の環境に合うライブラリが出力先へコピーされます。ローカルビルドを使う場合は`GUA_NATIVE_DIR`と`GUA_RUNTIME_NATIVE_DIR`で上書きできます。
 
 ローカルでパッケージを作る場合は、先にネイティブランタイムをビルドします。
 

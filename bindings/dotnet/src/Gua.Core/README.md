@@ -8,10 +8,13 @@ The package includes `net10.0` and `netstandard2.1` managed assemblies. The
 `DllImport` declarations so Unity owns native discovery through its Plugin
 Import Settings.
 
-The NuGet package includes the Windows x64 native runtime at:
+The NuGet package includes native libraries for the supported desktop RIDs:
 
 ```text
 runtimes/win-x64/native/gua.dll
+runtimes/linux-x64/native/libgua.so
+runtimes/osx-x64/native/libgua.dylib
+runtimes/osx-arm64/native/libgua.dylib
 ```
 
 .NET copies that native asset to the consuming app or test output as part of
@@ -41,7 +44,9 @@ At runtime the resolver checks:
 3. the assembly directory
 4. the current directory
 
-To pack the NuGet package locally, build the release native runtime first:
+To pack only the legacy Windows local asset, build the release native runtime
+first. Release packaging supplies `GuaNativeAssetsRoot` with all four RID
+directories and fails if any required library is absent.
 
 ```powershell
 cmake --preset windows-msvc-release

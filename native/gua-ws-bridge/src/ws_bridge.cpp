@@ -1,9 +1,5 @@
-#define WIN32_LEAN_AND_MEAN
-
 #include "gua/ws_bridge.hpp"
-
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "socket_platform.hpp"
 
 #include <algorithm>
 #include <array>
@@ -23,6 +19,11 @@
 #include <vector>
 
 namespace {
+
+using gua::ws::platform::NetworkSession;
+using gua::ws::platform::Socket;
+using gua::ws::platform::SocketHandle;
+using gua::ws::platform::invalid_socket;
 
 constexpr std::string_view websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -72,88 +73,9 @@ struct Command {
 };
 
 struct ClientConnection {
-    SOCKET socket = INVALID_SOCKET;
+    SocketHandle socket = invalid_socket;
     std::shared_ptr<std::mutex> send_mutex;
     unsigned long long game_input_owner_id = 0;
-};
-
-class Socket {
-public:
-    explicit Socket(SOCKET value = INVALID_SOCKET)
-        : value_(value)
-    {
-    }
-
-    Socket(const Socket&) = delete;
-    Socket& operator=(const Socket&) = delete;
-
-    Socket(Socket&& other) noexcept
-        : value_(other.value_)
-    {
-        other.value_ = INVALID_SOCKET;
-    }
-
-    Socket& operator=(Socket&& other) noexcept
-    {
-        if (this != &other) {
-            close();
-            value_ = other.value_;
-            other.value_ = INVALID_SOCKET;
-        }
-        return *this;
-    }
-
-    ~Socket()
-    {
-        close();
-    }
-
-    [[nodiscard]] SOCKET get() const noexcept
-    {
-        return value_;
-    }
-
-    [[nodiscard]] bool valid() const noexcept
-    {
-        return value_ != INVALID_SOCKET;
-    }
-
-    SOCKET release() noexcept
-    {
-        const SOCKET value = value_;
-        value_ = INVALID_SOCKET;
-        return value;
-    }
-
-    void close() noexcept
-    {
-        if (value_ != INVALID_SOCKET) {
-            closesocket(value_);
-            value_ = INVALID_SOCKET;
-        }
-    }
-
-private:
-    SOCKET value_;
-};
-
-class WinsockSession {
-public:
-    WinsockSession()
-    {
-        WSADATA data {};
-        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-            throw std::runtime_error("WSAStartup failed");
-        }
-    }
-
-    WinsockSession(const WinsockSession&) = delete;
-    WinsockSession& operator=(const WinsockSession&) = delete;
-
-    ~WinsockSession()
-    {
-        WSACleanup();
-    }
 };
 
 std::string escape_json(std::string_view value)
@@ -305,11 +227,11 @@ std::string websocket_accept_key(std::string_view key)
     return base64_encode(digest.data(), digest.size());
 }
 
-void send_all(SOCKET socket, const std::uint8_t* data, std::size_t size)
+void send_all(SocketHandle socket, const std::uint8_t* data, std::size_t size)
 {
     std::size_t sent = 0;
     while (sent < size) {
-        const int result = send(socket, reinterpret_cast<const char*>(data + sent), static_cast<int>(size - sent), 0);
+        const std::ptrdiff_t result = gua::ws::platform::send_some(socket, data + sent, size - sent);
         if (result <= 0) {
             throw std::runtime_error("send failed");
         }
@@ -317,17 +239,17 @@ void send_all(SOCKET socket, const std::uint8_t* data, std::size_t size)
     }
 }
 
-void send_all(SOCKET socket, std::string_view text)
+void send_all(SocketHandle socket, std::string_view text)
 {
     send_all(socket, reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
 }
 
-std::vector<std::uint8_t> recv_exact(SOCKET socket, std::size_t size)
+std::vector<std::uint8_t> recv_exact(SocketHandle socket, std::size_t size)
 {
     std::vector<std::uint8_t> data(size);
     std::size_t received = 0;
     while (received < size) {
-        const int result = recv(socket, reinterpret_cast<char*>(data.data() + received), static_cast<int>(size - received), 0);
+        const std::ptrdiff_t result = gua::ws::platform::receive_some(socket, data.data() + received, size - received);
         if (result <= 0) {
             throw std::runtime_error("connection closed");
         }
@@ -336,12 +258,13 @@ std::vector<std::uint8_t> recv_exact(SOCKET socket, std::size_t size)
     return data;
 }
 
-std::string read_http_headers(SOCKET socket)
+std::string read_http_headers(SocketHandle socket)
 {
     std::string headers;
     std::array<char, 1024> buffer {};
     while (headers.find("\r\n\r\n") == std::string::npos) {
-        const int result = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
+        const std::ptrdiff_t result = gua::ws::platform::receive_some(
+            socket, reinterpret_cast<std::uint8_t*>(buffer.data()), buffer.size());
         if (result <= 0) {
             throw std::runtime_error("failed to read handshake");
         }
@@ -355,6 +278,16 @@ std::string read_http_headers(SOCKET socket)
 
 std::optional<std::string> header_value(std::string_view headers, std::string_view name)
 {
+    const auto ascii_iequals = [](std::string_view left, std::string_view right) {
+        if (left.size() != right.size()) return false;
+        for (std::size_t i = 0; i < left.size(); ++i) {
+            const auto lower = [](unsigned char ch) {
+                return ch >= 'A' && ch <= 'Z' ? static_cast<unsigned char>(ch + ('a' - 'A')) : ch;
+            };
+            if (lower(static_cast<unsigned char>(left[i])) != lower(static_cast<unsigned char>(right[i]))) return false;
+        }
+        return true;
+    };
     std::size_t start = 0;
     while (start < headers.size()) {
         const std::size_t end = headers.find("\r\n", start);
@@ -365,7 +298,7 @@ std::optional<std::string> header_value(std::string_view headers, std::string_vi
         const std::size_t colon = line.find(':');
         if (colon != std::string_view::npos) {
             const std::string_view candidate = line.substr(0, colon);
-            if (_strnicmp(candidate.data(), name.data(), name.size()) == 0 && candidate.size() == name.size()) {
+            if (ascii_iequals(candidate, name)) {
                 std::size_t value_start = colon + 1U;
                 while (value_start < line.size() && line[value_start] == ' ') {
                     ++value_start;
@@ -378,7 +311,7 @@ std::optional<std::string> header_value(std::string_view headers, std::string_vi
     return std::nullopt;
 }
 
-void perform_handshake(SOCKET socket)
+void perform_handshake(SocketHandle socket)
 {
     const std::string headers = read_http_headers(socket);
     const std::optional<std::string> key = header_value(headers, "Sec-WebSocket-Key");
@@ -395,7 +328,7 @@ void perform_handshake(SOCKET socket)
     send_all(socket, response);
 }
 
-std::optional<std::string> read_text_frame(SOCKET socket)
+std::optional<std::string> read_text_frame(SocketHandle socket)
 {
     const auto header = recv_exact(socket, 2);
     const std::uint8_t opcode = header[0] & 0x0fU;
@@ -433,7 +366,7 @@ std::optional<std::string> read_text_frame(SOCKET socket)
     return std::string(payload.begin(), payload.end());
 }
 
-void send_text_frame(SOCKET socket, std::string_view text)
+void send_text_frame(SocketHandle socket, std::string_view text)
 {
     std::vector<std::uint8_t> frame;
     frame.push_back(0x81U);
@@ -962,31 +895,6 @@ std::string_view game_input_error_name(long long code)
     }
 }
 
-Socket create_listen_socket(unsigned short port)
-{
-    Socket listen_socket(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
-    if (!listen_socket.valid()) {
-        throw std::runtime_error("socket failed");
-    }
-
-    int reuse = 1;
-    setsockopt(listen_socket.get(), SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
-
-    sockaddr_in address {};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(port);
-
-    if (bind(listen_socket.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
-        throw std::runtime_error("bind failed");
-    }
-    if (listen(listen_socket.get(), SOMAXCONN) == SOCKET_ERROR) {
-        throw std::runtime_error("listen failed");
-    }
-
-    return listen_socket;
-}
-
 } // namespace
 
 namespace gua::ws {
@@ -1028,14 +936,13 @@ public:
         if (!running_.exchange(false)) {
             return;
         }
-        if (listen_socket_ != INVALID_SOCKET) {
-            closesocket(listen_socket_);
-            listen_socket_ = INVALID_SOCKET;
+        if (!gua::ws::platform::wake_listener(options_.port)) {
+            gua::ws::platform::close_socket(listen_socket_.exchange(invalid_socket));
         }
         {
             const std::lock_guard lock(clients_mutex_);
-            for (const SOCKET client_socket : active_client_sockets_) {
-                shutdown(client_socket, SD_BOTH);
+            for (const SocketHandle client_socket : active_client_sockets_) {
+                gua::ws::platform::shutdown_socket(client_socket);
             }
         }
         if (thread_.joinable()) {
@@ -1088,13 +995,13 @@ public:
             clients = clients_;
         }
 
-        std::vector<SOCKET> failed_clients;
+        std::vector<SocketHandle> failed_clients;
         for (const ClientConnection& client : clients) {
             try {
                 send_text_frame(client, message);
             } catch (...) {
                 failed_clients.push_back(client.socket);
-                closesocket(client.socket);
+                gua::ws::platform::shutdown_socket(client.socket);
             }
         }
 
@@ -1123,15 +1030,16 @@ private:
     {
         bool startup_reported = false;
         try {
-            const WinsockSession winsock;
-            Socket listen_socket = create_listen_socket(options_.port);
-            listen_socket_ = listen_socket.get();
+            const NetworkSession network;
+            Socket listen_socket = gua::ws::platform::create_listen_socket(options_.port);
+            const SocketHandle listen_handle = listen_socket.release();
+            listen_socket_ = listen_handle;
             started.set_value(true);
             startup_reported = true;
             std::cout << "Gua WebSocket bridge listening on ws://127.0.0.1:" << options_.port << std::endl;
 
             while (running_.load()) {
-                Socket client(accept(listen_socket.get(), nullptr, nullptr));
+                Socket client = gua::ws::platform::accept_socket(listen_handle);
                 if (!client.valid()) {
                     if (running_.load()) {
                         continue;
@@ -1142,7 +1050,7 @@ private:
                     break;
                 }
 
-                const SOCKET client_socket = client.release();
+                const SocketHandle client_socket = client.release();
                 {
                     const std::lock_guard clients_lock(clients_mutex_);
                     active_client_sockets_.push_back(client_socket);
@@ -1169,8 +1077,9 @@ private:
                 });
             }
 
-            listen_socket_ = INVALID_SOCKET;
+            gua::ws::platform::close_socket(listen_socket_.exchange(invalid_socket));
         } catch (const std::exception& error) {
+            gua::ws::platform::close_socket(listen_socket_.exchange(invalid_socket));
             std::cerr << "Gua bridge failed: " << error.what() << std::endl;
             running_.store(false);
             if (!startup_reported) {
@@ -1179,7 +1088,7 @@ private:
         }
     }
 
-    void serve_client(SOCKET client)
+    void serve_client(SocketHandle client)
     {
         perform_handshake(client);
         ClientConnection connection {
@@ -1416,10 +1325,10 @@ private:
     BridgeOptions options_;
     std::atomic_bool running_ = false;
     std::thread thread_;
-    std::atomic<SOCKET> listen_socket_ = INVALID_SOCKET;
+    std::atomic<SocketHandle> listen_socket_ = invalid_socket;
     std::mutex clients_mutex_;
     std::vector<ClientConnection> clients_;
-    std::vector<SOCKET> active_client_sockets_;
+    std::vector<SocketHandle> active_client_sockets_;
     std::mutex client_threads_mutex_;
     std::vector<std::thread> client_threads_;
 };

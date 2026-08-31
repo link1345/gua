@@ -23,10 +23,8 @@ target_include_directories(gua
 target_compile_features(gua-core PUBLIC cxx_std_20)
 target_compile_features(gua PUBLIC cxx_std_20)
 
-if(EMSCRIPTEN)
-    # gua-core is linked through gua-runtime into the Godot Web side module.
-    set_target_properties(gua-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
+# gua-core is linked into the shared gua-runtime library on desktop platforms.
+set_target_properties(gua-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set_target_properties(gua
     PROPERTIES

@@ -14,9 +14,68 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Pack and publish .NET packages
+  native-assets:
+    name: Build native assets / ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            core-file: build/native/native/gua-core/Release/gua.dll
+            runtime-file: build/native/native/gua-runtime/Release/gua_runtime.dll
+          - os: ubuntu-latest
+            rid: linux-x64
+            core-file: build/native/native/gua-core/libgua.so
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.so
+          - os: macos-15-intel
+            rid: osx-x64
+            core-file: build/native/native/gua-core/libgua.dylib
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
+          - os: macos-latest
+            rid: osx-arm64
+            core-file: build/native/native/gua-core/libgua.dylib
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        run: .github/scripts/release-version-from-tag.ps1
+
+      - name: Configure native assets
+        run: cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DGUA_BUILD_EXAMPLES=OFF -DGUA_BUILD_GODOT=OFF "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Build and test native assets
+        run: |
+          cmake --build build/native --config Release --parallel
+          ctest --test-dir build/native -C Release --output-on-failure
+
+      - name: Stage native assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "artifacts/native/${{ matrix.rid }}" | Out-Null
+          Copy-Item "${{ matrix.core-file }}" "artifacts/native/${{ matrix.rid }}/"
+          Copy-Item "${{ matrix.runtime-file }}" "artifacts/native/${{ matrix.rid }}/"
+
+      - name: Upload native assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-nuget-native-${{ matrix.rid }}
+          path: artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+
+  pack:
+    name: Pack .NET packages
+    needs: native-assets
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     environment: release
     steps:
       - name: Check out repository
@@ -29,24 +88,26 @@ jobs:
         shell: pwsh
         run: .github/scripts/release-version-from-tag.ps1
 
+      - name: Download native assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-nuget-native-*
+          path: artifacts/download
+
+      - name: Normalize native asset layout
+        shell: pwsh
+        run: |
+          foreach ($rid in 'win-x64', 'linux-x64', 'osx-x64', 'osx-arm64') {
+            $source = "artifacts/download/gua-nuget-native-$rid"
+            if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Missing native artifact: $rid" }
+            New-Item -ItemType Directory -Force "artifacts/native/$rid" | Out-Null
+            Copy-Item "$source/*" "artifacts/native/$rid/"
+          }
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-
-      - name: Configure native runtime
-        run: cmake --preset windows-msvc-release "-DGUA_VERSION=${{ steps.version.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
-
-      - name: Verify injected release metadata
-        shell: pwsh
-        run: |
-          $cache = Get-Content build/windows-msvc-release/CMakeCache.txt -Raw
-          if ($cache -notmatch 'GUA_VERSION:STRING=${{ steps.version.outputs.version }}' -or $cache -notmatch 'GUA_BUILD_ID:STRING=${{ github.sha }}') {
-            throw 'Configured Gua version/build ID does not match the release tag and commit.'
-          }
-
-      - name: Build native runtime
-        run: cmake --build --preset windows-msvc-release --target gua --config Release
 
       - name: Restore
         shell: pwsh
@@ -81,10 +142,10 @@ jobs:
       - name: Test Visual and Recording packages
         run: dotnet test bindings/dotnet/tests/Gua.Visual.Tests/Gua.Visual.Tests.csproj --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
         env:
-          GUA_NATIVE_DIR: ${{ github.workspace }}\build\windows-msvc-release\native\gua-core\Release
+          GUA_NATIVE_DIR: ${{ github.workspace }}\artifacts\native\win-x64
 
       - name: Pack Gua.Core
-        run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+        run: dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release --no-build -p:GuaPackageVersion=${{ steps.version.outputs.version }} -p:PackageVersion=${{ steps.version.outputs.version }} -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
 
       - name: Pack Gua.Testing
         run: dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
@@ -94,8 +155,12 @@ jobs:
 
       - name: Pack Unity runtime and testing host
         run: |
-          dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+          dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --no-build -p:GuaPackageVersion=${{ steps.version.outputs.version }} -p:PackageVersion=${{ steps.version.outputs.version }} -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
           dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
+
+      - name: Verify native package contents
+        shell: pwsh
+        run: scripts/verify-dotnet-native-packages.ps1 -PackageDirectory artifacts/packages -Version '${{ steps.version.outputs.version }}'
 
       - name: Pack Gua.Testing.Visual
         run: dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release --no-build -p:PackageVersion=${{ steps.version.outputs.version }}
@@ -111,6 +176,60 @@ jobs:
             artifacts/packages/*.nupkg
             artifacts/packages/*.snupkg
           if-no-files-found: error
+
+  package-smoke:
+    name: Package smoke / ${{ matrix.rid }}
+    needs: pack
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-nuget-packages
+          path: artifacts/packages
+
+      - name: Restore package-only smoke
+        run: dotnet restore bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj -p:GuaPackageVersion=${{ needs.pack.outputs.version }} --source "${{ github.workspace }}/artifacts/packages"
+
+      - name: Run package-only smoke
+        run: dotnet run --project bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj --configuration Release --no-restore -p:GuaPackageVersion=${{ needs.pack.outputs.version }}
+        env:
+          GUA_NATIVE_DIR: ""
+          GUA_RUNTIME_NATIVE_DIR: ""
+
+  publish:
+    name: Publish .NET packages
+    needs:
+      - pack
+      - package-smoke
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-nuget-packages
+          path: artifacts/packages
 
       - name: Check NuGet trusted publisher user
         shell: pwsh

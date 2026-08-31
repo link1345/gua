@@ -109,7 +109,7 @@ for installation and verification details.
 ## NuGet Packages
 
 - **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
-  P/Invoke bindings for using the Gua C ABI runtime from .NET, including the Windows x64 native runtime.
+  P/Invoke bindings for using the Gua C ABI runtime from .NET, including native assets for Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS.
 - **Gua.Testing:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing)](https://www.nuget.org/packages/Gua.Testing) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing)<br>
   Adds Gua locators, waits, assertions, and adapter test loops to regular .NET tests.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
@@ -117,7 +117,7 @@ for installation and verification details.
 - **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)](https://www.nuget.org/packages/Gua.Testing.Unity) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
   Starts a Unity process and provides helpers for controlling and verifying a running scene through the Gua bridge.
 - **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)](https://www.nuget.org/packages/Gua.Runtime) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
-  Shared managed wrapper for authors of engine adapters. Use it to publish semantic frames, consume actions, complete screenshot requests, and host the Inspector bridge without duplicating P/Invoke code. Application test projects normally use an engine package instead.
+  Shared managed wrapper and native runtime for authors of engine adapters on the same four desktop RIDs. Use it to publish semantic frames, consume actions, complete screenshot requests, and host the Inspector bridge without duplicating P/Invoke code. Application test projects normally use an engine package instead.
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
   Adds opt-in PNG baseline comparison for rendering regressions that semantic assertions cannot detect, such as clipping, misplaced controls, incorrect assets, and unexpected overlays. Failures retain expected, actual, diff, and machine-readable comparison artifacts.
   `gua-tester` can combine those artifacts with its prebuilt Astro viewer for workflow artifacts and GitHub Pages.
@@ -457,11 +457,12 @@ testing package:
 ```
 
 `Gua.Core` is also delivered as a NuGet package and `Gua.Testing` depends on the
-matching version. The Windows x64 native runtime is included in `Gua.Core` under
-`runtimes/win-x64/native/gua.dll`, so a normal package restore/build copies it to
-the consuming app or test output. `GUA_NATIVE_DIR` remains as an override for
-locally built native runtimes. A missing or wrong architecture native library is
-reported with the exact checked paths.
+matching version. Native assets are included for `win-x64`, `linux-x64`,
+`osx-x64`, and `osx-arm64`, so a normal package restore/build copies the correct
+library to the consuming app or test output. `Gua.Runtime` carries the matching
+Inspector bridge runtime for those RIDs. `GUA_NATIVE_DIR` and
+`GUA_RUNTIME_NATIVE_DIR` remain local-build overrides. A missing or wrong
+architecture native library is reported with the exact checked paths.
 
 Run the standalone testing sample:
 
