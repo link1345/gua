@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
@@ -599,14 +600,12 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
         json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
     if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
         return std::nullopt;
-    try {
-        std::size_t parsed = 0;
-        const std::string token(json.substr(start, end - start));
-        const double value = std::stod(token, &parsed);
-        return parsed == token.size() && std::isfinite(value) ? std::optional<double>(value) : std::nullopt;
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
+    const std::string_view token = json.substr(start, end - start);
+    double value = 0;
+    const auto [parsed_end, error] = std::from_chars(
+        token.data(), token.data() + token.size(), value, std::chars_format::general);
+    return error == std::errc {} && parsed_end == token.data() + token.size() && std::isfinite(value)
+        ? std::optional<double>(value) : std::nullopt;
 }
 
 bool json_has_field(std::string_view json, std::string_view field)
