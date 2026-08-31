@@ -4,10 +4,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <charconv>
+#include <cerrno>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -600,11 +601,11 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
         json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
     if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
         return std::nullopt;
-    const std::string_view token = json.substr(start, end - start);
-    double value = 0;
-    const auto [parsed_end, error] = std::from_chars(
-        token.data(), token.data() + token.size(), value, std::chars_format::general);
-    return error == std::errc {} && parsed_end == token.data() + token.size() && std::isfinite(value)
+    const std::string token(json.substr(start, end - start));
+    char* parsed_end = nullptr;
+    errno = 0;
+    const double value = std::strtod(token.c_str(), &parsed_end);
+    return errno != ERANGE && parsed_end == token.c_str() + token.size() && std::isfinite(value)
         ? std::optional<double>(value) : std::nullopt;
 }
 
