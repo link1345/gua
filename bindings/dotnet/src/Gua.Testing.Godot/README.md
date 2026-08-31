@@ -28,6 +28,9 @@ Set `GODOT_EXECUTABLE` or pass `GodotSceneTestHostOptions.GodotExecutablePath`
 when Godot is not on `PATH`. The running game must start a Gua bridge, normally
 at `ws://127.0.0.1:8765`.
 
+On macOS the executable option may point to either the Godot binary or a
+`Godot.app` bundle. Unix executable permissions are handled before launch.
+
 For parallel tests, set `UseAvailableBridgePort = true`; the host reserves a
 loopback port, connects to it, and passes it to the child as `GUA_BRIDGE_PORT`.
 `EnvironmentVariables` adds per-test child settings. `LoadRendered(...)` is the

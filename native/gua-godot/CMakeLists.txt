@@ -40,7 +40,7 @@ target_include_directories(gua-godot
         include
 )
 
-if(WIN32)
+if(GUA_DESKTOP_NATIVE)
     set(GUA_GODOT_RUNTIME_TARGET gua::runtime-godot)
 else()
     set(GUA_GODOT_RUNTIME_TARGET gua::runtime)
@@ -50,15 +50,43 @@ target_link_libraries(gua-godot PRIVATE ${GUA_GODOT_RUNTIME_TARGET} godot::cpp)
 
 target_compile_features(gua-godot PRIVATE cxx_std_20)
 
+set(GUA_GODOT_ARCHITECTURE "" CACHE STRING "Godot addon architecture override (x86_64 or arm64).")
+if(EMSCRIPTEN)
+    set(GUA_GODOT_ARCH "wasm32")
+elseif(GUA_GODOT_ARCHITECTURE)
+    set(GUA_GODOT_ARCH "${GUA_GODOT_ARCHITECTURE}")
+elseif(APPLE AND CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES MATCHES ";")
+    set(GUA_GODOT_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+else()
+    set(GUA_GODOT_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+string(TOLOWER "${GUA_GODOT_ARCH}" GUA_GODOT_ARCH)
+if(GUA_GODOT_ARCH MATCHES "^(amd64|x64|x86_64)$")
+    set(GUA_GODOT_ARCH "x86_64")
+elseif(GUA_GODOT_ARCH MATCHES "^(aarch64|arm64)$")
+    set(GUA_GODOT_ARCH "arm64")
+elseif(GUA_GODOT_ARCH STREQUAL "wasm32")
+    # The Web descriptor is intentionally single-threaded wasm32.
+else()
+    message(FATAL_ERROR "Unsupported Godot desktop architecture '${GUA_GODOT_ARCH}'.")
+endif()
+
 if(EMSCRIPTEN)
     set(GUA_GODOT_OUTPUT_NAME "gua_godot.web.${GUA_GODOT_CONFIGURATION_LOWER}.wasm32")
+elseif(WIN32)
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.${GUA_GODOT_CONFIGURATION_LOWER}.${GUA_GODOT_ARCH}")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.linux.${GUA_GODOT_CONFIGURATION_LOWER}.${GUA_GODOT_ARCH}")
+elseif(APPLE)
+    set(GUA_GODOT_OUTPUT_NAME "gua_godot.macos.${GUA_GODOT_CONFIGURATION_LOWER}.${GUA_GODOT_ARCH}")
 else()
-    set(GUA_GODOT_OUTPUT_NAME "gua_godot.windows.${GUA_GODOT_CONFIGURATION_LOWER}.x86_64")
+    message(FATAL_ERROR "Unsupported Godot target platform '${CMAKE_SYSTEM_NAME}'.")
 endif()
 
 set_target_properties(gua-godot
     PROPERTIES
         OUTPUT_NAME "${GUA_GODOT_OUTPUT_NAME}"
+        PREFIX ""
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/examples/godot-gdscript/addons/gua/bin"

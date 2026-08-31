@@ -1,6 +1,7 @@
 # Gua GDScript Sample
 
-This sample uses the Gua Godot GDExtension from GDScript.
+This sample uses the Gua Godot GDExtension from GDScript on Windows x64,
+Linux x64, Intel macOS, Apple Silicon macOS, and Godot Web.
 
 The packaged Godot Web addon contains configuration-specific GDExtensions for
 both Debug and Release exports. The included `Web` export preset enables

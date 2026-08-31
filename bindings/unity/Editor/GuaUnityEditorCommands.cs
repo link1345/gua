@@ -23,11 +23,32 @@ public static class GuaUnityEditorCommands
         var scene = Argument("-guaScene") ?? throw new ArgumentException("-guaScene is required.");
         var output = Argument("-guaOutput") ?? throw new ArgumentException("-guaOutput is required.");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        var platform = (Argument("-guaPlatform") ?? "windows-x64") switch
+        {
+            "WindowsX64" => "windows-x64",
+            "LinuxX64" => "linux-x64",
+            "MacOSX64" => "macos-x64",
+            "MacOSArm64" => "macos-arm64",
+            "MacOSUniversal" => "macos-universal",
+            var value => value,
+        };
+        var target = platform switch
+        {
+            "windows-x64" => BuildTarget.StandaloneWindows64,
+            "linux-x64" => BuildTarget.StandaloneLinux64,
+            "macos-x64" or "macos-arm64" or "macos-universal" => BuildTarget.StandaloneOSX,
+            _ => throw new ArgumentException($"Unsupported -guaPlatform '{platform}'."),
+        };
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+        if (target == BuildTarget.StandaloneOSX)
+        {
+            var architecture = platform == "macos-arm64" ? 1 : platform == "macos-universal" ? 2 : 0;
+            PlayerSettings.SetArchitecture(NamedBuildTarget.Standalone, architecture);
+        }
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
             scenes = new[] { scene }, locationPathName = output,
-            target = BuildTarget.StandaloneWindows64, options = BuildOptions.Development,
+            target = target, options = BuildOptions.Development,
         });
         if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
             throw new InvalidOperationException($"Gua Unity player build failed: {report.summary.result} ({report.summary.totalErrors} errors).");

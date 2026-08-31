@@ -25,6 +25,18 @@ PluginImporter:
         DefaultValueInitialized: true
         OS: AnyOS
   - first:
+      Standalone: Linux64
+    second:
+      enabled: 1
+      settings:
+        CPU: AnyCPU
+  - first:
+      Standalone: OSXUniversal
+    second:
+      enabled: 1
+      settings:
+        CPU: AnyCPU
+  - first:
       Standalone: Win64
     second:
       enabled: 1

@@ -1,7 +1,8 @@
 # Unity 6 runtime UI fixture
 
 This is the complete Unity 6000.5.3f1 project used to verify the first supported
-configuration: Windows x64 with the Mono scripting backend. It references the
+configurations: Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS
+with the Mono scripting backend. It references the
 source UPM package in `bindings/unity` and creates UI Toolkit, uGUI, and
 TextMeshPro controls without manual Gua node registration.
 

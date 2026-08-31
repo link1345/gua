@@ -374,18 +374,32 @@ public sealed class GodotSceneTestHost : IDisposable, IAsyncDisposable
 
     private static string ResolveGodotExecutable(string? configuredPath)
     {
+        string candidate;
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
-            return configuredPath;
+            candidate = configuredPath;
         }
-
-        var environmentPath = Environment.GetEnvironmentVariable("GODOT_EXECUTABLE");
-        if (!string.IsNullOrWhiteSpace(environmentPath))
+        else
         {
-            return environmentPath;
+            var environmentPath = Environment.GetEnvironmentVariable("GODOT_EXECUTABLE");
+            candidate = !string.IsNullOrWhiteSpace(environmentPath) ? environmentPath : "godot";
         }
 
-        return "godot";
+        if (candidate.EndsWith(".app", StringComparison.OrdinalIgnoreCase) && Directory.Exists(candidate))
+        {
+            var bundled = Path.Combine(candidate, "Contents", "MacOS", "Godot");
+            if (!File.Exists(bundled))
+                throw new FileNotFoundException("The Godot application bundle does not contain Contents/MacOS/Godot.", bundled);
+            candidate = bundled;
+        }
+
+        if (!OperatingSystem.IsWindows() && File.Exists(candidate))
+        {
+            var mode = File.GetUnixFileMode(candidate);
+            if ((mode & UnixFileMode.UserExecute) == 0)
+                File.SetUnixFileMode(candidate, mode | UnixFileMode.UserExecute);
+        }
+        return candidate;
     }
 
     private static string ResolveProjectPath(string scenePath, string? configuredProjectPath)

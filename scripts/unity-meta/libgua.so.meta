@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 41f339bbfa9649343b0f20337fe54bce
+guid: 86df316b33ee4fa8a957db978bda3c3e
 PluginImporter:
   externalObjects: {}
   serializedVersion: 2
@@ -9,7 +9,7 @@ PluginImporter:
   isPreloaded: 0
   isOverridable: 1
   isExplicitlyReferenced: 0
-  validateReferences: 0
+  validateReferences: 1
   platformData:
   - first:
       Any:
@@ -21,27 +21,15 @@ PluginImporter:
     second:
       enabled: 1
       settings:
-        CPU: AnyCPU
+        CPU: x86_64
         DefaultValueInitialized: true
-        OS: AnyOS
+        OS: Linux
   - first:
       Standalone: Linux64
     second:
       enabled: 1
       settings:
-        CPU: AnyCPU
-  - first:
-      Standalone: OSXUniversal
-    second:
-      enabled: 1
-      settings:
-        CPU: AnyCPU
-  - first:
-      Standalone: Win64
-    second:
-      enabled: 1
-      settings:
-        CPU: AnyCPU
+        CPU: x86_64
   userData:
   assetBundleName:
   assetBundleVariant:

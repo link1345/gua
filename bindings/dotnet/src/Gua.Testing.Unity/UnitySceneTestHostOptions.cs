@@ -2,12 +2,23 @@ using Gua.Core;
 
 namespace Gua.Testing.Unity;
 
+public enum UnityStandalonePlatform
+{
+    Auto,
+    WindowsX64,
+    LinuxX64,
+    MacOSX64,
+    MacOSArm64,
+    MacOSUniversal,
+}
+
 public sealed class UnitySceneTestHostOptions
 {
     public static UnitySceneTestHostOptions Default { get; } = new();
     public static UnitySceneTestHostOptions StrictIsolation { get; } = new() { StartupResetPolicy = GuaResetPolicy.Strict, TeardownResetPolicy = GuaResetPolicy.Strict, CaptureDiagnosticsBeforeTeardown = true };
     public string? UnityExecutablePath { get; init; }
     public string? ProjectPath { get; init; }
+    public UnityStandalonePlatform Platform { get; init; } = UnityStandalonePlatform.Auto;
     public string BridgeUrl { get; init; } = "ws://127.0.0.1:8765";
     public bool UseAvailableBridgePort { get; init; } = true;
     public bool KillProcessOnDispose { get; init; } = true;
@@ -29,6 +40,7 @@ public sealed class UnityPlayerBuildOptions
     public string? UnityExecutablePath { get; init; }
     public string? ProjectPath { get; init; }
     public string? OutputPath { get; init; }
+    public UnityStandalonePlatform Platform { get; init; } = UnityStandalonePlatform.Auto;
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(10);
     public IReadOnlyList<string> AdditionalArguments { get; init; } = Array.Empty<string>();
 }
