@@ -132,7 +132,7 @@ Unityの両方に対応する公開CI部品です。Godotでは、Godot本体と
 準備して外部.NETテストを実行します。
 
 ```yaml
-- uses: link1345/gua-tester/godot@v3
+- uses: link1345/gua-tester/godot@v3.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -147,15 +147,15 @@ Unityでは、指定したdesktop Mono Playerをビルドし、対象runnerへ�
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v3
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v3.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
       artifact-key: game
-      platform: WindowsX64
+      platform: LinuxX64
       unity-version: auto
-      gua-tag: gua-v0.15.0
+      gua-tag: gua-v1.0.4
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -166,8 +166,7 @@ jobs:
 `gua-tag`で選ぶUPM packageと`Gua.Testing.Unity`のNuGetバージョンは揃えてください。
 fork PRにはUnity credentialsが渡らないため、未信頼forkではUnity jobをskipします。
 reusable workflowはPlayer起動前にWindows test runnerの画面解像度を1920x1080へ固定します。
-Linux／macOSを選ぶ場合は、対応するcross-platform UPM native assetを含むGua releaseを指定してください。
-上の旧tag固定例はWindowsで実行可能な例です。
+Gua v1.0.4以降には、Linux／macOS platformで必要なcross-platform UPM native assetが含まれます。
 
 ## NuGetパッケージ
 

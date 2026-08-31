@@ -82,6 +82,11 @@ jobs:
           $templateDirectory = Join-Path $templateRoot 'export_templates/4.7.stable'
           New-Item -ItemType Directory -Force $templateDirectory | Out-Null
           Copy-Item ".godot-export-templates/templates/*" $templateDirectory -Recurse
+          if ($IsMacOS) {
+            scripts/prepare-godot-macos-export-template.ps1 `
+              -TemplateArchive (Join-Path $templateDirectory 'macos.zip') `
+              -Architecture '${{ matrix.arch }}'
+          }
           if (-not $IsWindows) { chmod +x '.godot-editor/${{ matrix.executable }}' }
 
       - name: Export desktop Release player

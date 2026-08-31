@@ -366,7 +366,7 @@ tests:
 For a typical consumer repository, the workflow can be as small as:
 
 ```yaml
-- uses: link1345/gua-tester/godot@v3
+- uses: link1345/gua-tester/godot@v3.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -382,15 +382,15 @@ the `Gua.Testing.Unity` NUnit project:
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v3
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v3.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
       artifact-key: game
-      platform: WindowsX64
+      platform: LinuxX64
       unity-version: auto
-      gua-tag: gua-v0.15.0
+      gua-tag: gua-v1.0.4
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -402,8 +402,8 @@ Keep the UPM release selected by `gua-tag` aligned with the
 `Gua.Testing.Unity` NuGet version. Unity credentials are unavailable to fork
 pull requests, so skip the Unity job for untrusted forks. The reusable workflow
 fixes the Windows test runner display at 1920x1080 before launching the Player.
-Select Linux or macOS only with a Gua release that includes the corresponding
-cross-platform UPM native assets; the pinned legacy tag above is a Windows-compatible example.
+Gua v1.0.4 and later include the cross-platform UPM native assets required by
+the Linux and macOS platform values.
 
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
