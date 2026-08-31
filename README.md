@@ -431,8 +431,11 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ```
 
-The portable boundary remains the C ABI. macOS and iOS should use Apple Clang,
-and Android should use Android NDK Clang when those targets are added.
+The native core, WebSocket bridge, runtime shared library, and native bridge
+example also build on Linux with GCC or Clang and on Intel and Apple Silicon
+macOS with Apple Clang. Godot and Unity native adapter support remains limited
+to the platforms described in their integration sections. iOS and Android are
+not currently supported targets.
 
 ## .NET Testing
 
@@ -691,6 +694,10 @@ example):
 ```text
 gua-godot-addon-v1.0.0.zip
 com.link1345.gua-1.0.0.tgz
+gua-native-win-x64-v1.0.0.zip
+gua-native-linux-x64-v1.0.0.zip
+gua-native-osx-x64-v1.0.0.zip
+gua-native-osx-arm64-v1.0.0.zip
 Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
@@ -700,6 +707,8 @@ Release Windows GDExtension DLLs and both Debug and Release Web GDExtension WASM
 inside that addon, Unity WebGL static libraries, and an ImGui ZIP are not
 published as separate GitHub Release assets; the static libraries are already
 included in the Unity Package Manager archive.
+Each `gua-native-<rid>-v1.0.0.zip` contains the `Gua.Core` and `Gua.Runtime`
+shared libraries for that RID plus `LICENSE`.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gua-world-tools`, `gua-webmcp`, and `gui-mcp` packages must each be configured

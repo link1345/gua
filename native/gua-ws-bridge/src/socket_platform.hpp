@@ -36,6 +36,7 @@ private:
 };
 
 Socket create_listen_socket(unsigned short port);
+unsigned short bound_port(SocketHandle listen_socket);
 Socket accept_socket(SocketHandle listen_socket) noexcept;
 bool wake_listener(unsigned short port) noexcept;
 std::ptrdiff_t send_some(SocketHandle socket, const std::uint8_t* data, std::size_t size) noexcept;

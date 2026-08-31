@@ -904,6 +904,7 @@ public:
     Impl(BridgeHandlers handlers, BridgeOptions options)
         : handlers_(std::move(handlers))
         , options_(options)
+        , bound_port_(options.port)
     {
     }
 
@@ -936,8 +937,10 @@ public:
         if (!running_.exchange(false)) {
             return;
         }
-        if (!gua::ws::platform::wake_listener(options_.port)) {
-            gua::ws::platform::close_socket(listen_socket_.exchange(invalid_socket));
+        if (!gua::ws::platform::wake_listener(bound_port_.load())) {
+            const SocketHandle listen_socket = listen_socket_.exchange(invalid_socket);
+            gua::ws::platform::shutdown_socket(listen_socket);
+            gua::ws::platform::close_socket(listen_socket);
         }
         {
             const std::lock_guard lock(clients_mutex_);
@@ -1022,7 +1025,7 @@ public:
 
     [[nodiscard]] unsigned short port() const
     {
-        return options_.port;
+        return bound_port_.load();
     }
 
 private:
@@ -1034,9 +1037,10 @@ private:
             Socket listen_socket = gua::ws::platform::create_listen_socket(options_.port);
             const SocketHandle listen_handle = listen_socket.release();
             listen_socket_ = listen_handle;
+            bound_port_.store(gua::ws::platform::bound_port(listen_handle));
             started.set_value(true);
             startup_reported = true;
-            std::cout << "Gua WebSocket bridge listening on ws://127.0.0.1:" << options_.port << std::endl;
+            std::cout << "Gua WebSocket bridge listening on ws://127.0.0.1:" << bound_port_.load() << std::endl;
 
             while (running_.load()) {
                 Socket client = gua::ws::platform::accept_socket(listen_handle);
@@ -1324,6 +1328,7 @@ private:
     BridgeHandlers handlers_;
     BridgeOptions options_;
     std::atomic_bool running_ = false;
+    std::atomic<unsigned short> bound_port_ = 0;
     std::thread thread_;
     std::atomic<SocketHandle> listen_socket_ = invalid_socket;
     std::mutex clients_mutex_;

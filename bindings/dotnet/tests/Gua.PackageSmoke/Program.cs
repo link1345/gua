@@ -30,12 +30,13 @@ if (!runtime.StartInspectorBridge(port))
 try
 {
     using var socket = new ClientWebSocket();
-    await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), CancellationToken.None);
-    _ = await ReceiveTextAsync(socket); // Initial snapshot.
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+    await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{port}"), timeout.Token);
+    _ = await ReceiveTextAsync(socket, timeout.Token); // Initial snapshot.
 
     var command = Encoding.UTF8.GetBytes("{\"id\":1,\"type\":\"get_version\"}");
-    await socket.SendAsync(command, WebSocketMessageType.Text, true, CancellationToken.None);
-    using var response = JsonDocument.Parse(await ReceiveTextAsync(socket));
+    await socket.SendAsync(command, WebSocketMessageType.Text, true, timeout.Token);
+    using var response = JsonDocument.Parse(await ReceiveTextAsync(socket, timeout.Token));
     if (!response.RootElement.GetProperty("ok").GetBoolean() || response.RootElement.GetProperty("id").GetInt32() != 1)
         throw new InvalidOperationException("Packaged native bridge returned an invalid response.");
 }
@@ -46,13 +47,13 @@ finally
 
 Console.WriteLine($"Gua package smoke passed on {System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier}.");
 
-static async Task<string> ReceiveTextAsync(ClientWebSocket socket)
+static async Task<string> ReceiveTextAsync(ClientWebSocket socket, CancellationToken cancellationToken)
 {
     var buffer = new byte[64 * 1024];
     using var stream = new MemoryStream();
     while (true)
     {
-        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+        var result = await socket.ReceiveAsync(buffer, cancellationToken);
         if (result.MessageType == WebSocketMessageType.Close)
             throw new InvalidOperationException("Bridge closed before returning a response.");
         stream.Write(buffer, 0, result.Count);

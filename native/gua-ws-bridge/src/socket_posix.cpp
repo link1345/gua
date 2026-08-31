@@ -85,6 +85,16 @@ Socket create_listen_socket(unsigned short port)
     return listen_socket;
 }
 
+unsigned short bound_port(SocketHandle listen_socket)
+{
+    sockaddr_in address {};
+    socklen_t address_size = sizeof(address);
+    if (::getsockname(native(listen_socket), reinterpret_cast<sockaddr*>(&address), &address_size) != 0 ||
+        address_size < sizeof(address) || address.sin_family != AF_INET)
+        throw std::runtime_error("getsockname failed");
+    return ntohs(address.sin_port);
+}
+
 Socket accept_socket(SocketHandle listen_socket) noexcept
 {
     int accepted;

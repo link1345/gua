@@ -298,7 +298,10 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ```
 
-移植可能な境界はC ABIです。将来macOS・iOSへ対応する場合はApple Clang、AndroidではAndroid NDK Clangを使用します。
+ネイティブコア、WebSocketブリッジ、ランタイム共有ライブラリ、native bridge
+サンプルは、LinuxではGCCまたはClang、Intel・Apple Silicon macOSではApple
+Clangでもビルドできます。Godot・Unityのネイティブアダプター対応範囲は各統合
+セクションの記載どおりで、iOS・Androidは現在の対応対象外です。
 
 ## .NETテスト
 
@@ -544,6 +547,10 @@ NuGetへ公開されます。`main`への変更だけではパッケージは公
 ```text
 gua-godot-addon-v1.0.0.zip
 com.link1345.gua-1.0.0.tgz
+gua-native-win-x64-v1.0.0.zip
+gua-native-linux-x64-v1.0.0.zip
+gua-native-osx-x64-v1.0.0.zip
+gua-native-osx-arm64-v1.0.0.zip
 Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
@@ -554,6 +561,8 @@ DLLと、Debug・Release両方のWeb用GDExtension WASMを含む単一の
 アドオン内の各ファイル、Unity WebGL用静的ライブラリ、ImGui ZIPはGitHub
 Releaseへ個別公開しません。静的ライブラリはUnity Package Managerアーカイブに
 収録されます。
+各`gua-native-<rid>-v1.0.0.zip`には、そのRID向けの`Gua.Core`・`Gua.Runtime`
+共有ライブラリと`LICENSE`が入ります。
 
 ## リポジトリ構成
 
