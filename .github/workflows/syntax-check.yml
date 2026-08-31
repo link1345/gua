@@ -162,10 +162,18 @@ jobs:
         run: dotnet restore bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj
 
       - name: Test remote bridge and selector contracts
-        run: dotnet test bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj --configuration Release --no-restore
+        run: dotnet test bindings/dotnet/tests/Gua.Selector.Tests/Gua.Selector.Tests.csproj --configuration Release --no-restore --blame-crash --blame-crash-dump-type mini --logger "console;verbosity=detailed"
         env:
           GUA_NATIVE_DIR: ${{ github.workspace }}/${{ matrix.core-dir }}
           GUA_RUNTIME_NATIVE_DIR: ${{ github.workspace }}/${{ matrix.runtime-dir }}
+
+      - name: Upload selector crash diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-selector-crash-${{ matrix.rid }}
+          path: bindings/dotnet/tests/Gua.Selector.Tests/TestResults
+          if-no-files-found: warn
 
       - name: Stage native package assets
         shell: pwsh
