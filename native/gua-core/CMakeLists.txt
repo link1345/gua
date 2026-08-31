@@ -32,6 +32,12 @@ set_target_properties(gua
         WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+if(APPLE)
+    set_target_properties(gua PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+elseif(UNIX)
+    set_target_properties(gua PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()
+
 if(MSVC)
     target_compile_options(gua-core
         PRIVATE

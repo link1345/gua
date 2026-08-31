@@ -26,7 +26,8 @@ than becoming separate engine-specific automation systems.
 
 Gua provides runtime integrations for the **Godot 4.7 GDScript addon** and
 **Unity 6**. The Unity package automatically reflects UI Toolkit, uGUI, and
-TextMeshPro runtime UI on Windows x64 Mono builds. During development, AI coding
+TextMeshPro runtime UI on Windows x64, Linux x64, and Intel/Apple Silicon macOS
+Mono builds. During development, AI coding
 agents can use Gua to implement and verify the game. In a release build, the game
 can expose only approved information and operations so an AI agent can play as a
 player.
@@ -53,11 +54,11 @@ time control, screenshots, Recording, and visual comparison.
 ### Unity 6 UI testing
 
 - Automatically expose UI Toolkit, uGUI, and TextMeshPro runtime UI.
-- Exercise scenes in Editor Play Mode or a Windows x64 Mono Player.
+- Exercise scenes in Editor Play Mode or a desktop Mono Player on the four supported RIDs.
 - Locate and operate controls through the same semantic API used for Godot.
 - Keep game-side adapter code separate from external NUnit test hosts.
 - Capture logs, screenshots, and diagnostics when a Unity test fails.
-- Build and test a Windows x64 Mono Player in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
+- Build and test all four desktop RID Mono Players in CI with [`link1345/gua-tester`](https://github.com/link1345/gua-tester).
 
 ### AI-assisted game development and playtesting
 
@@ -132,9 +133,9 @@ for setup details.
 The Unity package automatically starts the runtime adapter and reflects UI
 Toolkit, uGUI, and TextMeshPro controls without manual semantic-node
 registration. `Gua.Testing.Unity` can launch Editor Play Mode or a built Mono
-Player from ordinary .NET tests. The first supported scope is Unity 6000.5+ on
-Windows x64 with Mono; IL2CPP, non-Windows targets, Unity IMGUI, and EditorWindow
-automation are not currently supported. See [Unity 6 Windows x64](#unity-6-windows-x64)
+Player from ordinary .NET tests. The desktop scope is Unity 6000.5+ on Windows
+x64, Linux x64, Intel macOS, and Apple Silicon macOS with Mono; IL2CPP, Unity
+IMGUI, and EditorWindow automation are not supported. See [Unity 6 desktop Mono](#unity-6-desktop-mono)
 for installation and verification details.
 
 ## NuGet Packages
@@ -365,7 +366,7 @@ tests:
 For a typical consumer repository, the workflow can be as small as:
 
 ```yaml
-- uses: link1345/gua-tester/godot@v2.1
+- uses: link1345/gua-tester/godot@v3.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -373,22 +374,23 @@ For a typical consumer repository, the workflow can be as small as:
     godot-status: stable
 ```
 
-The Unity reusable workflow installs the released UPM package, builds a Windows
-x64 Mono Player on Linux, transfers it to a Windows runner, and runs the
-`Gua.Testing.Unity` NUnit project:
+The Unity reusable workflow installs the released UPM package, builds the
+requested desktop Mono Player, transfers it to the matching runner, and runs
+the `Gua.Testing.Unity` NUnit project:
 
 ```yaml
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v2.1
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v3.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
       artifact-key: game
+      platform: LinuxX64
       unity-version: auto
-      gua-tag: gua-v0.15.0
+      gua-tag: gua-v1.0.4
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -400,6 +402,8 @@ Keep the UPM release selected by `gua-tag` aligned with the
 `Gua.Testing.Unity` NuGet version. Unity credentials are unavailable to fork
 pull requests, so skip the Unity job for untrusted forks. The reusable workflow
 fixes the Windows test runner display at 1920x1080 before launching the Player.
+Gua v1.0.4 and later include the cross-platform UPM native assets required by
+the Linux and macOS platform values.
 
 ```cpp
 context.log(gua::LogLevel::info, "title screen opened");
@@ -441,7 +445,7 @@ The first implementation focuses on a small, stable core:
 - Recommended Godot 4.7 GDScript addon using the same runtime bridge through
   GDExtension, including the full standard-Control adapter
 - Unity 6 runtime package for UI Toolkit, uGUI, and TextMeshPro, plus external
-  Editor Play Mode and Windows x64 Mono Player test hosts
+  Editor Play Mode and desktop Mono Player test hosts
 
 Engine-specific integrations remain adapters built on top of the protocol, not
 the center of the project. Godot and Unity are the current supported adapters;
@@ -464,8 +468,8 @@ cmake --build --preset windows-msvc-debug
 
 The native core, WebSocket bridge, runtime shared library, and native bridge
 example also build on Linux with GCC or Clang and on Intel and Apple Silicon
-macOS with Apple Clang. Godot and Unity native adapter support remains limited
-to the platforms described in their integration sections. iOS and Android are
+macOS with Apple Clang. Godot and Unity desktop adapters support the same four
+RIDs described above. iOS and Android are
 not currently supported targets.
 
 ## .NET Testing
@@ -521,13 +525,14 @@ dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration R
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
-### Unity 6 Windows x64
+### Unity 6 desktop Mono
 
 `Gua.Core`, `Gua.Testing`, `Gua.Testing.Visual`, and
 `Gua.Testing.Recording` target both `net10.0` and `netstandard2.1`.
 Unity 6 projects using the default **.NET Standard 2.1** API Compatibility
 Level can load the managed assemblies without changing the native C ABI.
-The first verified native configuration is Windows Editor x64: place the
+The UPM archive includes OS/CPU-scoped native plugins for Windows x64, Linux x64,
+and Universal 2 macOS. For a manual Windows installation, place the
 managed assemblies and their NuGet dependency closure under
 `Assets/Plugins/Gua/Managed`, and place `gua.dll` under
 `Assets/Plugins/x86_64`. Unity's Plugin Import Settings must enable the DLL for
@@ -549,10 +554,10 @@ same release workflow as the Windows native plugins.
 The package starts automatically and reflects UI Toolkit, uGUI, and
 TextMeshPro runtime UI. `GuaId` and `GuaScreen` are optional overrides; game
 code does not register semantic nodes manually. `Gua.Testing.Unity` provides
-Editor Play Mode and Mono Windows Player hosts. See
+Editor Play Mode and desktop Mono Player hosts. See
 [`examples/unity-smoke`](examples/unity-smoke/README.md) for the verified Unity
-6000.5.3f1 fixture. Windows x64, Unity 6000.5+, and Mono are supported in this
-initial release; IL2CPP, other operating systems, IMGUI, and EditorWindow UI
+6000.5.3f1 fixture. All four desktop RIDs, Unity 6000.5+, and Mono are supported;
+IL2CPP, IMGUI, and EditorWindow UI
 automation are not.
 
 ## Inspector
@@ -737,8 +742,8 @@ Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
 
-`gua-godot-addon-v1.0.0.zip` contains one `addons/gua` tree with both Debug and
-Release Windows GDExtension DLLs and both Debug and Release Web GDExtension WASM files. Files
+`gua-godot-addon-v1.0.0.zip` contains one `addons/gua` tree with Debug and
+Release GDExtensions for all four desktop RIDs and Godot Web. Files
 inside that addon, Unity WebGL static libraries, and an ImGui ZIP are not
 published as separate GitHub Release assets; the static libraries are already
 included in the Unity Package Manager archive.

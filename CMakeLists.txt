@@ -47,7 +47,7 @@ if(GUA_DESKTOP_NATIVE OR EMSCRIPTEN)
     add_subdirectory(native/gua-runtime)
 endif()
 
-if(GUA_BUILD_GODOT AND (WIN32 OR EMSCRIPTEN))
+if(GUA_BUILD_GODOT AND (GUA_DESKTOP_NATIVE OR EMSCRIPTEN))
     add_subdirectory(native/gua-godot)
 elseif(GUA_BUILD_GODOT)
     message(STATUS "Skipping native/gua-godot because this platform is not a supported native or Web target.")

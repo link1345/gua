@@ -10,14 +10,16 @@ add_library(gua-runtime ${GUA_RUNTIME_LIBRARY_TYPE}
 
 add_library(gua::runtime ALIAS gua-runtime)
 
-if(WIN32 AND GUA_BUILD_GODOT)
-    # A distributed Godot addon contains Debug and Release GDExtensions side by
-    # side. Embed the runtime so they do not compete for one configuration-
-    # ambiguous gua_runtime.dll next to the addon binaries.
+if(GUA_DESKTOP_NATIVE AND GUA_BUILD_GODOT)
+    # A distributed Godot addon contains per-platform Debug and Release
+    # GDExtensions side by side. Embed the runtime so each library is
+    # self-contained and does not depend on a configuration-ambiguous shared
+    # runtime beside the addon binaries.
     add_library(gua-runtime-godot STATIC
         src/runtime.cpp
     )
     add_library(gua::runtime-godot ALIAS gua-runtime-godot)
+    set_target_properties(gua-runtime-godot PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
 target_include_directories(gua-runtime
@@ -57,6 +59,12 @@ set_target_properties(gua-runtime
         WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+if(APPLE)
+    set_target_properties(gua-runtime PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+elseif(UNIX AND NOT EMSCRIPTEN)
+    set_target_properties(gua-runtime PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()
+
 if(EMSCRIPTEN)
     # Godot loads the Web GDExtension as a side module. Every static archive
     # linked into that module must use relocatable WebAssembly code.
@@ -87,6 +95,9 @@ else()
             -Wextra
             -Wpedantic
     )
+    if(TARGET gua-runtime-godot)
+        target_compile_options(gua-runtime-godot PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 endif()
 
 if(BUILD_TESTING)

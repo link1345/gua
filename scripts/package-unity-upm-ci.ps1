@@ -18,7 +18,9 @@ $artifact = Join-Path $OutputDirectory "com.link1345.gua"
 if (Test-Path -LiteralPath $artifact) { Remove-Item -LiteralPath $artifact -Recurse -Force }
 New-Item -ItemType Directory -Force `
     (Join-Path $artifact "Runtime/Plugins/Managed"), `
-    (Join-Path $artifact "Runtime/Plugins/x86_64"), `
+    (Join-Path $artifact "Runtime/Plugins/Windows/x86_64"), `
+    (Join-Path $artifact "Runtime/Plugins/Linux/x86_64"), `
+    (Join-Path $artifact "Runtime/Plugins/macOS"), `
     (Join-Path $artifact "Runtime/Plugins/WebGL"), `
     (Join-Path $artifact "Runtime/Plugins/WebGL/Managed"), `
     (Join-Path $artifact "Editor"), `
@@ -37,9 +39,9 @@ Copy-Item (Join-Path $plugins "WebGL/Managed/Gua.Core.dll") (Join-Path $artifact
 Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Core.WebGL.dll.meta") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed/Gua.Core.dll.meta")
 Copy-Item (Join-Path $plugins "WebGL/Managed/Gua.Runtime.dll") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed")
 Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.WebGL.dll.meta") (Join-Path $artifact "Runtime/Plugins/WebGL/Managed/Gua.Runtime.dll.meta")
-Copy-Item (Join-Path $plugins "x86_64/*.dll") (Join-Path $artifact "Runtime/Plugins/x86_64")
-Copy-Item (Join-Path $root "scripts/unity-meta/gua.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
-Copy-Item (Join-Path $root "scripts/unity-meta/gua_runtime.dll.meta") (Join-Path $artifact "Runtime/Plugins/x86_64")
+Copy-Item (Join-Path $plugins "Windows/x86_64/*") (Join-Path $artifact "Runtime/Plugins/Windows/x86_64")
+Copy-Item (Join-Path $plugins "Linux/x86_64/*") (Join-Path $artifact "Runtime/Plugins/Linux/x86_64")
+Copy-Item (Join-Path $plugins "macOS/*") (Join-Path $artifact "Runtime/Plugins/macOS")
 Copy-Item (Join-Path $root "bindings/unity/Runtime/Plugins/WebGL/GuaWebMcp.jslib") (Join-Path $artifact "Runtime/Plugins/WebGL")
 Copy-Item (Join-Path $root "bindings/unity/Runtime/Plugins/WebGL/GuaWebMcp.jslib.meta") (Join-Path $artifact "Runtime/Plugins/WebGL")
 foreach ($webLibrary in "libgua_runtime.a", "libgua-core.a") {

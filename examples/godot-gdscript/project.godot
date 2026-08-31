@@ -19,3 +19,7 @@ config/icon="res://icon.svg"
 
 file_logging/enable_file_logging=false
 file_logging/enable_file_logging.pc=false
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true

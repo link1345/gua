@@ -3,7 +3,8 @@ param(
     [string]$Version,
 
     [Parameter(Mandatory = $true)]
-    [string]$NativeDirectory,
+    [Alias("NativeDirectory")]
+    [string]$NativeAssetsRoot,
 
     [string]$Configuration = "Release"
 )
@@ -12,7 +13,9 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $plugins = Join-Path $root "examples/unity-smoke/Assets/Plugins/Gua"
 $managed = Join-Path $plugins "Managed"
-$native = Join-Path $plugins "x86_64"
+$windowsNative = Join-Path $plugins "Windows/x86_64"
+$linuxNative = Join-Path $plugins "Linux/x86_64"
+$macNative = Join-Path $plugins "macOS"
 $webManaged = Join-Path $plugins "WebGL/Managed"
 $webManagedBuild = Join-Path $root "artifacts/unity-web-managed"
 
@@ -27,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to build the WebGL Gua.Core assembly." 
 dotnet build (Join-Path $root "bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj") -c $Configuration -f netstandard2.1 --no-restore -p:Version=$Version -p:RestoreEnablePackagePruning=false -p:DefineConstants=GUA_STATIC_LINK -o $webManagedBuild
 if ($LASTEXITCODE -ne 0) { throw "Failed to build the WebGL Gua.Runtime assembly." }
 
-New-Item -ItemType Directory -Force $managed, $native, $webManaged | Out-Null
+New-Item -ItemType Directory -Force $managed, $windowsNative, $linuxNative, $macNative, $webManaged | Out-Null
 Copy-Item (Join-Path $root "bindings/dotnet/src/Gua.Core/bin/$Configuration/netstandard2.1/Gua.Core.dll") $managed -Force
 Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Core.dll.meta") $managed -Force
 Copy-Item (Join-Path $root "bindings/dotnet/src/Gua.Runtime/bin/$Configuration/netstandard2.1/Gua.Runtime.dll") $managed -Force
@@ -42,10 +45,18 @@ Copy-Item (Join-Path $root "scripts/unity-meta/Gua.Runtime.WebGL.dll.meta") (Joi
     -TargetFramework "netstandard2.1" `
     -Destination $managed
 
-foreach ($file in "gua.dll", "gua_runtime.dll") {
-    $matches = @(Get-ChildItem -LiteralPath $NativeDirectory -Recurse -File -Filter $file)
-    if ($matches.Count -ne 1) { throw "Expected exactly one $file below '$NativeDirectory', found $($matches.Count)." }
-    Copy-Item -LiteralPath $matches[0].FullName -Destination $native -Force
+foreach ($asset in @(
+    @{ Rid = "win-x64"; File = "gua.dll"; Destination = $windowsNative; Meta = "gua.dll.meta" },
+    @{ Rid = "win-x64"; File = "gua_runtime.dll"; Destination = $windowsNative; Meta = "gua_runtime.dll.meta" },
+    @{ Rid = "linux-x64"; File = "libgua.so"; Destination = $linuxNative; Meta = "libgua.so.meta" },
+    @{ Rid = "linux-x64"; File = "libgua_runtime.so"; Destination = $linuxNative; Meta = "libgua_runtime.so.meta" },
+    @{ Rid = "osx-universal"; File = "libgua.dylib"; Destination = $macNative; Meta = "libgua.dylib.meta" },
+    @{ Rid = "osx-universal"; File = "libgua_runtime.dylib"; Destination = $macNative; Meta = "libgua_runtime.dylib.meta" }
+)) {
+    $source = Join-Path (Join-Path $NativeAssetsRoot $asset.Rid) $asset.File
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing Unity native asset '$source'." }
+    Copy-Item -LiteralPath $source -Destination $asset.Destination -Force
+    Copy-Item -LiteralPath (Join-Path $root "scripts/unity-meta/$($asset.Meta)") -Destination $asset.Destination -Force
 }
 
 Write-Host "Prepared Unity project dependencies for Gua $Version."

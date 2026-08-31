@@ -7,9 +7,45 @@ on:
       - main
 
 jobs:
-  godot-windows-addon-contract:
-    name: Godot Windows Debug / Release
-    runs-on: windows-latest
+  godot-desktop-addon-contract:
+    name: Godot desktop / ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            arch: x86_64
+            archive: Godot_v4.7-stable_win64.exe.zip
+            executable: Godot_v4.7-stable_win64_console.exe
+            preset: Windows Desktop
+            output: artifacts/godot-desktop/GuaGodotSample.exe
+            smoke: artifacts/godot-desktop/GuaGodotSample.exe
+          - os: ubuntu-22.04
+            rid: linux-x64
+            arch: x86_64
+            archive: Godot_v4.7-stable_linux.x86_64.zip
+            executable: Godot_v4.7-stable_linux.x86_64
+            preset: Linux/X11
+            output: artifacts/godot-desktop/GuaGodotSample
+            smoke: artifacts/godot-desktop/GuaGodotSample
+          - os: macos-15-intel
+            rid: osx-x64
+            arch: x86_64
+            archive: Godot_v4.7-stable_macos.universal.zip
+            executable: Godot.app/Contents/MacOS/Godot
+            preset: macOS x86_64
+            output: artifacts/godot-desktop/GuaGodotSample.app
+            smoke: artifacts/godot-desktop/GuaGodotSample.app/Contents/MacOS/GuaGodotSample
+          - os: macos-latest
+            rid: osx-arm64
+            arch: arm64
+            archive: Godot_v4.7-stable_macos.universal.zip
+            executable: Godot.app/Contents/MacOS/Godot
+            preset: macOS arm64
+            output: artifacts/godot-desktop/GuaGodotSample.app
+            smoke: artifacts/godot-desktop/GuaGodotSample.app/Contents/MacOS/GuaGodotSample
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - name: Check out repository
@@ -23,42 +59,61 @@ jobs:
 
       - name: Configure Debug and Release native builds
         run: |
-          cmake --preset windows-msvc-debug
-          cmake --preset windows-msvc-release
+          cmake -S . -B build/godot-debug -DCMAKE_BUILD_TYPE=Debug -DGUA_GODOT_CONFIGURATION=Debug -DGUA_GODOT_ARCHITECTURE=${{ matrix.arch }} -DGUA_BUILD_IMGUI_EXAMPLE=OFF
+          cmake -S . -B build/godot-release -DCMAKE_BUILD_TYPE=Release -DGUA_GODOT_CONFIGURATION=Release -DGUA_GODOT_ARCHITECTURE=${{ matrix.arch }} -DGUA_BUILD_IMGUI_EXAMPLE=OFF
 
       - name: Build Debug and Release Godot GDExtensions
         run: |
-          cmake --build --preset windows-msvc-debug --target gua-godot
-          cmake --build --preset windows-msvc-release --target gua-godot
+          cmake --build build/godot-debug --config Debug --target gua-godot --parallel 2
+          cmake --build build/godot-release --config Release --target gua-godot --parallel 2
 
-      - name: Verify Windows addon contract
+      - name: Verify desktop addon contract
         shell: pwsh
-        run: scripts/verify-godot-windows-addon.ps1 -RequireBinaries
+        run: scripts/verify-godot-desktop-addon.ps1 -Rid '${{ matrix.rid }}' -RequireBinaries
 
       - name: Install Godot 4.7 editor and export templates
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_win64.exe.zip -OutFile godot.zip
+          Invoke-WebRequest 'https://github.com/godotengine/godot-builds/releases/download/4.7-stable/${{ matrix.archive }}' -OutFile godot.zip
           Invoke-WebRequest https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz -OutFile templates.zip
           Expand-Archive godot.zip -DestinationPath .godot-editor
           Expand-Archive templates.zip -DestinationPath .godot-export-templates
-          $templateDirectory = Join-Path $env:APPDATA "Godot/export_templates/4.7.stable"
+          $templateRoot = if ($IsWindows) { Join-Path $env:APPDATA 'Godot' } elseif ($IsMacOS) { Join-Path $HOME 'Library/Application Support/Godot' } else { Join-Path $HOME '.local/share/godot' }
+          $templateDirectory = Join-Path $templateRoot 'export_templates/4.7.stable'
           New-Item -ItemType Directory -Force $templateDirectory | Out-Null
           Copy-Item ".godot-export-templates/templates/*" $templateDirectory -Recurse
+          if ($IsMacOS) {
+            scripts/prepare-godot-macos-export-template.ps1 `
+              -TemplateArchive (Join-Path $templateDirectory 'macos.zip') `
+              -Architecture '${{ matrix.arch }}'
+          }
+          if (-not $IsWindows) { chmod +x '.godot-editor/${{ matrix.executable }}' }
 
-      - name: Export Windows Release player
+      - name: Export desktop Release player
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force artifacts/godot-windows-release | Out-Null
-          $godot = (Resolve-Path ".godot-editor/Godot_v4.7-stable_win64_console.exe").Path
-          $output = Join-Path $env:GITHUB_WORKSPACE "artifacts/godot-windows-release/GuaGodotSample.exe"
-          & $godot --headless --path examples/godot-gdscript --export-release "Windows Desktop" $output
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
-            throw "Godot Windows Release export failed."
+          New-Item -ItemType Directory -Force artifacts/godot-desktop | Out-Null
+          $godot = (Resolve-Path '.godot-editor/${{ matrix.executable }}').Path
+          $output = Join-Path $env:GITHUB_WORKSPACE '${{ matrix.output }}'
+          & $godot --headless --path examples/godot-gdscript --export-release '${{ matrix.preset }}' $output
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) {
+            throw 'Godot ${{ matrix.rid }} Release export failed.'
           }
 
-      - name: Run external-control smoke against Windows Release
-        run: bun scripts/verify-godot-windows-release.ts artifacts/godot-windows-release/GuaGodotSample.exe
+      - name: Run external-control smoke against desktop Release
+        shell: pwsh
+        run: |
+          $executable = '${{ matrix.smoke }}'
+          if ('${{ matrix.rid }}'.StartsWith('osx-')) {
+            $macOSDirectory = Join-Path '${{ matrix.output }}' 'Contents/MacOS'
+            $candidates = @(Get-ChildItem -LiteralPath $macOSDirectory -File)
+            if ($candidates.Count -ne 1) {
+              $candidateNames = $candidates.Name -join ', '
+              throw "Expected one macOS app executable in $macOSDirectory, found $($candidates.Count): $candidateNames"
+            }
+            $executable = $candidates[0].FullName
+          }
+          bun scripts/verify-godot-desktop-release.ts $executable '${{ matrix.rid }}'
 
   godot-web-addon-contract:
     name: Godot Web Debug / Release
@@ -274,7 +329,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S . -B build/cpp -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build/cpp -DCMAKE_BUILD_TYPE=Debug -DGUA_BUILD_GODOT=OFF
 
       - name: Build
         run: |

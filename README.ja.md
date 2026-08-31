@@ -24,7 +24,7 @@
 時間依存テストのための仮想時計、RecordingとVisual比較を、同じプロトコル境界で利用できます。
 
 Guaは**Godot 4.7 GDScriptアドオン**と**Unity 6**向けのランタイム統合を
-提供します。Unityパッケージは、Windows x64 Mono環境のUI Toolkit、uGUI、
+提供します。Unityパッケージは、Windows x64、Linux x64、Intel／Apple Silicon macOSのMono環境でUI Toolkit、uGUI、
 TextMeshProランタイムUIを自動収集します。開発中はAIコーディングエージェントによる
 実装・検証に使えます。リリース版では、ゲームが許可した情報と操作だけを公開し、
 AIエージェントプレイヤーが実際にゲームを遊ぶためにも利用できます。
@@ -50,11 +50,11 @@ UIの外側にあるゲーム世界、ゲームプレイ入力、AI接続、安�
 ### Unity 6 UIテスト
 
 - UI Toolkit、uGUI、TextMeshProのランタイムUIを自動的に公開
-- Editor Play ModeまたはWindows x64 Mono Playerでシーンを操作
+- Editor Play Modeまたは4 RIDのdesktop Mono Playerでシーンを操作
 - Godotと同じSemantic APIでControlを検索・操作
 - ゲーム側アダプターと外部NUnitテストホストを分離
 - Unityテスト失敗時にログ、スクリーンショット、診断情報を保存
-- [`link1345/gua-tester`](https://github.com/link1345/gua-tester)でWindows x64 Mono PlayerをCIビルド・テスト
+- [`link1345/gua-tester`](https://github.com/link1345/gua-tester)で4 RIDのMono PlayerをCIビルド・テスト
 
 ### AIによるゲーム開発とプレイテスト
 
@@ -121,9 +121,9 @@ regressionテスト、CI、Inspectorによる調査、MCPによるAIプレイテ
 Unityパッケージはランタイムアダプターを自動起動し、UI Toolkit、uGUI、TextMeshProの
 Controlを手動登録なしで収集します。`Gua.Testing.Unity`を使うと、通常の.NETテストから
 Editor Play Modeまたはビルド済みMono Playerを起動できます。現在の対応範囲は
-Unity 6000.5以降、Windows x64、Monoです。IL2CPP、Windows以外、Unity IMGUI、
+Unity 6000.5以降、Windows x64／Linux x64／Intel Mac／Apple Silicon Mac、Monoです。IL2CPP、Unity IMGUI、
 EditorWindowの自動化には未対応です。導入・検証手順は
-[Unity 6 Windows x64](#unity-6-windows-x64)を参照してください。
+[Unity 6 desktop Mono](#unity-6-desktop-mono)を参照してください。
 
 ## GitHub Actions
 
@@ -132,7 +132,7 @@ Unityの両方に対応する公開CI部品です。Godotでは、Godot本体と
 準備して外部.NETテストを実行します。
 
 ```yaml
-- uses: link1345/gua-tester/godot@v2.1
+- uses: link1345/gua-tester/godot@v3.1
   with:
     project-path: game
     test-project: tests/GuaTester.Tests.csproj
@@ -140,21 +140,22 @@ Unityの両方に対応する公開CI部品です。Godotでは、Godot本体と
     godot-status: stable
 ```
 
-Unityでは、LinuxでWindows x64 Mono Playerをビルドし、Windows runnerへ渡して
+Unityでは、指定したdesktop Mono Playerをビルドし、対象runnerへ渡して
 `Gua.Testing.Unity`のNUnitテストを実行します。
 
 ```yaml
 jobs:
   unity:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    uses: link1345/gua-tester/.github/workflows/unity.yml@v2.1
+    uses: link1345/gua-tester/.github/workflows/unity.yml@v3.1
     with:
       project-path: game
       scene-path: Assets/Scenes/Title.unity
       test-project: tests/GuaTester.Unity.Tests.csproj
       artifact-key: game
+      platform: LinuxX64
       unity-version: auto
-      gua-tag: gua-v0.15.0
+      gua-tag: gua-v1.0.4
     secrets:
       UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
       UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -165,6 +166,7 @@ jobs:
 `gua-tag`で選ぶUPM packageと`Gua.Testing.Unity`のNuGetバージョンは揃えてください。
 fork PRにはUnity credentialsが渡らないため、未信頼forkではUnity jobをskipします。
 reusable workflowはPlayer起動前にWindows test runnerの画面解像度を1920x1080へ固定します。
+Gua v1.0.4以降には、Linux／macOS platformで必要なcross-platform UPM native assetが含まれます。
 
 ## NuGetパッケージ
 
@@ -308,7 +310,7 @@ Guaは、ゲームランタイムと自動化ツールをつなぐUIレイヤー
 - ランタイムブリッジをAIエージェントへ公開するMCPサーバー
 - 共有ネイティブランタイム上で基本的なUI Tree収集とボタンクリックを示す、実験的なGodot 4.7 C#サンプル
 - GDExtension経由で標準Control向けの全機能を提供する、推奨Godot 4.7 GDScriptアドオン
-- UI Toolkit、uGUI、TextMeshPro向けUnity 6ランタイムパッケージと、Editor Play Mode・Windows x64 Mono Player用の外部テストホスト
+- UI Toolkit、uGUI、TextMeshPro向けUnity 6ランタイムパッケージと、Editor Play Mode・desktop Mono Player用の外部テストホスト
 
 エンジン固有機能はGuaの中心ではなく、プロトコル上に構築するアダプターとして扱います。現在はGodotとUnityに対応しており、追加エンジンも同じ境界上へ実装できます。
 
@@ -357,13 +359,13 @@ NUnitサンプルは次のコマンドで実行できます。
 dotnet test examples/dotnet-nunit/GuaDotNetNUnitSample.csproj
 ```
 
-### Unity 6 Windows x64
+### Unity 6 desktop Mono
 
 `Gua.Core`、`Gua.Testing`、`Gua.Testing.Visual`、`Gua.Testing.Recording`は
 `net10.0`と`netstandard2.1`の両方を対象にします。
 既定の**.NET Standard 2.1** API Compatibility Levelを使うUnity 6では、
 native C ABIを変えずにmanaged assemblyを読み込めます。対応対象は
-Windows Editor x64とWindows Standalone x64 Mono Playerです。managed assemblyとNuGet依存assemblyを
+Windows x64、Linux x64、Intel／Apple Silicon macOSのEditorとStandalone Mono Playerです。managed assemblyとNuGet依存assemblyを
 `Assets/Plugins/Gua/Managed`へ、`gua.dll`を`Assets/Plugins/x86_64`へ配置し、
 UnityのPlugin Import SettingsでWindows EditorとWindows Standalone x86_64を
 有効にします。
@@ -371,9 +373,9 @@ UnityのPlugin Import SettingsでWindows EditorとWindows Standalone x86_64を
 Unity Package Manager向けのビルド済み`.tgz`は各GitHub Releaseへ添付されます。
 Unity Package Managerの**Add package from tarball**から導入できます。パッケージは
 自動起動し、UI Toolkit、uGUI、TextMeshProのランタイムUIを収集します。
-`Gua.Testing.Unity`はEditor Play ModeとMono Windows Playerの外部テストホストを
+`Gua.Testing.Unity`はEditor Play Modeとdesktop Mono Playerの外部テストホストを
 提供します。検証済みfixtureは[`examples/unity-smoke`](examples/unity-smoke/README.md)を
-参照してください。IL2CPP、Windows以外、IMGUI、EditorWindow UIには未対応です。
+参照してください。IL2CPP、IMGUI、EditorWindow UIには未対応です。
 
 ## Inspector
 
@@ -579,8 +581,8 @@ Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
 
-`gua-godot-addon-v1.0.0.zip`には、Debug・Release両方のWindows用GDExtension
-DLLと、Debug・Release両方のWeb用GDExtension WASMを含む単一の
+`gua-godot-addon-v1.0.0.zip`には、4 RIDとGodot Web向けのDebug・Release
+GDExtensionを含む単一の
 `addons/gua`ツリーが入ります。
 アドオン内の各ファイル、Unity WebGL用静的ライブラリ、ImGui ZIPはGitHub
 Releaseへ個別公開しません。静的ライブラリはUnity Package Managerアーカイブに

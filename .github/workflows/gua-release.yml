@@ -75,7 +75,17 @@ jobs:
 
       - name: Verify Windows Godot addon contract
         shell: pwsh
-        run: scripts/verify-godot-windows-addon.ps1 -RequireBinaries
+        run: |
+          scripts/verify-godot-windows-addon.ps1 -RequireBinaries
+          $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022" -Recurse -Filter dumpbin.exe -File | Select-Object -First 1
+          if ($null -eq $dumpbin) { throw 'dumpbin.exe was not found.' }
+          foreach ($configuration in 'debug', 'release') {
+            $binary = "examples/godot-gdscript/addons/gua/bin/gua_godot.windows.$configuration.x86_64.dll"
+            $dependencies = (& $dumpbin.FullName /dependents $binary) -join "`n"
+            if ($LASTEXITCODE -ne 0 -or $dependencies -match '(?i)gua_runtime\.dll') {
+              throw "Godot $configuration GDExtension must embed gua-runtime."
+            }
+          }
 
       - name: Build Unity native plugins
         run: cmake --build --preset windows-msvc-release --target gua gua-runtime --config Release
@@ -129,6 +139,15 @@ jobs:
             build/windows-msvc-release/native/gua-runtime/Release/gua_runtime.dll
           if-no-files-found: error
 
+      - name: Upload Windows Godot GDExtensions
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-godot-desktop-win-x64-v${{ steps.version.outputs.version }}
+          path: |
+            examples/godot-gdscript/addons/gua/bin/gua_godot.windows.debug.x86_64.dll
+            examples/godot-gdscript/addons/gua/bin/gua_godot.windows.release.x86_64.dll
+          if-no-files-found: error
+
   portable-native:
     name: Build release native / ${{ matrix.rid }}
     needs: windows-assets
@@ -138,14 +157,17 @@ jobs:
         include:
           - os: ubuntu-22.04
             rid: linux-x64
+            arch: x86_64
             core-file: build/native/native/gua-core/libgua.so
             runtime-file: build/native/native/gua-runtime/libgua_runtime.so
           - os: macos-15-intel
             rid: osx-x64
+            arch: x86_64
             core-file: build/native/native/gua-core/libgua.dylib
             runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
           - os: macos-latest
             rid: osx-arm64
+            arch: arm64
             core-file: build/native/native/gua-core/libgua.dylib
             runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
     runs-on: ${{ matrix.os }}
@@ -153,13 +175,41 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Configure release native targets
-        run: cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DGUA_BUILD_EXAMPLES=OFF -DGUA_BUILD_GODOT=OFF "-DGUA_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+      - name: Configure native and Godot targets
+        run: |
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DGUA_BUILD_EXAMPLES=OFF -DGUA_GODOT_CONFIGURATION=Release -DGUA_GODOT_ARCHITECTURE=${{ matrix.arch }} "-DGUA_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_GODOT_PLUGIN_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+          cmake -S . -B build/godot-debug -DCMAKE_BUILD_TYPE=Debug -DGUA_BUILD_EXAMPLES=OFF -DGUA_GODOT_CONFIGURATION=Debug -DGUA_GODOT_ARCHITECTURE=${{ matrix.arch }} "-DGUA_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_GODOT_PLUGIN_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
 
       - name: Build and test release native targets
         run: |
-          cmake --build build/native --parallel
+          cmake --build build/native --parallel 2
           ctest --test-dir build/native --output-on-failure
+          cmake --build build/godot-debug --target gua-godot --parallel 2
+
+      - name: Verify desktop Godot binaries
+        shell: pwsh
+        run: scripts/verify-godot-desktop-addon.ps1 -Rid '${{ matrix.rid }}' -RequireBinaries
+
+      - name: Verify Linux native closure
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          ldd '${{ matrix.core-file }}' | tee artifacts-ldd-core.txt
+          ldd '${{ matrix.runtime-file }}' | tee artifacts-ldd-runtime.txt
+          ! grep -q 'not found' artifacts-ldd-core.txt artifacts-ldd-runtime.txt
+          readelf -d '${{ matrix.core-file }}' | grep -F '$ORIGIN'
+          readelf -d '${{ matrix.runtime-file }}' | grep -F '$ORIGIN'
+          ! ldd "examples/godot-gdscript/addons/gua/bin/gua_godot.linux.release.${{ matrix.arch }}.so" | grep -F 'gua_runtime'
+
+      - name: Verify macOS native closure
+        if: startsWith(matrix.rid, 'osx-')
+        shell: bash
+        run: |
+          otool -L '${{ matrix.core-file }}'
+          otool -L '${{ matrix.runtime-file }}'
+          otool -l '${{ matrix.core-file }}' | grep -A2 LC_RPATH | grep -F '@loader_path'
+          otool -l '${{ matrix.runtime-file }}' | grep -A2 LC_RPATH | grep -F '@loader_path'
+          ! otool -L "examples/godot-gdscript/addons/gua/bin/gua_godot.macos.release.${{ matrix.arch }}.dylib" | grep -F 'gua_runtime'
 
       - name: Package release native archive
         shell: pwsh
@@ -178,6 +228,13 @@ jobs:
           path: |
             artifacts/gua-native-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}.zip
             artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+
+      - name: Upload desktop Godot GDExtensions
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-godot-desktop-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}
+          path: examples/godot-gdscript/addons/gua/bin/gua_godot.*
           if-no-files-found: error
 
   native-nuget:
@@ -287,6 +344,59 @@ jobs:
           GUA_NATIVE_DIR: ""
           GUA_RUNTIME_NATIVE_DIR: ""
 
+  unity-desktop-native:
+    name: Aggregate Unity desktop native plugins
+    needs:
+      - windows-assets
+      - portable-native
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows native plugins
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/download/windows
+
+      - name: Download portable native plugins
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-release-native-*
+          path: artifacts/download/portable
+
+      - name: Build Unity native layout and Universal 2 libraries
+        shell: pwsh
+        run: |
+          $root = 'artifacts/unity-native'
+          foreach ($rid in 'win-x64', 'linux-x64', 'osx-universal') { New-Item -ItemType Directory -Force (Join-Path $root $rid) | Out-Null }
+          foreach ($file in 'gua.dll', 'gua_runtime.dll') {
+            $match = @(Get-ChildItem artifacts/download/windows -Recurse -File -Filter $file)
+            if ($match.Count -ne 1) { throw "Expected one Windows $file, found $($match.Count)." }
+            Copy-Item $match[0].FullName (Join-Path $root 'win-x64')
+          }
+          foreach ($file in 'libgua.so', 'libgua_runtime.so') {
+            $match = @(Get-ChildItem artifacts/download/portable/gua-release-native-linux-x64 -Recurse -File -Filter $file)
+            if ($match.Count -ne 1) { throw "Expected one Linux $file, found $($match.Count)." }
+            Copy-Item $match[0].FullName (Join-Path $root 'linux-x64')
+          }
+          foreach ($file in 'libgua.dylib', 'libgua_runtime.dylib') {
+            $intel = @(Get-ChildItem artifacts/download/portable/gua-release-native-osx-x64 -Recurse -File -Filter $file)
+            $arm = @(Get-ChildItem artifacts/download/portable/gua-release-native-osx-arm64 -Recurse -File -Filter $file)
+            if ($intel.Count -ne 1 -or $arm.Count -ne 1) { throw "Expected one dylib per macOS architecture for $file." }
+            lipo -create $intel[0].FullName $arm[0].FullName -output (Join-Path $root "osx-universal/$file")
+            lipo (Join-Path $root "osx-universal/$file") -verify_arch x86_64 arm64
+            if ($LASTEXITCODE -ne 0) { throw "Universal 2 verification failed for $file." }
+          }
+
+      - name: Upload Unity desktop native plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-unity-desktop-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-native
+          if-no-files-found: error
+
   web-native:
     name: Build browser native assets
     needs: windows-assets
@@ -340,11 +450,60 @@ jobs:
           path: artifacts/web-native
           if-no-files-found: error
 
+  godot-addon:
+    name: Package cross-platform Godot addon
+    needs:
+      - windows-assets
+      - portable-native
+      - web-native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download desktop Godot GDExtensions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-godot-desktop-*
+          path: artifacts/download/desktop
+          merge-multiple: true
+
+      - name: Download Web Godot GDExtensions
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/download/web
+
+      - name: Assemble Godot addon
+        shell: pwsh
+        run: |
+          $root = 'artifacts/godot-addon'
+          $addon = Join-Path $root 'addons/gua'
+          New-Item -ItemType Directory -Force (Join-Path $addon 'bin') | Out-Null
+          foreach ($file in 'gua.gdextension', 'gua.gdextension.uid', 'gua_auto_adapter.gd', 'gua_webmcp_bridge.gd', 'plugin.cfg', 'plugin.gd', 'plugin.gd.uid') {
+            Copy-Item "examples/godot-gdscript/addons/gua/$file" $addon
+          }
+          foreach ($pattern in 'gua_godot.windows.*', 'gua_godot.linux.*', 'gua_godot.macos.*', 'gua_godot.web.*') {
+            $files = @(Get-ChildItem artifacts/download -Recurse -File -Filter $pattern)
+            foreach ($file in $files) { Copy-Item $file.FullName (Join-Path $addon 'bin') -Force }
+          }
+          scripts/verify-godot-desktop-addon.ps1 -AddonDirectory $addon -Rid all -RequireBinaries
+          scripts/verify-godot-web-addon.ps1 -AddonDirectory $addon -RequireBinaries
+          Compress-Archive -Path (Join-Path $root 'addons') -DestinationPath "artifacts/gua-godot-addon-v${{ needs.windows-assets.outputs.version }}.zip" -CompressionLevel Optimal
+
+      - name: Upload Godot addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-godot-addon-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/gua-godot-addon-v${{ needs.windows-assets.outputs.version }}.zip
+          if-no-files-found: error
+
   unity-package:
     name: Build Unity UPM package
     needs:
       - windows-assets
       - web-native
+      - unity-desktop-native
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -359,7 +518,7 @@ jobs:
       - name: Download Unity native plugins
         uses: actions/download-artifact@v4
         with:
-          name: gua-unity-native-v${{ needs.windows-assets.outputs.version }}
+          name: gua-unity-desktop-native-v${{ needs.windows-assets.outputs.version }}
           path: artifacts/unity-native
 
       - name: Download Web native plugins
@@ -370,7 +529,7 @@ jobs:
 
       - name: Prepare Unity project package dependencies
         shell: pwsh
-        run: scripts/prepare-unity-package-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -NativeDirectory artifacts/unity-native
+        run: scripts/prepare-unity-package-ci.ps1 -Version '${{ needs.windows-assets.outputs.version }}' -NativeAssetsRoot artifacts/unity-native
 
       - name: Verify Unity CI credentials
         shell: pwsh
@@ -409,6 +568,226 @@ jobs:
           path: artifacts/unity-release/com.link1345.gua-${{ needs.windows-assets.outputs.version }}.tgz
           if-no-files-found: error
 
+  unity-player-build:
+    name: Build Unity ${{ matrix.rid }} Player
+    needs:
+      - windows-assets
+      - unity-package
+    runs-on: ubuntu-latest
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            platform: WindowsX64
+            target: StandaloneWindows64
+            output: /github/workspace/artifacts/unity-player/GuaUnitySmoke.exe
+          - rid: linux-x64
+            platform: LinuxX64
+            target: StandaloneLinux64
+            output: /github/workspace/artifacts/unity-player/GuaUnitySmoke
+          - rid: osx-x64
+            platform: MacOSX64
+            target: StandaloneOSX
+            output: /github/workspace/artifacts/unity-player/GuaUnitySmoke.app
+          - rid: osx-arm64
+            platform: MacOSArm64
+            target: StandaloneOSX
+            output: /github/workspace/artifacts/unity-player/GuaUnitySmoke.app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-upm
+      - name: Install released UPM package into fixture
+        shell: pwsh
+        run: |
+          $target = 'examples/unity-smoke/Packages/com.link1345.gua'
+          New-Item -ItemType Directory -Force $target | Out-Null
+          tar -xzf "artifacts/unity-upm/com.link1345.gua-${{ needs.windows-assets.outputs.version }}.tgz" -C artifacts/unity-upm
+          Copy-Item artifacts/unity-upm/package/* $target -Recurse -Force
+          $manifestPath = 'examples/unity-smoke/Packages/manifest.json'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.dependencies.PSObject.Properties.Remove('com.link1345.gua')
+          $manifest | ConvertTo-Json -Depth 100 | Set-Content $manifestPath -Encoding utf8NoBOM
+      - name: Build Unity Mono Player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.5.3f1
+          projectPath: examples/unity-smoke
+          targetPlatform: ${{ matrix.target }}
+          buildMethod: Gua.Unity.Editor.GuaUnityEditorCommands.BuildPlayer
+          customParameters: -guaScene Assets/Scenes/GuaUnityFixture.unity -guaOutput "${{ matrix.output }}" -guaPlatform "${{ matrix.platform }}"
+          allowDirtyBuild: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gua-unity-player-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-player
+          if-no-files-found: error
+
+  unity-editor-smoke:
+    name: Smoke Unity Editor / ${{ matrix.rid }}
+    needs:
+      - windows-assets
+      - unity-package
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-latest
+            architecture: x86_64
+            target: StandaloneWindows64
+            kind: windows
+          - rid: linux-x64
+            runner: ubuntu-22.04
+            architecture: x86_64
+            target: StandaloneLinux64
+            kind: linux
+          - rid: osx-x64
+            runner: macos-15-intel
+            architecture: x86_64
+            target: StandaloneOSX
+            kind: macos
+          - rid: osx-arm64
+            runner: macos-latest
+            architecture: arm64
+            target: StandaloneOSX
+            kind: macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Unity Editor for this runner
+        id: unity-setup
+        uses: buildalon/unity-setup@v2
+        with:
+          version-file: examples/unity-smoke/ProjectSettings/ProjectVersion.txt
+          unity-version: 6000.5.3f1
+          architecture: ${{ matrix.architecture }}
+          build-targets: ${{ matrix.target }}
+          cache-installation: true
+      - name: Install Unity license
+        shell: pwsh
+        env:
+          UNITY_LICENSE_VALUE: ${{ secrets.UNITY_LICENSE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:UNITY_LICENSE_VALUE)) { throw 'UNITY_LICENSE is required.' }
+          if ('${{ matrix.kind }}' -eq 'windows') {
+            $directory = Join-Path $env:ProgramData 'Unity'
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            Set-Content -LiteralPath (Join-Path $directory 'Unity_lic.ulf') -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
+          } elseif ('${{ matrix.kind }}' -eq 'macos') {
+            $temporary = Join-Path $env:RUNNER_TEMP 'Unity_lic.ulf'
+            Set-Content -LiteralPath $temporary -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
+            sudo mkdir -p '/Library/Application Support/Unity'
+            sudo cp $temporary '/Library/Application Support/Unity/Unity_lic.ulf'
+          } else {
+            $directory = Join-Path $HOME '.local/share/unity3d/Unity'
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            Set-Content -LiteralPath (Join-Path $directory 'Unity_lic.ulf') -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-upm
+      - name: Install released UPM package into fixture
+        shell: pwsh
+        run: |
+          $target = 'examples/unity-smoke/Packages/com.link1345.gua'
+          New-Item -ItemType Directory -Force $target | Out-Null
+          tar -xzf "artifacts/unity-upm/com.link1345.gua-${{ needs.windows-assets.outputs.version }}.tgz" -C artifacts/unity-upm
+          Copy-Item artifacts/unity-upm/package/* $target -Recurse -Force
+          $manifestPath = 'examples/unity-smoke/Packages/manifest.json'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.dependencies.PSObject.Properties.Remove('com.link1345.gua')
+          $manifest | ConvertTo-Json -Depth 100 | Set-Content $manifestPath -Encoding utf8NoBOM
+      - name: Run Editor Play Mode external smoke
+        if: matrix.kind != 'linux'
+        shell: pwsh
+        env:
+          UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
+          GUA_UNITY_SCENE: examples/unity-smoke/Assets/Scenes/GuaUnityFixture.unity
+        run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
+      - name: Run Editor Play Mode external smoke with Xvfb
+        if: matrix.kind == 'linux'
+        shell: bash
+        env:
+          UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
+          GUA_UNITY_SCENE: examples/unity-smoke/Assets/Scenes/GuaUnityFixture.unity
+        run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
+
+  unity-player-smoke:
+    name: Smoke Unity ${{ matrix.rid }} Player
+    needs:
+      - windows-assets
+      - unity-player-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-latest
+            kind: windows
+          - rid: linux-x64
+            runner: ubuntu-22.04
+            kind: linux
+          - rid: osx-x64
+            runner: macos-15-intel
+            kind: macos
+          - rid: osx-arm64
+            runner: macos-latest
+            kind: macos
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-player-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/unity-player
+      - name: Locate Player
+        id: player
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path artifacts/unity-player).Path
+          $player = switch ('${{ matrix.kind }}') {
+            'windows' { Get-ChildItem $root -Recurse -Filter GuaUnitySmoke.exe -File | Select-Object -First 1 }
+            'linux' { Get-ChildItem $root -Recurse -Filter GuaUnitySmoke -File | Select-Object -First 1 }
+            default { Get-ChildItem $root -Recurse -Filter GuaUnitySmoke.app -Directory | Select-Object -First 1 }
+          }
+          if ($null -eq $player) { throw 'Unity Player artifact was not found.' }
+          if ('${{ matrix.kind }}' -ne 'windows') {
+            $exe = if ('${{ matrix.kind }}' -eq 'linux') { $player.FullName } else { Join-Path $player.FullName 'Contents/MacOS/GuaUnitySmoke' }
+            chmod +x $exe
+          }
+          "path=$($player.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+      - name: Run rendered Player integration tests
+        if: matrix.kind != 'linux'
+        shell: pwsh
+        env:
+          GUA_UNITY_PLAYER: ${{ steps.player.outputs.path }}
+          GUA_UNITY_ARTIFACT_PLAYER: ${{ steps.player.outputs.path }}
+        run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release
+      - name: Run rendered Player integration tests with Xvfb
+        if: matrix.kind == 'linux'
+        shell: bash
+        env:
+          GUA_UNITY_PLAYER: ${{ steps.player.outputs.path }}
+          GUA_UNITY_ARTIFACT_PLAYER: ${{ steps.player.outputs.path }}
+        run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release
+
   publish:
     name: Publish Gua release
     needs:
@@ -416,7 +795,9 @@ jobs:
       - portable-native
       - native-package-smoke
       - unity-package
-      - web-native
+      - unity-player-smoke
+      - unity-editor-smoke
+      - godot-addon
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -434,11 +815,11 @@ jobs:
           name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
           path: release-assets/unity
 
-      - name: Download Web native assets
+      - name: Download cross-platform Godot addon
         uses: actions/download-artifact@v4
         with:
-          name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
-          path: release-assets/web
+          name: gua-godot-addon-v${{ needs.windows-assets.outputs.version }}
+          path: release-assets/godot
 
       - name: Download portable native archives
         uses: actions/download-artifact@v4
@@ -454,7 +835,7 @@ jobs:
             -Version '${{ needs.windows-assets.outputs.version }}' `
             -WindowsAssetsDirectory release-assets `
             -NativeAssetsDirectory release-assets/native `
-            -WebNativeDirectory release-assets/web `
+            -GodotAddonDirectory release-assets/godot `
             -UnityPackageDirectory release-assets/unity `
             -OutputDirectory publish-assets
 
@@ -466,6 +847,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains native runtime archives for Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS; the Windows Inspector installers; one Godot addon archive with Windows and Web GDExtensions; and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
+            This release contains native runtime archives for Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS; the Windows Inspector installers; one Godot addon archive with desktop and Web GDExtensions; and the Unity Package Manager archive for Unity 6000.5+ Mono on Windows, Linux, and Intel/Apple Silicon macOS plus experimental WebGL runtimes.
           files: publish-assets/*
           fail_on_unmatched_files: true

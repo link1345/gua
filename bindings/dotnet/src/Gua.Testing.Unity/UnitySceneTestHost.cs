@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Gua.Core;
 using Gua.Testing;
 
@@ -27,7 +28,7 @@ public sealed class UnitySceneTestHost : IDisposable, IAsyncDisposable
     public static UnitySceneTestHost BuildAndLoadPlayer(string scenePath, UnitySceneTestHostOptions? options = null, bool rendered = false)
     {
         options ??= UnitySceneTestHostOptions.Default;
-        var player = UnityPlayerBuilder.Build(scenePath, new UnityPlayerBuildOptions { UnityExecutablePath = options.UnityExecutablePath, ProjectPath = options.ProjectPath });
+        var player = UnityPlayerBuilder.Build(scenePath, new UnityPlayerBuildOptions { UnityExecutablePath = options.UnityExecutablePath, ProjectPath = options.ProjectPath, Platform = options.Platform });
         return StartPlayer(player, !rendered, options);
     }
     public static UnitySceneTestHost LoadEditor(string scenePath, UnitySceneTestHostOptions? options = null)
@@ -41,7 +42,7 @@ public sealed class UnitySceneTestHost : IDisposable, IAsyncDisposable
     }
     private static UnitySceneTestHost StartPlayer(string playerPath, bool headless, UnitySceneTestHostOptions options)
     {
-        var player = Path.GetFullPath(playerPath); if (!File.Exists(player)) throw new FileNotFoundException("Unity player executable was not found.", player);
+        var player = UnityPaths.ResolvePlayerExecutable(playerPath);
         var bridge = Bridge(options); var log = Path.Combine(Path.GetTempPath(), $"gua-unity-player-{Guid.NewGuid():N}.log");
         var args = new List<string>(); if (headless) { args.Add("-batchmode"); args.Add("-nographics"); } args.Add("-logFile"); args.Add(log); args.AddRange(options.AdditionalArguments);
         return Start(UnityPaths.StartInfo(player, Path.GetDirectoryName(player)!, args, Environment(options, bridge)), options, bridge, log, $"Unity player '{player}'");
@@ -97,7 +98,20 @@ public sealed class UnitySceneTestHost : IDisposable, IAsyncDisposable
     private static string Bridge(UnitySceneTestHostOptions options) => options.UseAvailableBridgePort ? $"ws://127.0.0.1:{ReservePort()}" : options.BridgeUrl;
     private static int ReservePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); try { return ((IPEndPoint)listener.LocalEndpoint).Port; } finally { listener.Stop(); } }
     private static string Read(string path) { try { return File.Exists(path) ? File.ReadAllText(path) : ""; } catch { return ""; } }
-    private static void TryKill(Process process) { try { if (!process.HasExited) process.Kill(); } catch { } }
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (process.HasExited) return;
+#if NETSTANDARD2_1
+            process.Kill();
+#else
+            process.Kill(entireProcessTree: true);
+#endif
+            process.WaitForExit(2000);
+        }
+        catch { }
+    }
 }
 
 internal static class UnityPaths
@@ -114,11 +128,101 @@ internal static class UnityPaths
     }
     internal static string ResolveEditor(string? configured)
     {
-        if (!string.IsNullOrWhiteSpace(configured)) return Path.GetFullPath(configured);
-        var environment = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"); if (!string.IsNullOrWhiteSpace(environment)) return Path.GetFullPath(environment);
-        var root = @"C:\Program Files\Unity\Hub\Editor";
-        var candidate = Directory.Exists(root) ? Directory.EnumerateDirectories(root).OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase).Select(path => Path.Combine(path, "Editor", "Unity.exe")).FirstOrDefault(File.Exists) : null;
-        return candidate ?? throw new FileNotFoundException("Could not locate Unity.exe. Set UNITY_EXECUTABLE or UnityExecutablePath.");
+        if (!string.IsNullOrWhiteSpace(configured)) return ResolveEditorCandidate(configured);
+        var environment = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"); if (!string.IsNullOrWhiteSpace(environment)) return ResolveEditorCandidate(environment);
+        var roots = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Unity", "Hub", "Editor") }
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? new[] { "/Applications/Unity/Hub/Editor", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Applications", "Unity", "Hub", "Editor") }
+                : new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Unity", "Hub", "Editor"), "/opt/unity/editors" };
+        foreach (var root in roots.Where(Directory.Exists))
+        {
+            var candidate = Directory.EnumerateDirectories(root).OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(EditorExecutable).FirstOrDefault(File.Exists);
+            if (candidate != null) return candidate;
+        }
+        throw new FileNotFoundException("Could not locate the Unity Editor. Set UNITY_EXECUTABLE or UnityExecutablePath.");
+    }
+
+    internal static UnityStandalonePlatform ResolvePlatform(UnityStandalonePlatform platform)
+    {
+        if (platform != UnityStandalonePlatform.Auto) return platform;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return UnityStandalonePlatform.WindowsX64;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return UnityStandalonePlatform.LinuxX64;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? UnityStandalonePlatform.MacOSArm64 : UnityStandalonePlatform.MacOSX64;
+        throw new PlatformNotSupportedException("Unity standalone tests support Windows x64, Linux x64, and macOS x64/arm64.");
+    }
+
+    internal static string PlatformArgument(UnityStandalonePlatform platform) => platform switch
+    {
+        UnityStandalonePlatform.WindowsX64 => "windows-x64",
+        UnityStandalonePlatform.LinuxX64 => "linux-x64",
+        UnityStandalonePlatform.MacOSX64 => "macos-x64",
+        UnityStandalonePlatform.MacOSArm64 => "macos-arm64",
+        UnityStandalonePlatform.MacOSUniversal => "macos-universal",
+        _ => throw new ArgumentOutOfRangeException(nameof(platform)),
+    };
+
+    internal static string DefaultPlayerOutput(UnityStandalonePlatform platform)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "gua-unity-player", Guid.NewGuid().ToString("N"));
+        return platform switch
+        {
+            UnityStandalonePlatform.WindowsX64 => Path.Combine(root, "GuaUnityFixture.exe"),
+            UnityStandalonePlatform.LinuxX64 => Path.Combine(root, "GuaUnityFixture"),
+            UnityStandalonePlatform.MacOSX64 or UnityStandalonePlatform.MacOSArm64 or UnityStandalonePlatform.MacOSUniversal => Path.Combine(root, "GuaUnityFixture.app"),
+            _ => throw new ArgumentOutOfRangeException(nameof(platform)),
+        };
+    }
+
+    internal static string ResolvePlayerExecutable(string playerPath)
+    {
+        var full = Path.GetFullPath(playerPath);
+        if (File.Exists(full)) return EnsureUnixExecutable(full);
+        if (Directory.Exists(full) && full.EndsWith(".app", StringComparison.OrdinalIgnoreCase))
+        {
+            var directory = Path.Combine(full, "Contents", "MacOS");
+            var executable = Directory.Exists(directory) ? Directory.EnumerateFiles(directory).FirstOrDefault() : null;
+            if (executable != null) return EnsureUnixExecutable(executable);
+        }
+        throw new FileNotFoundException("Unity player executable or macOS application bundle was not found.", full);
+    }
+
+    private static string EditorExecutable(string versionDirectory)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return Path.Combine(versionDirectory, "Editor", "Unity.exe");
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return Path.Combine(versionDirectory, "Unity.app", "Contents", "MacOS", "Unity");
+        return Path.Combine(versionDirectory, "Editor", "Unity");
+    }
+    private static string ResolveEditorCandidate(string candidate)
+    {
+        var full = Path.GetFullPath(candidate);
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && Directory.Exists(full) && full.EndsWith(".app", StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(full, "Contents", "MacOS", "Unity");
+        return full;
+    }
+
+    private static string EnsureUnixExecutable(string path)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+#if NETSTANDARD2_1
+            using var chmod = Process.Start(new ProcessStartInfo
+            {
+                FileName = "/bin/chmod",
+                Arguments = "u+x " + Quote(path),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }) ?? throw new InvalidOperationException($"Failed to start chmod for Unity player '{path}'.");
+            chmod.WaitForExit();
+            if (chmod.ExitCode != 0) throw new InvalidOperationException($"chmod failed for Unity player '{path}' with exit code {chmod.ExitCode}.");
+#else
+            var mode = File.GetUnixFileMode(path);
+            if ((mode & UnixFileMode.UserExecute) == 0) File.SetUnixFileMode(path, mode | UnixFileMode.UserExecute);
+#endif
+        }
+        return path;
     }
     internal static string ResolveProject(string scenePath, string? configured)
     {

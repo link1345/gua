@@ -27,15 +27,15 @@ cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release --config Release --target gua gua-runtime
 
 $plugins = Join-Path $root "examples\unity-smoke\Assets\Plugins\Gua"
-New-Item -ItemType Directory -Force (Join-Path $plugins "Managed"), (Join-Path $plugins "x86_64") | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $plugins "Managed"), (Join-Path $plugins "Windows\x86_64") | Out-Null
 Copy-Item (Join-Path $root "bindings\dotnet\src\Gua.Core\bin\$Configuration\netstandard2.1\Gua.Core.dll") (Join-Path $plugins "Managed") -Force
 Copy-Item (Join-Path $root "bindings\dotnet\src\Gua.Runtime\bin\$Configuration\netstandard2.1\Gua.Runtime.dll") (Join-Path $plugins "Managed") -Force
 & (Join-Path $PSScriptRoot "copy-unity-managed-closure.ps1") `
     -AssetsFile (Join-Path $root "bindings/dotnet/src/Gua.Runtime/obj/project.assets.json") `
     -TargetFramework "netstandard2.1" `
     -Destination (Join-Path $plugins "Managed")
-Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-core\Release\gua.dll") (Join-Path $plugins "x86_64") -Force
-Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-runtime\Release\gua_runtime.dll") (Join-Path $plugins "x86_64") -Force
+Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-core\Release\gua.dll") (Join-Path $plugins "Windows\x86_64") -Force
+Copy-Item (Join-Path $root "build\windows-msvc-release\native\gua-runtime\Release\gua_runtime.dll") (Join-Path $plugins "Windows\x86_64") -Force
 
 $project = Join-Path $root "examples\unity-smoke"
 $log = Join-Path $root "artifacts\unity-compile.log"
@@ -58,15 +58,15 @@ if ($unityProcess.ExitCode -ne 0) { throw "Unity package compilation failed with
 
 $artifact = Join-Path $root "artifacts\unity\com.link1345.gua"
 if (Test-Path $artifact) { Remove-Item -Recurse -Force $artifact }
-New-Item -ItemType Directory -Force (Join-Path $artifact "Runtime\Plugins\Managed"), (Join-Path $artifact "Runtime\Plugins\x86_64"), (Join-Path $artifact "Editor"), (Join-Path $artifact "Documentation~") | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $artifact "Runtime\Plugins\Managed"), (Join-Path $artifact "Runtime\Plugins\Windows\x86_64"), (Join-Path $artifact "Editor"), (Join-Path $artifact "Documentation~") | Out-Null
 Copy-Item (Join-Path $root "bindings\unity\package.json") $artifact
 Copy-Item (Join-Path $root "bindings\unity\Documentation~\index.md") (Join-Path $artifact "Documentation~")
 Copy-Item (Join-Path $root "bindings\unity\Samples~") $artifact -Recurse
 Copy-Item (Join-Path $root "bindings\unity\Runtime\link.xml") (Join-Path $artifact "Runtime")
 Copy-Item (Join-Path $plugins "Managed\*.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
-Copy-Item (Join-Path $plugins "x86_64\*.dll") (Join-Path $artifact "Runtime\Plugins\x86_64")
-Copy-Item (Join-Path $root "scripts\unity-meta\gua.dll.meta") (Join-Path $artifact "Runtime\Plugins\x86_64")
-Copy-Item (Join-Path $root "scripts\unity-meta\gua_runtime.dll.meta") (Join-Path $artifact "Runtime\Plugins\x86_64")
+Copy-Item (Join-Path $plugins "Windows\x86_64\*.dll") (Join-Path $artifact "Runtime\Plugins\Windows\x86_64")
+Copy-Item (Join-Path $root "scripts\unity-meta\gua.dll.meta") (Join-Path $artifact "Runtime\Plugins\Windows\x86_64")
+Copy-Item (Join-Path $root "scripts\unity-meta\gua_runtime.dll.meta") (Join-Path $artifact "Runtime\Plugins\Windows\x86_64")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.Bootstrap.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
 Copy-Item (Join-Path $project "Library\ScriptAssemblies\Gua.Unity.TMP.dll") (Join-Path $artifact "Runtime\Plugins\Managed")
