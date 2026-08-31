@@ -127,6 +127,7 @@ jobs:
           dotnet build bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --framework net10.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
+          dotnet build bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --framework net8.0 --no-restore -p:Version=${{ steps.version.outputs.version }}
           dotnet build bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release --framework netstandard2.1 --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Build Visual and Recording target frameworks
