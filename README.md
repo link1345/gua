@@ -140,7 +140,7 @@ for installation and verification details.
 ## NuGet Packages
 
 - **Gua.Core:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Core)](https://www.nuget.org/packages/Gua.Core) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Core)<br>
-  P/Invoke bindings for using the Gua C ABI runtime from .NET, including the Windows x64 native runtime.
+  P/Invoke bindings for using the Gua C ABI runtime from .NET, including native assets for Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS.
 - **Gua.Testing:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing)](https://www.nuget.org/packages/Gua.Testing) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing)<br>
   Adds Gua locators, waits, assertions, and adapter test loops to regular .NET tests.
 - **Gua.Testing.Godot:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Godot)](https://www.nuget.org/packages/Gua.Testing.Godot) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Godot)<br>
@@ -148,7 +148,7 @@ for installation and verification details.
 - **Gua.Testing.Unity:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Unity)](https://www.nuget.org/packages/Gua.Testing.Unity) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Unity)<br>
   Starts a Unity process and provides helpers for controlling and verifying a running scene through the Gua bridge.
 - **Gua.Runtime:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Runtime)](https://www.nuget.org/packages/Gua.Runtime) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Runtime)<br>
-  Shared managed wrapper for authors of engine adapters. Use it to publish semantic frames, consume actions, complete screenshot requests, and host the Inspector bridge without duplicating P/Invoke code. Application test projects normally use an engine package instead.
+  Shared managed wrapper and native runtime for authors of engine adapters on the same four desktop RIDs. Use it to publish semantic frames, consume actions, complete screenshot requests, and host the Inspector bridge without duplicating P/Invoke code. Application test projects normally use an engine package instead.
 - **Gua.Testing.Visual:** [![NuGet Version](https://img.shields.io/nuget/v/Gua.Testing.Visual)](https://www.nuget.org/packages/Gua.Testing.Visual) ![NuGet Downloads](https://img.shields.io/nuget/dt/Gua.Testing.Visual)<br>
   Adds opt-in PNG baseline comparison for rendering regressions that semantic assertions cannot detect, such as clipping, misplaced controls, incorrect assets, and unexpected overlays. Failures retain expected, actual, diff, and machine-readable comparison artifacts.
   `gua-tester` can combine those artifacts with its prebuilt Astro viewer for workflow artifacts and GitHub Pages.
@@ -462,17 +462,24 @@ cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug
 ```
 
-The portable boundary remains the C ABI. macOS and iOS should use Apple Clang,
-and Android should use Android NDK Clang when those targets are added.
+The native core, WebSocket bridge, runtime shared library, and native bridge
+example also build on Linux with GCC or Clang and on Intel and Apple Silicon
+macOS with Apple Clang. Godot and Unity native adapter support remains limited
+to the platforms described in their integration sections. iOS and Android are
+not currently supported targets.
 
 ## .NET Testing
 
-The .NET packages are published on NuGet and can also be packed locally:
+The .NET packages are published on NuGet and can also be packed locally. To
+pack `Gua.Core` or `Gua.Runtime` with native assets, first stage all four RID
+directories described in their package READMEs and pass the absolute staging
+path as `GuaNativeAssetsRoot`:
 
 ```powershell
-dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release
+$nativeAssets = "C:\absolute\path\to\native-assets"
+dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing/Gua.Testing.csproj --configuration Release
-dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release
+dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release -p:GuaNativeAssetsRoot=$nativeAssets
 dotnet pack bindings/dotnet/src/Gua.Testing.Unity/Gua.Testing.Unity.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Godot/Gua.Testing.Godot.csproj --configuration Release
 dotnet pack bindings/dotnet/src/Gua.Testing.Visual/Gua.Testing.Visual.csproj --configuration Release
@@ -488,11 +495,12 @@ testing package:
 ```
 
 `Gua.Core` is also delivered as a NuGet package and `Gua.Testing` depends on the
-matching version. The Windows x64 native runtime is included in `Gua.Core` under
-`runtimes/win-x64/native/gua.dll`, so a normal package restore/build copies it to
-the consuming app or test output. `GUA_NATIVE_DIR` remains as an override for
-locally built native runtimes. A missing or wrong architecture native library is
-reported with the exact checked paths.
+matching version. Native assets are included for `win-x64`, `linux-x64`,
+`osx-x64`, and `osx-arm64`, so a normal package restore/build copies the correct
+library to the consuming app or test output. `Gua.Runtime` carries the matching
+Inspector bridge runtime for those RIDs. `GUA_NATIVE_DIR` and
+`GUA_RUNTIME_NATIVE_DIR` remain local-build overrides. A missing or wrong
+architecture native library is reported with the exact checked paths.
 
 Run the standalone testing sample:
 
@@ -721,6 +729,10 @@ example):
 ```text
 gua-godot-addon-v1.0.0.zip
 com.link1345.gua-1.0.0.tgz
+gua-native-win-x64-v1.0.0.zip
+gua-native-linux-x64-v1.0.0.zip
+gua-native-osx-x64-v1.0.0.zip
+gua-native-osx-arm64-v1.0.0.zip
 Gua.Inspector_<inspector-version>_x64-setup.exe
 Gua.Inspector_<inspector-version>_x64_en-US.msi
 ```
@@ -730,6 +742,8 @@ Release Windows GDExtension DLLs and both Debug and Release Web GDExtension WASM
 inside that addon, Unity WebGL static libraries, and an ImGui ZIP are not
 published as separate GitHub Release assets; the static libraries are already
 included in the Unity Package Manager archive.
+Each `gua-native-<rid>-v1.0.0.zip` contains the `Gua.Core` and `Gua.Runtime`
+shared libraries for that RID plus `LICENSE`.
 
 The MCP workflow uses npm trusted publishing through GitHub Actions OIDC. The
 `gua-world-tools`, `gua-webmcp`, and `gui-mcp` packages must each be configured

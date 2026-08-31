@@ -3,14 +3,21 @@
 This sample exposes a small `gua::Context` runtime over the Inspector WebSocket
 command protocol.
 
-It is intentionally Windows-only for now because the sample WebSocket server uses
-WinSock directly. The protocol shape is the same as `packages/bridge-ws`.
+It uses the shared `gua::ws::BridgeServer` transport and builds on Windows,
+Linux, and macOS. The protocol shape is the same as `packages/bridge-ws`.
 
 Build:
 
 ```powershell
 cmake --preset windows-msvc-debug
 cmake --build --preset windows-msvc-debug --target gua-native-bridge-example
+```
+
+On Linux or macOS:
+
+```sh
+cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Debug -DGUA_BUILD_GODOT=OFF
+cmake --build build/native --target gua-native-bridge-example --parallel
 ```
 
 Run:

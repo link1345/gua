@@ -5,7 +5,7 @@ add_executable(gua-native-bridge-example
 target_link_libraries(gua-native-bridge-example
     PRIVATE
         gua::core
-        ws2_32
+        gua::ws-bridge
 )
 
 target_compile_features(gua-native-bridge-example PRIVATE cxx_std_20)

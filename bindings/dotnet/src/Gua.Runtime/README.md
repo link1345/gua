@@ -23,7 +23,16 @@ Adapter callback failures are reported by `CallbackFailed` after the scheduler
 isolates the failure and continues the remaining due callbacks and tick
 notification.
 
-The native `gua_runtime` library must be deployed for the current platform.
+The NuGet package deploys `gua_runtime.dll`, `libgua_runtime.so`, or
+`libgua_runtime.dylib` from its `win-x64`, `linux-x64`, `osx-x64`, and
+`osx-arm64` native assets. `GUA_RUNTIME_NATIVE_DIR` remains available for local
+build overrides.
+
+Local distributable packing requires an absolute `GuaNativeAssetsRoot` whose
+four RID directories contain `gua_runtime.dll`, `libgua_runtime.so`, or
+`libgua_runtime.dylib` as appropriate. Packing fails when that root is omitted
+without the legacy Windows Release DLL, or when any required RID asset is
+missing.
 
 Screenshot adapters should use `TryCompleteScreenshot`. It returns `false`
 when a timeout, cancellation, or context reset has already invalidated the

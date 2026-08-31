@@ -6,6 +6,9 @@ param(
     [string]$WindowsAssetsDirectory,
 
     [Parameter(Mandatory = $true)]
+    [string]$NativeAssetsDirectory,
+
+    [Parameter(Mandatory = $true)]
     [string]$WebNativeDirectory,
 
     [Parameter(Mandatory = $true)]
@@ -80,6 +83,13 @@ try {
     Compress-Archive -Path (Join-Path $windowsAddonRoot "addons") -DestinationPath $godotArchive -CompressionLevel Optimal
 
     Copy-Item -LiteralPath $unityArchive -Destination $OutputDirectory
+
+    foreach ($rid in "linux-x64", "osx-x64", "osx-arm64") {
+        $nativeArchive = Require-File (Join-Path $NativeAssetsDirectory "gua-native-$rid-v$Version.zip")
+        Copy-Item -LiteralPath $nativeArchive -Destination $OutputDirectory
+    }
+    $windowsNativeArchive = Require-File (Join-Path $WindowsAssetsDirectory "gua-native-win-x64-v$Version.zip")
+    Copy-Item -LiteralPath $windowsNativeArchive -Destination $OutputDirectory
 
     $inspectorFiles = @(
         Get-ChildItem -LiteralPath (Join-Path $WindowsAssetsDirectory "inspector") -Recurse -File |

@@ -103,6 +103,13 @@ jobs:
 
           Compress-Archive -Path (Join-Path $godotRoot "addons") -DestinationPath (Join-Path $assets "gua-godot-plugin-windows-v$version.zip") -CompressionLevel Optimal
 
+          $nativeRoot = Join-Path $env:RUNNER_TEMP "gua-native-win-x64"
+          New-Item -ItemType Directory -Force $nativeRoot | Out-Null
+          Copy-Item "build/windows-msvc-release/native/gua-core/Release/gua.dll" $nativeRoot
+          Copy-Item "build/windows-msvc-release/native/gua-runtime/Release/gua_runtime.dll" $nativeRoot
+          Copy-Item "LICENSE" $nativeRoot
+          Compress-Archive -Path (Join-Path $nativeRoot "*") -DestinationPath (Join-Path $assets "gua-native-win-x64-v$version.zip") -CompressionLevel Optimal
+
           Copy-Item "packages/inspector/src-tauri/target/release/bundle" (Join-Path $assets "inspector") -Recurse
           "assets=$assets" >> $env:GITHUB_OUTPUT
 
@@ -121,6 +128,164 @@ jobs:
             build/windows-msvc-release/native/gua-core/Release/gua.dll
             build/windows-msvc-release/native/gua-runtime/Release/gua_runtime.dll
           if-no-files-found: error
+
+  portable-native:
+    name: Build release native / ${{ matrix.rid }}
+    needs: windows-assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            rid: linux-x64
+            core-file: build/native/native/gua-core/libgua.so
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.so
+          - os: macos-15-intel
+            rid: osx-x64
+            core-file: build/native/native/gua-core/libgua.dylib
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
+          - os: macos-latest
+            rid: osx-arm64
+            core-file: build/native/native/gua-core/libgua.dylib
+            runtime-file: build/native/native/gua-runtime/libgua_runtime.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure release native targets
+        run: cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DGUA_BUILD_EXAMPLES=OFF -DGUA_BUILD_GODOT=OFF "-DGUA_VERSION=${{ needs.windows-assets.outputs.version }}" "-DGUA_BUILD_ID=${{ github.sha }}"
+
+      - name: Build and test release native targets
+        run: |
+          cmake --build build/native --parallel
+          ctest --test-dir build/native --output-on-failure
+
+      - name: Package release native archive
+        shell: pwsh
+        run: |
+          $stage = "artifacts/native/${{ matrix.rid }}"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "${{ matrix.core-file }}" $stage
+          Copy-Item "${{ matrix.runtime-file }}" $stage
+          Copy-Item LICENSE $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "artifacts/gua-native-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}.zip" -CompressionLevel Optimal
+
+      - name: Upload release native archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-release-native-${{ matrix.rid }}
+          path: |
+            artifacts/gua-native-${{ matrix.rid }}-v${{ needs.windows-assets.outputs.version }}.zip
+            artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+
+  native-nuget:
+    name: Pack release native NuGet packages
+    needs:
+      - windows-assets
+      - portable-native
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.windows-assets.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Windows native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-unity-native-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/download/windows
+
+      - name: Download portable native libraries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-release-native-*
+          path: artifacts/download/portable
+
+      - name: Normalize native asset layout
+        shell: pwsh
+        run: |
+          $contracts = @(
+            @{ Rid = 'win-x64'; Root = 'artifacts/download/windows'; Core = 'gua.dll'; Runtime = 'gua_runtime.dll' },
+            @{ Rid = 'linux-x64'; Root = 'artifacts/download/portable/gua-release-native-linux-x64'; Core = 'libgua.so'; Runtime = 'libgua_runtime.so' },
+            @{ Rid = 'osx-x64'; Root = 'artifacts/download/portable/gua-release-native-osx-x64'; Core = 'libgua.dylib'; Runtime = 'libgua_runtime.dylib' },
+            @{ Rid = 'osx-arm64'; Root = 'artifacts/download/portable/gua-release-native-osx-arm64'; Core = 'libgua.dylib'; Runtime = 'libgua_runtime.dylib' }
+          )
+
+          foreach ($contract in $contracts) {
+            $target = "artifacts/native/$($contract.Rid)"
+            New-Item -ItemType Directory -Force $target | Out-Null
+            foreach ($fileName in @($contract.Core, $contract.Runtime)) {
+              $matches = @(Get-ChildItem $contract.Root -Recurse -File -Filter $fileName)
+              if ($matches.Count -ne 1) {
+                throw "Expected exactly one $fileName for $($contract.Rid), found $($matches.Count)."
+              }
+              Copy-Item $matches[0].FullName $target
+            }
+          }
+
+      - name: Pack native NuGet packages
+        run: |
+          dotnet pack bindings/dotnet/src/Gua.Core/Gua.Core.csproj --configuration Release -p:GuaPackageVersion=${{ needs.windows-assets.outputs.version }} -p:PackageVersion=${{ needs.windows-assets.outputs.version }} -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
+          dotnet pack bindings/dotnet/src/Gua.Runtime/Gua.Runtime.csproj --configuration Release -p:GuaPackageVersion=${{ needs.windows-assets.outputs.version }} -p:PackageVersion=${{ needs.windows-assets.outputs.version }} -p:GuaNativeAssetsRoot=${{ github.workspace }}/artifacts/native
+
+      - name: Verify native package contents
+        shell: pwsh
+        run: scripts/verify-dotnet-native-packages.ps1 -PackageDirectory artifacts/packages -Version '${{ needs.windows-assets.outputs.version }}'
+
+      - name: Upload native NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: gua-release-native-nuget-v${{ needs.windows-assets.outputs.version }}
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+  native-package-smoke:
+    name: Smoke release native package / ${{ matrix.rid }}
+    needs: native-nuget
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-22.04
+            rid: linux-x64
+          - os: macos-15-intel
+            rid: osx-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download native NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: gua-release-native-nuget-v${{ needs.native-nuget.outputs.version }}
+          path: artifacts/packages
+
+      - name: Restore package-only smoke
+        run: dotnet restore bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj -p:GuaPackageVersion=${{ needs.native-nuget.outputs.version }} --source "${{ github.workspace }}/artifacts/packages"
+
+      - name: Run package-only smoke
+        run: dotnet run --project bindings/dotnet/tests/Gua.PackageSmoke/Gua.PackageSmoke.csproj --configuration Release --no-restore -p:GuaPackageVersion=${{ needs.native-nuget.outputs.version }}
+        env:
+          GUA_NATIVE_DIR: ""
+          GUA_RUNTIME_NATIVE_DIR: ""
 
   web-native:
     name: Build browser native assets
@@ -248,6 +413,8 @@ jobs:
     name: Publish Gua release
     needs:
       - windows-assets
+      - portable-native
+      - native-package-smoke
       - unity-package
       - web-native
     runs-on: ubuntu-latest
@@ -273,12 +440,20 @@ jobs:
           name: gua-web-native-v${{ needs.windows-assets.outputs.version }}
           path: release-assets/web
 
+      - name: Download portable native archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gua-release-native-*
+          path: release-assets/native
+          merge-multiple: true
+
       - name: Package public GitHub Release assets
         shell: pwsh
         run: |
           scripts/package-github-release-assets.ps1 `
             -Version '${{ needs.windows-assets.outputs.version }}' `
             -WindowsAssetsDirectory release-assets `
+            -NativeAssetsDirectory release-assets/native `
             -WebNativeDirectory release-assets/web `
             -UnityPackageDirectory release-assets/unity `
             -OutputDirectory publish-assets
@@ -291,6 +466,6 @@ jobs:
           body: |
             Automated Gua release build from `${{ github.sha }}`.
 
-            This release contains the Windows Inspector installers, one Godot addon archive with Windows and Web GDExtensions, and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
+            This release contains native runtime archives for Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS; the Windows Inspector installers; one Godot addon archive with Windows and Web GDExtensions; and the Unity Package Manager archive for Unity 6000.5+ with Windows x64 Mono and experimental WebGL native runtimes.
           files: publish-assets/*
           fail_on_unmatched_files: true
