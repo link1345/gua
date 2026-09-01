@@ -23,7 +23,17 @@ public static class GuaUnityFixture
         GuaUnityAdapterRegistry.Register(new GuaUnityThrowingAdapter());
         Application.runInBackground = true;
         Application.targetFrameRate = 60;
-        Screen.SetResolution(1280, 720, FullScreenMode.Windowed);
+        var fixtureWidth = 1280;
+        var fixtureHeight = 720;
+        var fixtureResolution = Environment.GetEnvironmentVariable("GUA_UNITY_FIXTURE_RESOLUTION");
+        if (!string.IsNullOrWhiteSpace(fixtureResolution))
+        {
+            var parts = fixtureResolution.Split('x');
+            if (parts.Length != 2 || !int.TryParse(parts[0], out fixtureWidth) || !int.TryParse(parts[1], out fixtureHeight) ||
+                fixtureWidth <= 0 || fixtureHeight <= 0)
+                throw new ArgumentException("GUA_UNITY_FIXTURE_RESOLUTION must use a positive WIDTHxHEIGHT value.");
+        }
+        Screen.SetResolution(fixtureWidth, fixtureHeight, FullScreenMode.Windowed);
         legacyFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
         var inputMapObject = new GameObject("GuaGameInputFixture");

@@ -25,12 +25,14 @@ public sealed class UnityIntegrationTests
     {
         var scene = Environment.GetEnvironmentVariable("GUA_UNITY_SCENE");
         if (string.IsNullOrWhiteSpace(scene)) Assert.Ignore("Set GUA_UNITY_SCENE to run the Unity Editor integration fixture.");
+        var batchMode = string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_EDITOR_BATCH_MODE"), "1", StringComparison.Ordinal);
         using var host = UnitySceneTestHost.LoadEditor(scene!, new UnitySceneTestHostOptions
         {
             UnityExecutablePath = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"),
             ProjectPath = Environment.GetEnvironmentVariable("GUA_UNITY_PROJECT"),
             ConnectTimeout = TimeSpan.FromSeconds(60),
             SceneTimeout = TimeSpan.FromSeconds(15),
+            AdditionalArguments = batchMode ? ["-batchmode"] : [],
         });
         Assert.That(WaitForText(host, "Start Game"), Is.True);
         Assert.That(WaitForText(host, "Gua Unity Sample"), Is.True);
@@ -48,8 +50,13 @@ public sealed class UnityIntegrationTests
         {
             ConnectTimeout = TimeSpan.FromSeconds(30),
             SceneTimeout = TimeSpan.FromSeconds(15),
-            EnvironmentVariables = new Dictionary<string, string> { ["GUA_UNITY_COVERAGE"] = "1", ["GUA_UNITY_HOST_CLICK"] = "1" },
-            AdditionalArguments = ["-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"],
+            EnvironmentVariables = new Dictionary<string, string>
+            {
+                ["GUA_UNITY_COVERAGE"] = "1",
+                ["GUA_UNITY_HOST_CLICK"] = "1",
+                ["GUA_UNITY_FIXTURE_RESOLUTION"] = "960x540",
+            },
+            AdditionalArguments = ["-screen-width", "960", "-screen-height", "540", "-screen-fullscreen", "0"],
         });
 
         var version = host.RemoteContext.GetVersion();
