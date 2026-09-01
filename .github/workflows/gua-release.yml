@@ -77,11 +77,13 @@ jobs:
         shell: pwsh
         run: |
           scripts/verify-godot-windows-addon.ps1 -RequireBinaries
-          $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022" -Recurse -Filter dumpbin.exe -File | Select-Object -First 1
-          if ($null -eq $dumpbin) { throw 'dumpbin.exe was not found.' }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw 'vswhere.exe was not found.' }
+          $dumpbin = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($dumpbin)) { throw 'dumpbin.exe was not found.' }
           foreach ($configuration in 'debug', 'release') {
             $binary = "examples/godot-gdscript/addons/gua/bin/gua_godot.windows.$configuration.x86_64.dll"
-            $dependencies = (& $dumpbin.FullName /dependents $binary) -join "`n"
+            $dependencies = (& $dumpbin /dependents $binary) -join "`n"
             if ($LASTEXITCODE -ne 0 -or $dependencies -match '(?i)gua_runtime\.dll') {
               throw "Godot $configuration GDExtension must embed gua-runtime."
             }
