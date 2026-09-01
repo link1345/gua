@@ -4,12 +4,9 @@ on:
   push:
     tags:
       - "gua-v[0-9]*"
-  pull_request:
-    paths:
-      - ".github/workflows/gua-release.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: gua-release-${{ github.ref }}
@@ -31,14 +28,7 @@ jobs:
       - name: Determine release version
         id: version
         shell: pwsh
-        run: |
-          if ('${{ github.event_name }}' -eq 'pull_request') {
-            $version = '0.0.0-pr.${{ github.event.pull_request.number }}'
-            "version=$version" >> $env:GITHUB_OUTPUT
-            "tag=" >> $env:GITHUB_OUTPUT
-          } else {
-            .github/scripts/release-version-from-tag.ps1
-          }
+        run: .github/scripts/release-version-from-tag.ps1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -793,7 +783,6 @@ jobs:
 
   publish:
     name: Publish Gua release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gua-v')
     needs:
       - windows-assets
       - portable-native
@@ -803,8 +792,6 @@ jobs:
       - unity-editor-smoke
       - godot-addon
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
