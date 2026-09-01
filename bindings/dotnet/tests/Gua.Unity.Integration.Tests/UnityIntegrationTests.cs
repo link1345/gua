@@ -28,6 +28,7 @@ public sealed class UnityIntegrationTests
         using var host = UnitySceneTestHost.LoadEditor(scene!, new UnitySceneTestHostOptions
         {
             UnityExecutablePath = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"),
+            ProjectPath = Environment.GetEnvironmentVariable("GUA_UNITY_PROJECT"),
             ConnectTimeout = TimeSpan.FromSeconds(60),
             SceneTimeout = TimeSpan.FromSeconds(15),
         });
@@ -48,6 +49,7 @@ public sealed class UnityIntegrationTests
             ConnectTimeout = TimeSpan.FromSeconds(30),
             SceneTimeout = TimeSpan.FromSeconds(15),
             EnvironmentVariables = new Dictionary<string, string> { ["GUA_UNITY_COVERAGE"] = "1", ["GUA_UNITY_HOST_CLICK"] = "1" },
+            AdditionalArguments = ["-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"],
         });
 
         var version = host.RemoteContext.GetVersion();
