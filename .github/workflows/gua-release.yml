@@ -685,26 +685,12 @@ jobs:
           # unity-setup@v2 omits the editor architecture from its macOS cache key,
           # so an arm64 editor can otherwise be restored on the Intel runner.
           cache-installation: ${{ matrix.kind != 'macos' }}
-      - name: Install Unity license
-        shell: pwsh
-        env:
-          UNITY_LICENSE_VALUE: ${{ secrets.UNITY_LICENSE }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:UNITY_LICENSE_VALUE)) { throw 'UNITY_LICENSE is required.' }
-          if ('${{ matrix.kind }}' -eq 'windows') {
-            $directory = Join-Path $env:ProgramData 'Unity'
-            New-Item -ItemType Directory -Force $directory | Out-Null
-            Set-Content -LiteralPath (Join-Path $directory 'Unity_lic.ulf') -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
-          } elseif ('${{ matrix.kind }}' -eq 'macos') {
-            $temporary = Join-Path $env:RUNNER_TEMP 'Unity_lic.ulf'
-            Set-Content -LiteralPath $temporary -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
-            sudo mkdir -p '/Library/Application Support/Unity'
-            sudo cp $temporary '/Library/Application Support/Unity/Unity_lic.ulf'
-          } else {
-            $directory = Join-Path $HOME '.local/share/unity3d/Unity'
-            New-Item -ItemType Directory -Force $directory | Out-Null
-            Set-Content -LiteralPath (Join-Path $directory 'Unity_lic.ulf') -Value $env:UNITY_LICENSE_VALUE -Encoding utf8NoBOM
-          }
+      - name: Activate Unity license
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_EMAIL }}
+          password: ${{ secrets.UNITY_PASSWORD }}
       - uses: actions/download-artifact@v4
         with:
           name: gua-unity-upm-v${{ needs.windows-assets.outputs.version }}
