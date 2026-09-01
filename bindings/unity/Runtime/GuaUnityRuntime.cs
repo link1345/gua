@@ -662,7 +662,8 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     private void CollectTransform(Transform transform, string? parentId, Canvas canvas, HashSet<Transform> visited, string? ancestorSelectableLabel, bool parentVisible)
     {
         if (!visited.Add(transform)) return;
-        var localCanvas = transform.GetComponent<Canvas>() ?? canvas;
+        var attachedCanvas = transform.GetComponent<Canvas>();
+        var localCanvas = attachedCanvas != null ? attachedCanvas : canvas;
         var id = FitNodeId(ExplicitOrObjectId(transform.gameObject, transform.GetSiblingIndex().ToString(CultureInfo.InvariantCulture)));
         var selectable = transform.GetComponent<Selectable>();
         var text = transform.GetComponent<Text>();
