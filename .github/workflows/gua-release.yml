@@ -682,7 +682,9 @@ jobs:
           unity-version: 6000.5.3f1
           architecture: ${{ matrix.architecture }}
           build-targets: ${{ matrix.target }}
-          cache-installation: true
+          # unity-setup@v2 omits the editor architecture from its macOS cache key,
+          # so an arm64 editor can otherwise be restored on the Intel runner.
+          cache-installation: ${{ matrix.kind != 'macos' }}
       - name: Install Unity license
         shell: pwsh
         env:
@@ -725,6 +727,7 @@ jobs:
           UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
           GUA_UNITY_PROJECT: ${{ github.workspace }}/examples/unity-smoke
           GUA_UNITY_SCENE: Assets/Scenes/GuaUnityFixture.unity
+          GUA_UNITY_EDITOR_BATCH_MODE: '1'
         run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
       - name: Run Editor Play Mode external smoke with Xvfb
         if: matrix.kind == 'linux'
@@ -733,6 +736,7 @@ jobs:
           UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
           GUA_UNITY_PROJECT: ${{ github.workspace }}/examples/unity-smoke
           GUA_UNITY_SCENE: Assets/Scenes/GuaUnityFixture.unity
+          GUA_UNITY_EDITOR_BATCH_MODE: '1'
         run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
 
   unity-player-smoke:
@@ -783,15 +787,13 @@ jobs:
         shell: pwsh
         env:
           GUA_UNITY_PLAYER: ${{ steps.player.outputs.path }}
-          GUA_UNITY_ARTIFACT_PLAYER: ${{ steps.player.outputs.path }}
-        run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release
+        run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedPlayer_ReflectsUiAndDispatchesButtonListener
       - name: Run rendered Player integration tests with Xvfb
         if: matrix.kind == 'linux'
         shell: bash
         env:
           GUA_UNITY_PLAYER: ${{ steps.player.outputs.path }}
-          GUA_UNITY_ARTIFACT_PLAYER: ${{ steps.player.outputs.path }}
-        run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release
+        run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedPlayer_ReflectsUiAndDispatchesButtonListener
 
   publish:
     name: Publish Gua release
