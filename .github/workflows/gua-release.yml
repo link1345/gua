@@ -669,6 +669,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Prepare Unity Hub compatibility path
+        if: matrix.kind == 'linux'
+        shell: bash
+        run: |
+          sudo ln -sfn /usr/lib/unityhub /opt/unityhub
       - name: Install Unity Editor for this runner
         id: unity-setup
         uses: buildalon/unity-setup@v2
@@ -718,14 +723,16 @@ jobs:
         shell: pwsh
         env:
           UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
-          GUA_UNITY_SCENE: examples/unity-smoke/Assets/Scenes/GuaUnityFixture.unity
+          GUA_UNITY_PROJECT: ${{ github.workspace }}/examples/unity-smoke
+          GUA_UNITY_SCENE: Assets/Scenes/GuaUnityFixture.unity
         run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
       - name: Run Editor Play Mode external smoke with Xvfb
         if: matrix.kind == 'linux'
         shell: bash
         env:
           UNITY_EXECUTABLE: ${{ steps.unity-setup.outputs.unity-editor-path }}
-          GUA_UNITY_SCENE: examples/unity-smoke/Assets/Scenes/GuaUnityFixture.unity
+          GUA_UNITY_PROJECT: ${{ github.workspace }}/examples/unity-smoke
+          GUA_UNITY_SCENE: Assets/Scenes/GuaUnityFixture.unity
         run: xvfb-run --auto-servernum dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
 
   unity-player-smoke:
@@ -770,10 +777,6 @@ jobs:
             default { Get-ChildItem $root -Recurse -Filter GuaUnitySmoke.app -Directory | Select-Object -First 1 }
           }
           if ($null -eq $player) { throw 'Unity Player artifact was not found.' }
-          if ('${{ matrix.kind }}' -ne 'windows') {
-            $exe = if ('${{ matrix.kind }}' -eq 'linux') { $player.FullName } else { Join-Path $player.FullName 'Contents/MacOS/GuaUnitySmoke' }
-            chmod +x $exe
-          }
           "path=$($player.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
       - name: Run rendered Player integration tests
         if: matrix.kind != 'linux'
