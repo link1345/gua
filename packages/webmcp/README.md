@@ -13,6 +13,9 @@ replacement, and engine shutdown release its held input.
 World types and selector definitions come from the public `gua-world-tools`
 package; observation remains host-filtered and browser callers cannot request a
 debug profile.
+The existing find and wait tools accept `relativeToObjectId`, `maxDistance`, and
+an optional positive `limit`. Nearby results carry the projected snapshot's
+epoch/frame/revision and one distance for every returned match.
 The engine ports always use the runtime's Player projection for UI and World
 observations and Player authorization for actions. This is independent of the
 profile used by a local Inspector, and no WebMCP tool exposes a profile argument.

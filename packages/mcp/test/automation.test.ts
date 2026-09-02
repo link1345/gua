@@ -17,6 +17,32 @@ afterEach(async () => {
 });
 
 describe("GuaAutomationManager", () => {
+  test("rejects a nearby bridge result without spatial metadata", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return undefined;
+        return new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message(socket, message) {
+          const request = JSON.parse(String(message));
+          socket.send(JSON.stringify({ id: request.id, ok: true, result: {
+            valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches: [],
+          } }));
+        },
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    try {
+      await expect(bridge.findWorldObjects({ near: { relativeToObjectId: "player", maxDistance: 5 } }))
+        .rejects.toThrow("invalid world query result");
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
   test("bounds world waits by their requested deadline", async () => {
     const server = Bun.serve({
       port: 0,

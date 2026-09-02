@@ -97,6 +97,10 @@ For Player-profile exposure, controls accept `gua_agent_exposure`,
 use the corresponding `gua_world_agent_*` keys. Rules are dictionaries such as
 `{"path": "text", "mode": "redact"}` or
 `{"path": "position.x", "mode": "quantize", "quantum": 100.0}`.
+World find/wait requests can include `relativeToObjectId`, `maxDistance`, and an
+optional positive `limit`. Godot positions and the radius use Godot world units;
+the native core performs XY distance for Node2D and XYZ for Node3D after Player
+projection.
 
 ## Virtual clock integration
 

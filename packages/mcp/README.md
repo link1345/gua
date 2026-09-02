@@ -37,6 +37,9 @@ World tools are read-only and use the observation profile fixed by the host. Set
 `GUA_OBSERVATION_PROFILE=player` on the native host for player-facing MCP use;
 tool arguments cannot elevate it to debug. `find_world_objects` accepts ID,
 kind, label, tag, parent scope, visibility, active, and primitive state criteria.
+It also accepts paired `relativeToObjectId` and nonnegative `maxDistance`, plus
+an optional positive `limit`, for deterministic nearby search in host world
+units. Query results include World snapshot metadata and aligned distances.
 There is deliberately no world action tool.
 
 The same host profile also projects the Semantic UI Tree and authorizes UI

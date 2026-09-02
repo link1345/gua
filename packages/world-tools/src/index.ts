@@ -6,8 +6,10 @@ export interface GuaWorldObject {
   domainId?: string; relatedUiNodeId?: string; tags?: string[]; state: Record<string, WorldPrimitive>;
 }
 export interface GuaWorldObjectTree { schemaVersion: 1; sessionEpoch: number; frameSequence: number; revision: number; scene: string; objects: GuaWorldObject[] }
-export interface GuaWorldSelector { id?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: boolean; visibleToPlayer?: boolean; active?: boolean; state?: { key: string; value: WorldPrimitive } }
-export interface GuaWorldQueryResult { valid: boolean; matches: GuaWorldObject[]; error?: string }
+export interface GuaWorldSelector { id?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: boolean; visibleToPlayer?: boolean; active?: boolean; state?: { key: string; value: WorldPrimitive }; near?: { relativeToObjectId: string; maxDistance: number }; limit?: number }
+export interface GuaWorldDistance { objectId: string; distance: number }
+export interface GuaWorldSpatialResult { relativeToObjectId: string; truncated: boolean; distances: GuaWorldDistance[] }
+export interface GuaWorldQueryResult { valid: boolean; matches: GuaWorldObject[]; error?: string; sessionEpoch?: number; frameSequence?: number; revision?: number; spatial?: GuaWorldSpatialResult }
 export interface GuaWorldProvider {
   getWorldObjectTree(): Promise<GuaWorldObjectTree>;
   findWorldObjects(selector: GuaWorldSelector): Promise<GuaWorldQueryResult>;
@@ -25,19 +27,42 @@ export function parseWorldObjectTree(value: unknown): GuaWorldObjectTree {
   return parsed as GuaWorldObjectTree;
 }
 
-export function parseWorldQueryResult(value: unknown): GuaWorldQueryResult {
+export function parseWorldQueryResult(value: unknown, selector?: GuaWorldSelector): GuaWorldQueryResult {
   const parsed = parseJson(value);
   const result = record(parsed);
+  const spatial = record(result?.spatial);
+  const matches = Array.isArray(result?.matches) ? result.matches : undefined;
+  const distances = Array.isArray(spatial?.distances) ? spatial.distances : undefined;
+  const validSpatial = spatial === undefined || (only(spatial, spatialKeys) && nonEmptyString(spatial.relativeToObjectId) &&
+    typeof spatial.truncated === "boolean" && distances !== undefined && distances.every((item) => {
+      const distance = record(item);
+      return !!distance && only(distance, distanceKeys) && nonEmptyString(distance.objectId) && finiteNumber(distance.distance) && distance.distance >= 0;
+    }) && matches !== undefined && distances.length === matches.length &&
+    distances.every((item, index) => record(item)?.objectId === record(matches[index])?.id));
+  const selectorSpatial = !result?.valid || selector === undefined || (selector.near === undefined
+    ? spatial === undefined
+    : spatial !== undefined && distances !== undefined && spatial.relativeToObjectId === selector.near.relativeToObjectId &&
+      distances.every((item) => (record(item)?.distance as number) <= selector.near!.maxDistance) &&
+      (selector.limit === undefined
+        ? spatial.truncated === false
+        : matches !== undefined && matches.length <= selector.limit && (!spatial.truncated || matches.length === selector.limit)));
   if (!result || !only(result, queryKeys) || typeof result.valid !== "boolean" ||
       !Array.isArray(result.matches) || !result.matches.every(worldObject) ||
-      (result.error !== undefined && typeof result.error !== "string")) {
+      (result.error !== undefined && typeof result.error !== "string") || !validSpatial || !selectorSpatial ||
+      (result.valid && (!positiveInteger(result.sessionEpoch) || !nonNegativeInteger(result.frameSequence) ||
+        !nonNegativeInteger(result.revision) || result.error !== undefined)) ||
+      (result.valid && distances !== undefined && new Set(distances.map((item) => record(item)!.objectId)).size !== distances.length) ||
+      (!result.valid && (typeof result.error !== "string" || result.sessionEpoch !== undefined || result.frameSequence !== undefined ||
+        result.revision !== undefined || result.spatial !== undefined))) {
     throw new TypeError("The engine returned an invalid world query result.");
   }
   return parsed as GuaWorldQueryResult;
 }
 
 const treeKeys = new Set(["schemaVersion", "sessionEpoch", "frameSequence", "revision", "scene", "objects"]);
-const queryKeys = new Set(["valid", "matches", "error"]);
+const queryKeys = new Set(["valid", "matches", "error", "sessionEpoch", "frameSequence", "revision", "spatial"]);
+const spatialKeys = new Set(["relativeToObjectId", "truncated", "distances"]);
+const distanceKeys = new Set(["objectId", "distance"]);
 const objectKeys = new Set([
   "id", "parentId", "kind", "label", "description", "space", "position", "visibleToPlayer", "active",
   "agentExposure", "domainId", "relatedUiNodeId", "tags", "state",
@@ -96,10 +121,13 @@ const selectorProperties = {
     { type: "number", not: { type: "integer" } },
     { type: "integer", minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
   ], description: "Exact primitive state value; integers must be safely distinguishable." },
+  relativeToObjectId: string("Stable observable object id used as the spatial reference."),
+  maxDistance: { type: "number", minimum: 0, description: "Inclusive radius in host world units." },
+  limit: { type: "integer", minimum: 1, maximum: 4294967295, description: "Maximum spatial matches after distance ordering." },
 };
 const selectorSchema = (properties: Record<string, unknown>) => ({
   type: "object", additionalProperties: false, properties,
-  dependentRequired: { stateKey: ["stateValue"], stateValue: ["stateKey"] },
+  dependentRequired: { stateKey: ["stateValue"], stateValue: ["stateKey"], relativeToObjectId: ["maxDistance"], maxDistance: ["relativeToObjectId"], limit: ["relativeToObjectId", "maxDistance"] },
   allOf: [{ if: { required: ["directChild"], properties: { directChild: { const: true } } }, then: { required: ["parentId"] } }],
 });
 export const worldObservationTools = [
@@ -110,7 +138,7 @@ export const worldObservationTools = [
 export type WorldObservationToolName = (typeof worldObservationTools)[number]["name"];
 
 export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSelector {
-  const knownKeys = new Set(["id", "kind", "label", "tag", "parentId", "directChild", "visibleToPlayer", "active", "stateKey", "stateValue", "timeoutMs"]);
+  const knownKeys = new Set(["id", "kind", "label", "tag", "parentId", "directChild", "visibleToPlayer", "active", "stateKey", "stateValue", "relativeToObjectId", "maxDistance", "limit", "timeoutMs"]);
   for (const key of Object.keys(args)) if (!knownKeys.has(key)) throw new TypeError(`Unknown world selector argument: ${key}.`);
   const result: Record<string, unknown> = {};
   for (const key of ["id", "kind", "label", "tag", "parentId"] as const) {
@@ -137,6 +165,22 @@ export function selectorFromArguments(args: Record<string, unknown>): GuaWorldSe
       throw new TypeError("Integer stateValue must be a safely distinguishable JSON number.");
     result.state = { key: args.stateKey, value: value as WorldPrimitive };
   }
+  const hasRelative = Object.prototype.hasOwnProperty.call(args, "relativeToObjectId");
+  const hasMaxDistance = Object.prototype.hasOwnProperty.call(args, "maxDistance");
+  if (hasRelative !== hasMaxDistance) throw new TypeError("relativeToObjectId and maxDistance must be supplied together.");
+  if (hasRelative) {
+    if (typeof args.relativeToObjectId !== "string" || args.relativeToObjectId.length === 0)
+      throw new TypeError("relativeToObjectId must be a non-empty string.");
+    if (typeof args.maxDistance !== "number" || !Number.isFinite(args.maxDistance) || args.maxDistance < 0)
+      throw new TypeError("maxDistance must be a finite non-negative number.");
+    result.near = { relativeToObjectId: args.relativeToObjectId, maxDistance: args.maxDistance };
+  }
+  if (Object.prototype.hasOwnProperty.call(args, "limit")) {
+    if (!hasRelative) throw new TypeError("relativeToObjectId and maxDistance are required when limit is supplied.");
+    if (typeof args.limit !== "number" || !Number.isInteger(args.limit) || args.limit < 1 || args.limit > 4294967295)
+      throw new TypeError("limit must be an integer from 1 through 4294967295.");
+    result.limit = args.limit;
+  }
   return result as GuaWorldSelector;
 }
 
@@ -151,7 +195,7 @@ export function registerWorldWebMcpTools(modelContext: WebMcpModelContext | unde
     if (tool.name === "find_world_objects" && Object.prototype.hasOwnProperty.call(args, "timeoutMs"))
       throw new TypeError("Unknown find_world_objects argument: timeoutMs.");
     const selector = selectorFromArguments(args);
-    if (tool.name === "find_world_objects") return provider.findWorldObjects(selector);
+    if (tool.name === "find_world_objects") return parseWorldQueryResult(await provider.findWorldObjects(selector), selector);
     if (Object.prototype.hasOwnProperty.call(args, "timeoutMs") &&
         (typeof args.timeoutMs !== "number" || !Number.isInteger(args.timeoutMs) || args.timeoutMs < 1 || args.timeoutMs > 300000))
       throw new TypeError("timeoutMs must be an integer from 1 through 300000.");

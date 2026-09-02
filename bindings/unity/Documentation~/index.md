@@ -25,6 +25,10 @@ read-only `get_world_object_tree`, `find_world_objects`, and
 `wait_for_world_object` tools. Shared browser-safe world contracts are provided
 by `gua-world-tools`; WebMCP callers cannot elevate the runtime observation
 profile or invoke actions on world objects.
+The existing find and wait tools accept `relativeToObjectId`, `maxDistance`, and
+an optional positive `limit`. Unity publishes positions in Unity world units;
+the native core evaluates a single projected snapshot and returns its
+epoch/frame/revision plus aligned distances.
 When `GuaGameInputMap` initializes the input pump, the same page bridge exposes
 only the matching Semantic Game Action and Raw Input capabilities. Calls wait
 for correlated host completion and use a page-owned session that is released on

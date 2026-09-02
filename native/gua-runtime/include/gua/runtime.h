@@ -47,9 +47,11 @@ int gua_runtime_end_world_frame(gua_runtime_t* runtime);
 int gua_runtime_abort_world_frame(gua_runtime_t* runtime);
 int gua_runtime_copy_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
+int gua_runtime_query_world_objects_v2_json(gua_runtime_t* runtime, const gua_world_selector_v2_t* selector, char* out_json, int out_json_size);
 /* Browser/public-agent projection. These calls cannot elevate to the runtime's Debug profile. */
 int gua_runtime_copy_player_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
 int gua_runtime_query_player_world_objects_json(gua_runtime_t* runtime, const gua_world_selector_v1_t* selector, char* out_json, int out_json_size);
+int gua_runtime_query_player_world_objects_v2_json(gua_runtime_t* runtime, const gua_world_selector_v2_t* selector, char* out_json, int out_json_size);
 
 const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime);
 /* Returns the required byte size including the trailing NUL. Output is NUL-terminated when out_json_size > 0. */

@@ -185,6 +185,35 @@ func _run() -> void:
 	door.set_meta(&"gua_world_tags", ["east-corridor", "mission-critical"])
 	door.set_meta(&"gua_world_state", {"open": false, "locked": true})
 	screen.add_child(door)
+	var player_world := Node2D.new()
+	player_world.position = Vector2(635, 180)
+	player_world.add_to_group(&"gua_world_object")
+	player_world.set_meta(&"gua_world_id", "player-world")
+	player_world.set_meta(&"gua_world_kind", "player")
+	player_world.set_meta(&"gua_world_visible_to_player", true)
+	screen.add_child(player_world)
+	var door_b := Node2D.new()
+	door_b.position = Vector2(635, 185)
+	door_b.add_to_group(&"gua_world_object")
+	door_b.set_meta(&"gua_world_id", "door-b")
+	door_b.set_meta(&"gua_world_kind", "door")
+	door_b.set_meta(&"gua_world_visible_to_player", true)
+	door_b.set_meta(&"gua_world_state", {"locked": true})
+	screen.add_child(door_b)
+	var anchor_3d := Node3D.new()
+	anchor_3d.position = Vector3.ZERO
+	anchor_3d.add_to_group(&"gua_world_object")
+	anchor_3d.set_meta(&"gua_world_id", "anchor-3d")
+	anchor_3d.set_meta(&"gua_world_kind", "player")
+	anchor_3d.set_meta(&"gua_world_visible_to_player", true)
+	screen.add_child(anchor_3d)
+	var target_3d := Node3D.new()
+	target_3d.position = Vector3(1, 2, 2)
+	target_3d.add_to_group(&"gua_world_object")
+	target_3d.set_meta(&"gua_world_id", "target-3d")
+	target_3d.set_meta(&"gua_world_kind", "objective")
+	target_3d.set_meta(&"gua_world_visible_to_player", true)
+	screen.add_child(target_3d)
 
 	ui.attach(screen)
 	if ui.get_game_input_capabilities(1) != 0:
@@ -207,6 +236,11 @@ func _run() -> void:
 		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
 		return
 	var web_input_bridge = load("res://addons/gua/gua_webmcp_bridge.gd").new()
+	var parsed_limit: Dictionary = JSON.parse_string("{\"limit\":1}")
+	if typeof(parsed_limit.limit) != TYPE_FLOAT or web_input_bridge._normalize_world_limit(parsed_limit.limit) != 1 \
+			or web_input_bridge._normalize_world_limit(1.5) != null:
+		_fail("Gua WebMCP did not normalize an integer-valued JSON limit without accepting fractions.")
+		return
 	var wheel_request: Dictionary = web_input_bridge._native_game_input_request({
 		"type": "pointer_wheel", "deltaX": -4.0, "deltaY": 120.0, "wheelUnit": "pixels"
 	})
@@ -300,13 +334,34 @@ func _run() -> void:
 		_fail("Gua Godot adapter did not publish the shared Door fixture: %s" % world_tree)
 		return
 	var world_query = JSON.parse_string(ui.context.query_world_objects_json({"kind": "door", "state_key": "locked", "state_type": 3, "state_bool": true}))
-	if not world_query.get("valid", false) or world_query.get("matches", []).size() != 1 \
-			or world_query.get("matches", [])[0].get("id", "") != "door-a":
+	if not world_query.get("valid", false) or world_query.get("matches", []).size() != 2 \
+			or _find_world_object({"objects": world_query.get("matches", [])}, "door-a") == null \
+			or _find_world_object({"objects": world_query.get("matches", [])}, "door-b") == null:
 		_fail("Gua Godot world query did not return the shared Door fixture: %s" % world_query)
+		return
+	var nearby = JSON.parse_string(ui.context.query_world_objects_json({
+		"kind": "door", "state_key": "locked", "state_type": 3, "state_bool": true,
+		"relative_to_object_id": "player-world", "max_distance": 5.0, "limit": 1,
+	}))
+	if not nearby.get("valid", false) or nearby.get("matches", []).size() != 1 \
+			or nearby.get("matches", [])[0].get("id", "") != "door-a" \
+			or not nearby.get("spatial", {}).get("truncated", false) \
+			or float(nearby.get("spatial", {}).get("distances", [])[0].get("distance", -1)) != 5.0:
+		_fail("Gua Godot spatial world query lost distance order or metadata: %s" % nearby)
+		return
+	var nearby_3d = JSON.parse_string(ui.context.query_world_objects_json({
+		"kind": "objective", "relative_to_object_id": "anchor-3d", "max_distance": 3.0,
+	}))
+	if nearby_3d.get("matches", []).size() != 1 or nearby_3d.get("matches", [])[0].get("id", "") != "target-3d":
+		_fail("Gua Godot spatial world query did not use XYZ distance: %s" % nearby_3d)
+		return
+	var incomplete_near = JSON.parse_string(ui.context.query_world_objects_json({"max_distance": 5.0}))
+	if incomplete_near.get("valid", true):
+		_fail("Gua Godot accepted maxDistance without a reference object: %s" % incomplete_near)
 		return
 	var world_status: Dictionary = ui.context.get_context_status()
 	if world_status.get("world_frame_sequence", 0) != 1 or world_status.get("world_revision", 0) != 1 \
-			or world_status.get("world_object_count", 0) != 1:
+			or world_status.get("world_object_count", 0) != 5:
 		_fail("Gua Godot status omitted World Object Tree metadata: %s" % world_status)
 		return
 	door.set_meta(&"gua_world_visible_to_player", "false")
@@ -739,7 +794,7 @@ func _run() -> void:
 	if reset_report.get("result", 0) != 1 or after_reset.get("session_epoch", 0) != before_reset.get("session_epoch", 0) + 1:
 		_fail("Gua reset did not advance the session epoch: %s / %s" % [reset_report, after_reset])
 		return
-	if reset_report.get("discarded_world_object_count", 0) != 1 or after_reset.get("world_object_count", -1) != 0 \
+	if reset_report.get("discarded_world_object_count", 0) != 5 or after_reset.get("world_object_count", -1) != 0 \
 			or after_reset.get("world_frame_sequence", -1) != 0 or after_reset.get("world_revision", -1) != 0:
 		_fail("Gua Godot reset omitted World Object Tree metadata: %s / %s" % [reset_report, after_reset])
 		return

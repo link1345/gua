@@ -5,6 +5,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -406,9 +408,19 @@ String GuaContext::query_world_objects_json_with_projection(const Dictionary& so
 {
     const String id = source.get("id", String()), kind = source.get("kind", String()), label = source.get("label", String());
     const String tag = source.get("tag", String()), parent = source.get("parent_id", String()), state_key = source.get("state_key", String());
-    const CharString id8 = id.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), tag8 = tag.utf8(), parent8 = parent.utf8(), state_key8 = state_key.utf8();
+    const Variant relative_value = source.get("relative_to_object_id", String());
+    const String relative = relative_value;
+    const CharString id8 = id.utf8(), kind8 = kind.utf8(), label8 = label.utf8(), tag8 = tag.utf8(), parent8 = parent.utf8(), state_key8 = state_key.utf8(), relative8 = relative.utf8();
     const int direct_child = source.get("direct_child", 0), visible = source.get("visible_to_player", 0), active = source.get("active", 0);
-    if (direct_child < 0 || direct_child > 1 || (direct_child != 0 && parent.is_empty()) || visible < 0 || visible > 2 || active < 0 || active > 2)
+    const bool has_relative = source.has("relative_to_object_id"), has_max_distance = source.has("max_distance"), has_limit = source.has("limit");
+    const Variant max_distance_value = source.get("max_distance", 0.0), limit_value = source.get("limit", 0);
+    const bool max_distance_is_number = max_distance_value.get_type() == Variant::INT || max_distance_value.get_type() == Variant::FLOAT;
+    const bool limit_is_integer = limit_value.get_type() == Variant::INT;
+    const double max_distance = max_distance_value;
+    const std::int64_t limit = limit_value;
+    if (direct_child < 0 || direct_child > 1 || (direct_child != 0 && parent.is_empty()) || visible < 0 || visible > 2 || active < 0 || active > 2 ||
+        has_relative != has_max_distance || (has_relative && (relative_value.get_type() != Variant::STRING || !max_distance_is_number || relative.is_empty() || !std::isfinite(max_distance) || max_distance < 0)) ||
+        (has_limit && (!limit_is_integer || !has_relative || limit < 1 || static_cast<std::uint64_t>(limit) > std::numeric_limits<std::uint32_t>::max())))
         return "{\"valid\":false,\"error\":\"invalid_selector\",\"matches\":[]}";
 
     gua_world_state_value_v1_t state { sizeof(gua_world_state_value_v1_t) };
@@ -436,11 +448,14 @@ String GuaContext::query_world_objects_json_with_projection(const Dictionary& so
         tag.is_empty() ? nullptr : tag8.get_data(), GUA_MATCH_EXACT,
         parent.is_empty() ? nullptr : parent8.get_data(), direct_child != 0 ? 1 : 0, visible, active, state_pointer,
     };
-    const auto query = player_projection ? gua_runtime_query_player_world_objects_json : gua_runtime_query_world_objects_json;
-    int required = query(runtime_, &selector, nullptr, 0);
+    const gua_world_near_v1_t near { sizeof(gua_world_near_v1_t), has_relative ? relative8.get_data() : nullptr, max_distance };
+    const gua_world_selector_v2_t selector_v2 { sizeof(gua_world_selector_v2_t), selector, has_relative ? &near : nullptr,
+        has_limit ? static_cast<std::uint32_t>(limit) : 0U };
+    const auto query = player_projection ? gua_runtime_query_player_world_objects_v2_json : gua_runtime_query_world_objects_v2_json;
+    int required = query(runtime_, &selector_v2, nullptr, 0);
     if (required <= 0) return "{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}";
     std::vector<char> json(static_cast<std::size_t>(required));
-    required = query(runtime_, &selector, json.data(), static_cast<int>(json.size()));
+    required = query(runtime_, &selector_v2, json.data(), static_cast<int>(json.size()));
     return required > 0 ? String::utf8(json.data()) : String("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}");
 }
 void GuaContext::enable_world_object_tree_adapter() { gua_runtime_set_world_object_tree_enabled(runtime_, 1); }

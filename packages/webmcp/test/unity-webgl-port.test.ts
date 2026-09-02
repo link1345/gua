@@ -69,6 +69,18 @@ describe("Unity WebGL same-page port", () => {
     expect(messages).toEqual([]);
   });
 
+  test("rejects incomplete spatial selectors before reaching Unity", async () => {
+    const { library, messages } = await loadUnityWebLibrary();
+    library.GuaUnityWebInstall("World Host", "owner-1", 100);
+    for (const command of [
+      { type: "query_world_objects", relativeToObjectId: "player" },
+      { type: "query_world_objects", maxDistance: 5 },
+      { type: "query_world_objects", relativeToObjectId: "player", maxDistance: -1 },
+      { type: "query_world_objects", relativeToObjectId: "player", maxDistance: 5, limit: 0 },
+    ]) await expect(unityGlobals.__guaUnityWebPort!.invoke(command)).rejects.toMatchObject({ code: "invalid_request" });
+    expect(messages).toEqual([]);
+  });
+
   test("preserves false world state values and sends raw field presence to Unity", async () => {
     const { library, messages } = await loadUnityWebLibrary();
     library.GuaUnityWebInstall("World Host", "owner-1", 100);

@@ -36,6 +36,15 @@ mergeInto(LibraryManager.library, {
     const worldSelectorError = function (command) {
       if (!command || command.type !== 'query_world_objects') return null;
       const own = function (name) { return Object.prototype.hasOwnProperty.call(command, name); };
+      const hasRelative = own('relativeToObjectId');
+      const hasMaxDistance = own('maxDistance');
+      const hasLimit = own('limit');
+      if (hasRelative !== hasMaxDistance || (hasRelative && (typeof command.relativeToObjectId !== 'string' ||
+          command.relativeToObjectId.length === 0 || typeof command.maxDistance !== 'number' ||
+          !Number.isFinite(command.maxDistance) || command.maxDistance < 0)) ||
+          (hasLimit && (!hasRelative || !Number.isInteger(command.limit) || command.limit < 1 || command.limit > 4294967295))) {
+        return 'World spatial criteria require relativeToObjectId, a finite non-negative maxDistance, and an optional positive limit.';
+      }
       const stateFields = ['stateKey', 'stateType', 'stateString', 'stateNumber', 'stateBool'];
       if (!stateFields.some(own)) return null;
       if (!own('stateKey') || typeof command.stateKey !== 'string' || command.stateKey.length === 0 ||

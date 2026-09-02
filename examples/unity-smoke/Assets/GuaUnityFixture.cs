@@ -103,6 +103,30 @@ public static class GuaUnityFixture
             settings.gameObject.AddComponent<GuaUnityHostClickDriver>().Button = settings;
 
         BuildInactiveCoverageControls(canvasObject.transform);
+        BuildWorldObjects();
+    }
+
+    private static void BuildWorldObjects()
+    {
+        AddWorldObject("Player", "player-world", "actor", GuaWorldSpace.World2D, new Vector3(635, 180, 0));
+        var doorA = AddWorldObject("Door A", "door-a", "door", GuaWorldSpace.World2D, new Vector3(640, 180, 0));
+        doorA.SetState("locked", true);
+        var doorB = AddWorldObject("Door B", "door-b", "door", GuaWorldSpace.World2D, new Vector3(635, 185, 0));
+        doorB.SetState("locked", true);
+        AddWorldObject("3D Anchor", "anchor-3d", "anchor", GuaWorldSpace.World3D, Vector3.zero);
+        AddWorldObject("3D Target", "target-3d", "target", GuaWorldSpace.World3D, new Vector3(1, 2, 2));
+    }
+
+    private static GuaWorldObject AddWorldObject(string name, string id, string kind, GuaWorldSpace space, Vector3 position)
+    {
+        var objectGameObject = new GameObject(name);
+        objectGameObject.transform.position = position;
+        var worldObject = objectGameObject.AddComponent<GuaWorldObject>();
+        worldObject.Id = id;
+        worldObject.Kind = kind;
+        worldObject.Space = space;
+        worldObject.VisibleToPlayer = true;
+        return worldObject;
     }
 
     private static void BuildInactiveCoverageControls(Transform parent)

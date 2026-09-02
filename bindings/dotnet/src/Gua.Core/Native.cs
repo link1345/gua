@@ -208,6 +208,10 @@ internal static partial class Native
         public uint StructSize; public nint Id; public int IdMatch; public nint Kind; public int KindMatch; public nint Label; public int LabelMatch;
         public nint Tag; public int TagMatch; public nint ParentId; public int DirectChild; public int VisibleToPlayer; public int Active; public nint State;
     }
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeWorldNearV1
+    { public uint StructSize; public nint RelativeToObjectId; public double MaxDistance; }
+    [StructLayout(LayoutKind.Sequential)] internal struct GuaNativeWorldSelectorV2
+    { public uint StructSize; public GuaNativeWorldSelectorV1 Base; public nint Near; public uint Limit; }
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct GuaNativeNodeStateV2
@@ -380,6 +384,7 @@ internal static partial class Native
     [LibraryImport("gua")] internal static partial int gua_abort_world_frame(nint context);
     [LibraryImport("gua")] internal static unsafe partial int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
     [LibraryImport("gua")] internal static unsafe partial int gua_query_world_objects_json(nint context, in GuaNativeWorldSelectorV1 selector, int profile, byte* outJson, int outJsonSize);
+    [LibraryImport("gua")] internal static unsafe partial int gua_query_world_objects_v2_json(nint context, in GuaNativeWorldSelectorV2 selector, int profile, byte* outJson, int outJsonSize);
 
     [LibraryImport("gua")]
     internal static partial nint gua_get_ui_tree_json(nint context);

@@ -1023,6 +1023,94 @@ std::string build_world_query_json(const std::vector<WorldObject>& source, const
     return json + "]}";
 }
 
+bool world_has_complete_position(const WorldObject& object)
+{
+    if (object.omitted_fields.contains("position.x") || object.omitted_fields.contains("position.y")) return false;
+    return object.space != GUA_WORLD_SPACE_3D || !object.omitted_fields.contains("position.z");
+}
+
+std::optional<double> world_distance(const WorldObject& reference, const WorldObject& candidate)
+{
+    if (reference.space != candidate.space || !world_has_complete_position(reference) || !world_has_complete_position(candidate)) return std::nullopt;
+    const double dx = candidate.x - reference.x;
+    const double dy = candidate.y - reference.y;
+    const double distance = reference.space == GUA_WORLD_SPACE_3D
+        ? std::hypot(dx, dy, candidate.z - reference.z)
+        : std::hypot(dx, dy);
+    if (!std::isfinite(distance)) return std::nullopt;
+    return distance;
+}
+
+std::string build_world_query_v2_json(const std::vector<WorldObject>& source, const gua_world_selector_v2_t& selector,
+    unsigned long long session_epoch, unsigned long long frame_sequence, unsigned long long revision, int profile)
+{
+    const auto& base = selector.base;
+    std::string error;
+    if (!validate_text_criterion(base.id, base.id_match, error) ||
+        !validate_text_criterion(base.kind, base.kind_match, error) ||
+        !validate_text_criterion(base.label, base.label_match, error) ||
+        !validate_text_criterion(base.tag, base.tag_match, error) ||
+        !validate_filter(base.visible_to_player, error) || !validate_filter(base.active, error))
+        return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+
+    const auto objects = project_world_objects(source, profile);
+    const WorldObject* reference = nullptr;
+    if (selector.near != nullptr) {
+        const auto found = std::find_if(objects.begin(), objects.end(), [&](const auto& object) {
+            return object.id == selector.near->relative_to_object_id;
+        });
+        if (found != objects.end() && world_has_complete_position(*found)) reference = &*found;
+    }
+
+    struct Match { const WorldObject* object; double distance; };
+    std::vector<Match> matches;
+    if (selector.near == nullptr || reference != nullptr) {
+        for (const auto& object : objects) {
+            if (!world_in_scope(objects, object, base.parent_id, base.direct_child != 0)) continue;
+            bool tag_match = base.tag == nullptr || base.tag[0] == '\0';
+            for (const auto& tag : object.tags) if (matches_text(tag, base.tag, base.tag_match, error)) { tag_match = true; break; }
+            if (!error.empty()) return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+            if (!matches_text(object.id, base.id, base.id_match, error) ||
+                !matches_text(object.kind, base.kind, base.kind_match, error) ||
+                !matches_text(object.label, base.label, base.label_match, error) || !tag_match ||
+                !matches_filter(object.visible_to_player, base.visible_to_player, error) ||
+                !matches_filter(object.active, base.active, error) || !world_state_matches(object, base.state)) continue;
+            double distance = 0;
+            if (reference != nullptr) {
+                if (object.id == reference->id) continue;
+                const auto measured = world_distance(*reference, object);
+                if (!measured.has_value() || *measured > selector.near->max_distance) continue;
+                distance = *measured;
+            }
+            matches.push_back(Match { &object, distance });
+        }
+    }
+    if (!error.empty()) return "{\"valid\":false,\"error\":\"" + escape_json(error) + "\",\"matches\":[]}";
+    if (selector.near != nullptr) {
+        std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
+            if (left.distance != right.distance) return left.distance < right.distance;
+            return left.object->id < right.object->id;
+        });
+    }
+    const bool truncated = selector.near != nullptr && selector.limit != 0 && matches.size() > selector.limit;
+    if (truncated) matches.resize(selector.limit);
+
+    std::string json = "{\"valid\":true,\"sessionEpoch\":" + std::to_string(session_epoch) +
+        ",\"frameSequence\":" + std::to_string(frame_sequence) + ",\"revision\":" + std::to_string(revision) + ",\"matches\":[";
+    for (std::size_t i = 0; i < matches.size(); ++i) { if (i != 0) json += ','; json += world_object_json(*matches[i].object); }
+    json += ']';
+    if (selector.near != nullptr) {
+        json += ",\"spatial\":{\"relativeToObjectId\":\"" + escape_json(selector.near->relative_to_object_id) +
+            "\",\"truncated\":" + std::string(truncated ? "true" : "false") + ",\"distances\":[";
+        for (std::size_t i = 0; i < matches.size(); ++i) {
+            if (i != 0) json += ',';
+            json += "{\"objectId\":\"" + escape_json(matches[i].object->id) + "\",\"distance\":" + json_number(matches[i].distance) + '}';
+        }
+        json += "]}";
+    }
+    return json + '}';
+}
+
 const char* action_name(int action)
 {
     switch (action) {
@@ -2663,6 +2751,35 @@ extern "C" int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_
         return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector state\",\"matches\":[]}", out_json, out_json_size);
     const std::lock_guard lock(ctx->mutex);
     return copy_json_string(build_world_query_json(ctx->world_objects, *selector, observation_profile), out_json, out_json_size);
+}
+
+extern "C" int gua_query_world_objects_v2_json(gua_context_t* ctx, const gua_world_selector_v2_t* selector, int observation_profile, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(gua_world_selector_v2_t) ||
+        selector->base.struct_size < sizeof(gua_world_selector_v1_t) ||
+        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER) ||
+        (selector->base.id != nullptr && selector->base.id[0] == '\0') ||
+        (selector->base.kind != nullptr && selector->base.kind[0] == '\0') ||
+        (selector->base.label != nullptr && selector->base.label[0] == '\0') ||
+        (selector->base.tag != nullptr && selector->base.tag[0] == '\0') ||
+        (selector->base.parent_id != nullptr && selector->base.parent_id[0] == '\0') ||
+        (selector->base.direct_child != 0 && selector->base.direct_child != 1) ||
+        (selector->base.direct_child == 1 && (selector->base.parent_id == nullptr || selector->base.parent_id[0] == '\0')) ||
+        (selector->limit != 0 && selector->near == nullptr) ||
+        (selector->near != nullptr && (selector->near->struct_size < sizeof(gua_world_near_v1_t) ||
+            selector->near->relative_to_object_id == nullptr || selector->near->relative_to_object_id[0] == '\0' ||
+            !std::isfinite(selector->near->max_distance) || selector->near->max_distance < 0)))
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector\",\"matches\":[]}", out_json, out_json_size);
+    if (selector->base.state != nullptr && (selector->base.state->struct_size < sizeof(gua_world_state_value_v1_t) ||
+        selector->base.state->key == nullptr || selector->base.state->key[0] == '\0' ||
+        selector->base.state->type < GUA_WORLD_VALUE_NULL || selector->base.state->type > GUA_WORLD_VALUE_BOOLEAN ||
+        (selector->base.state->type == GUA_WORLD_VALUE_STRING && selector->base.state->string_value == nullptr) ||
+        (selector->base.state->type == GUA_WORLD_VALUE_NUMBER && !std::isfinite(selector->base.state->number_value))))
+        return copy_json_string("{\"valid\":false,\"error\":\"invalid world selector state\",\"matches\":[]}", out_json, out_json_size);
+    const std::lock_guard lock(ctx->mutex);
+    const auto revision = observation_profile == GUA_OBSERVATION_PROFILE_PLAYER ? ctx->player_world_revision : ctx->world_revision;
+    return copy_json_string(build_world_query_v2_json(ctx->world_objects, *selector, ctx->session_epoch,
+        ctx->world_frame_sequence, revision, observation_profile), out_json, out_json_size);
 }
 
 extern "C" int gua_enqueue_click(gua_context_t* ctx, const char* node_id)

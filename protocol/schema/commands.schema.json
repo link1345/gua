@@ -48,7 +48,10 @@
         "parentId": { "type": "string", "minLength": 1 }, "directChild": { "type": "integer", "enum": [0, 1] },
         "visibleToPlayer": { "type": "integer", "minimum": 0, "maximum": 2 }, "active": { "type": "integer", "minimum": 0, "maximum": 2 },
         "stateKey": { "type": "string", "minLength": 1 }, "stateType": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "stateString": { "type": "string" }, "stateNumber": { "type": "number" }, "stateBool": { "type": "boolean" }
+        "stateString": { "type": "string" }, "stateNumber": { "type": "number" }, "stateBool": { "type": "boolean" },
+        "relativeToObjectId": { "type": "string", "minLength": 1 },
+        "maxDistance": { "type": "number", "minimum": 0 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
       },
       "oneOf": [
         { "not": { "anyOf": [
@@ -66,7 +69,9 @@
       ],
       "allOf": [
         { "if": { "required": ["directChild"], "properties": { "directChild": { "const": 1 } } },
-          "then": { "required": ["parentId"] } }
+          "then": { "required": ["parentId"] } },
+        { "if": { "anyOf": [{ "required": ["relativeToObjectId"] }, { "required": ["maxDistance"] }, { "required": ["limit"] }] },
+          "then": { "required": ["relativeToObjectId", "maxDistance"] } }
       ]
     },
     "nodeCommand": {

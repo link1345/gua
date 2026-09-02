@@ -18,13 +18,18 @@ public sealed record GuaWorldObjectDescriptor(
     GuaAgentPolicy? AgentPolicy = null);
 
 public sealed record GuaWorldStateCriterion(string Key, object? Value);
+public sealed record GuaWorldNear(string RelativeToObjectId, double MaxDistance);
 public sealed record GuaWorldSelector(
     string? Id = null, GuaMatchMode IdMatch = GuaMatchMode.Exact,
     string? Kind = null, GuaMatchMode KindMatch = GuaMatchMode.Exact,
     string? Label = null, GuaMatchMode LabelMatch = GuaMatchMode.Exact,
     string? Tag = null, GuaMatchMode TagMatch = GuaMatchMode.Exact,
     string? ParentId = null, bool DirectChild = false, bool? VisibleToPlayer = null,
-    bool? Active = null, GuaWorldStateCriterion? State = null);
+    bool? Active = null, GuaWorldStateCriterion? State = null)
+{
+    public GuaWorldNear? Near { get; init; }
+    public uint? Limit { get; init; }
+}
 
 public sealed record GuaWorldObject(
     string Id, string Kind, string? Label, string Space, JsonElement Position, bool VisibleToPlayer,
@@ -32,7 +37,15 @@ public sealed record GuaWorldObject(
     IReadOnlyList<string>? Tags, IReadOnlyDictionary<string, JsonElement> State,
     string? DomainId, string? RelatedUiNodeId);
 public sealed record GuaWorldTree(int SchemaVersion, ulong SessionEpoch, ulong FrameSequence, ulong Revision, string Scene, IReadOnlyList<GuaWorldObject> Objects);
-public sealed record GuaWorldQueryResult(bool Valid, IReadOnlyList<GuaWorldObject> Matches, string? Error = null);
+public sealed record GuaWorldDistance(string ObjectId, double Distance);
+public sealed record GuaWorldSpatialResult(string RelativeToObjectId, bool Truncated, IReadOnlyList<GuaWorldDistance> Distances);
+public sealed record GuaWorldQueryResult(bool Valid, IReadOnlyList<GuaWorldObject> Matches, string? Error = null)
+{
+    public ulong? SessionEpoch { get; init; }
+    public ulong? FrameSequence { get; init; }
+    public ulong? Revision { get; init; }
+    public GuaWorldSpatialResult? Spatial { get; init; }
+}
 
 public interface IGuaWorldContext
 {
@@ -102,11 +115,11 @@ public sealed partial class GuaContext : IGuaWorldContext
         throw new TimeoutException("Timed out waiting for a Gua world object.");
     }
 
-    private unsafe string CopyWorldJson(Native.GuaNativeWorldSelectorV1? selector, GuaObservationProfile profile)
+    private unsafe string CopyWorldJson(Native.GuaNativeWorldSelectorV2? selector, GuaObservationProfile profile)
     {
         ThrowIfDisposed();
         int Required(byte* buffer, int size) => selector is { } value
-            ? Native.gua_query_world_objects_json(_handle, in value, (int)profile, buffer, size)
+            ? Native.gua_query_world_objects_v2_json(_handle, in value, (int)profile, buffer, size)
             : Native.gua_copy_world_object_tree_json(_handle, (int)profile, buffer, size);
         var required = Required(null, 0);
         if (required <= 0) throw new InvalidOperationException("Native Gua returned an invalid World Object Tree JSON size.");
@@ -193,7 +206,7 @@ internal sealed class NativeWorldDescriptor : IDisposable
 internal sealed class NativeWorldSelector : IDisposable
 {
     private readonly List<nint> allocations = [];
-    public Native.GuaNativeWorldSelectorV1 Value { get; }
+    public Native.GuaNativeWorldSelectorV2 Value { get; }
     public NativeWorldSelector(GuaWorldSelector source)
     {
         foreach (var (name, value) in new[] {
@@ -201,15 +214,32 @@ internal sealed class NativeWorldSelector : IDisposable
             (nameof(source.Tag), source.Tag), (nameof(source.ParentId), source.ParentId) })
             if (value is not null && value.Length == 0)
                 throw new ArgumentException($"World selector criterion '{name}' must be a non-empty string.", nameof(source));
+        if (source.DirectChild && source.ParentId is null)
+            throw new ArgumentException("World selector ParentId is required when DirectChild is true.", nameof(source));
+        if (source.Limit is 0)
+            throw new ArgumentException("World selector Limit must be positive when supplied.", nameof(source));
+        if (source.Limit.HasValue && source.Near is null)
+            throw new ArgumentException("World selector Near is required when Limit is supplied.", nameof(source));
+        if (source.Near is { } near && (string.IsNullOrEmpty(near.RelativeToObjectId) || double.IsNaN(near.MaxDistance) || double.IsInfinity(near.MaxDistance) || near.MaxDistance < 0))
+            throw new ArgumentException("World selector Near requires a non-empty object ID and a finite non-negative distance.", nameof(source));
         nint Text(string? value) { if (value is null) return 0; var p = Marshal.StringToCoTaskMemUTF8(value); allocations.Add(p); return p; }
         try {
             nint statePointer = 0;
             if (source.State is { } state) { var native = NativeWorldDescriptor.State(state.Key, state.Value, Text); statePointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.GuaNativeWorldStateValueV1>()); allocations.Add(statePointer); Marshal.StructureToPtr(native, statePointer, false); }
-            Value = new Native.GuaNativeWorldSelectorV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV1>(),
+            var baseSelector = new Native.GuaNativeWorldSelectorV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV1>(),
                 Id = Text(source.Id), IdMatch = (int)source.IdMatch, Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
                 Label = Text(source.Label), LabelMatch = (int)source.LabelMatch, Tag = Text(source.Tag), TagMatch = (int)source.TagMatch,
                 ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
                 VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer };
+            nint nearPointer = 0;
+            if (source.Near is { } spatial) {
+                var nativeNear = new Native.GuaNativeWorldNearV1 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldNearV1>(),
+                    RelativeToObjectId = Text(spatial.RelativeToObjectId), MaxDistance = spatial.MaxDistance };
+                nearPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.GuaNativeWorldNearV1>()); allocations.Add(nearPointer);
+                Marshal.StructureToPtr(nativeNear, nearPointer, false);
+            }
+            Value = new Native.GuaNativeWorldSelectorV2 { StructSize = (uint)Marshal.SizeOf<Native.GuaNativeWorldSelectorV2>(),
+                Base = baseSelector, Near = nearPointer, Limit = source.Limit ?? 0 };
         } catch { Dispose(); throw; }
     }
     private static int Filter(bool? value) => value is null ? 0 : value.Value ? 2 : 1;

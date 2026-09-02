@@ -55,6 +55,10 @@ function worldTree(objects: GuaWorldObject[] = []): GuaWorldObjectTree {
   return { schemaVersion: 1, sessionEpoch: 1, frameSequence: 2, revision: 2, scene: "level", objects };
 }
 
+function worldQuery(matches: GuaWorldObject[] = []) {
+  return { valid: true as const, sessionEpoch: 1, frameSequence: 1, revision: 1, matches };
+}
+
 describe("registerGuaWebMcp", () => {
   test("does not expose profile selection and accepts projected field omission", async () => {
     expect(guaWebMcpToolDefinitions.every((tool) => {
@@ -295,7 +299,7 @@ describe("registerGuaWebMcp", () => {
       findWorldObjects: async (selector) => {
         selectors.push(selector);
         queryCount += 1;
-        return { valid: true, matches: queryCount >= 2 ? [worldObject()] : [] };
+        return worldQuery(queryCount >= 2 ? [worldObject()] : []);
       },
     };
     const registration = await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
@@ -325,7 +329,7 @@ describe("registerGuaWebMcp", () => {
       findWorldObjects: async (_selector, options) => {
         timeouts.push(options?.timeoutMs ?? -1);
         queryCount += 1;
-        return { valid: true, matches: queryCount >= 2 ? [worldObject()] : [] };
+        return worldQuery(queryCount >= 2 ? [worldObject()] : []);
       },
     };
     await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
@@ -354,6 +358,18 @@ describe("registerGuaWebMcp", () => {
       expect(JSON.parse(result.content[0]!.text).error.code).toBe("invalid_request");
     }
     expect(queries).toBe(0);
+  });
+
+  test("rejects nearby engine results without spatial metadata", async () => {
+    const page = modelDocument();
+    const bridge: GuaBrowserBridge = {
+      getUiTree: async () => tree(),
+      performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
+      findWorldObjects: async () => worldQuery(),
+    };
+    await registerGuaWebMcp(bridge, { document: page.document });
+    const result = await page.tools.get("find_world_objects")!.execute({ relativeToObjectId: "player", maxDistance: 5 }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0]!.text).error.code).toBe("action_failed");
   });
 
   test.each([
@@ -789,14 +805,17 @@ describe("Gua same-page engine port", () => {
     const bridge = createGuaInPageBridge({ invoke: async (command) => {
       commands.push(command);
       if (command.type === "get_world_object_tree") return worldTree([worldObject()]);
-      if (command.type === "query_world_objects") return { valid: true, matches: [worldObject()] };
+      if (command.type === "query_world_objects") return { valid: true, sessionEpoch: 7, frameSequence: 8, revision: 9, matches: [worldObject()],
+        spatial: { relativeToObjectId: "player", truncated: false, distances: [{ objectId: "door", distance: 5 }] } };
       throw new Error("unsupported");
     } }, { world: true });
     expect((await bridge.getWorldObjectTree!()).objects[0]?.id).toBe("door");
-    expect((await bridge.findWorldObjects!({ visibleToPlayer: false, state: { key: "locked", value: true } })).matches).toHaveLength(1);
+    expect((await bridge.findWorldObjects!({ visibleToPlayer: false, state: { key: "locked", value: true },
+      near: { relativeToObjectId: "player", maxDistance: 5 }, limit: 2 })).matches).toHaveLength(1);
     expect(commands).toEqual([
       { type: "get_world_object_tree" },
-      { type: "query_world_objects", visibleToPlayer: 1, stateKey: "locked", stateType: 3, stateBool: true },
+      { type: "query_world_objects", visibleToPlayer: 1, stateKey: "locked", stateType: 3, stateBool: true,
+        relativeToObjectId: "player", maxDistance: 5, limit: 2 },
     ]);
   });
 

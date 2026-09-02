@@ -18,6 +18,15 @@
     "state": {
       "type": "object", "required": ["key", "value"], "additionalProperties": false,
       "properties": { "key": { "type": "string", "minLength": 1 }, "value": { "type": ["string", "number", "boolean", "null"] } }
-    }
-  }
+    },
+    "near": {
+      "type": "object", "required": ["relativeToObjectId", "maxDistance"], "additionalProperties": false,
+      "properties": {
+        "relativeToObjectId": { "type": "string", "minLength": 1 },
+        "maxDistance": { "type": "number", "minimum": 0 }
+      }
+    },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+  },
+  "dependentRequired": { "limit": ["near"] }
 }

@@ -77,6 +77,23 @@ public sealed class UnityIntegrationTests
         Assert.That(host.RemoteContext.GetRemoteTree().Nodes.All(node => Encoding.UTF8.GetByteCount(node.Id) <= 127), Is.True,
             "Unity must keep node IDs round-trippable through the fixed-size C ABI action request.");
 
+        var nearbyDoors = host.RemoteContext.QueryWorldObjects(new GuaWorldSelector(
+            Kind: "door", State: new GuaWorldStateCriterion("locked", true))
+            { Near = new GuaWorldNear("player-world", 5), Limit = 1 });
+        Assert.That(nearbyDoors.Valid, Is.True);
+        Assert.That(nearbyDoors.Matches.Select(match => match.Id), Is.EqualTo(new[] { "door-a" }));
+        Assert.That(nearbyDoors.Spatial?.Truncated, Is.True);
+        Assert.That(nearbyDoors.Spatial?.Distances.Single().Distance, Is.EqualTo(5));
+        Assert.That(nearbyDoors.SessionEpoch, Is.Not.Null);
+        Assert.That(nearbyDoors.FrameSequence, Is.Not.Null);
+        Assert.That(nearbyDoors.Revision, Is.Not.Null);
+
+        var nearby3D = host.RemoteContext.QueryWorldObjects(new GuaWorldSelector
+            { Near = new GuaWorldNear("anchor-3d", 3) });
+        Assert.That(nearby3D.Valid, Is.True);
+        Assert.That(nearby3D.Matches.Select(match => match.Id), Does.Contain("target-3d"));
+        Assert.That(nearby3D.Spatial!.Distances.Single(distance => distance.ObjectId == "target-3d").Distance, Is.EqualTo(3));
+
         var initialTree = host.RemoteContext.GetRemoteTree();
         Assert.That(initialTree.Nodes.Count(node => node.Label == "Start Game" || node.Text == "Start Game"), Is.EqualTo(1),
             "A button label must not be duplicated as an independent text node.");

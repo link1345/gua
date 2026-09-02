@@ -14,7 +14,7 @@ import {
   type RecordingStep,
   validateRecording,
 } from "./automation.js";
-import { selectorFromArguments, worldObservationTools, type GuaWorldQueryResult, type GuaWorldObjectTree, type GuaWorldSelector } from "gua-world-tools";
+import { parseWorldQueryResult, selectorFromArguments, worldObservationTools, type GuaWorldQueryResult, type GuaWorldObjectTree, type GuaWorldSelector } from "gua-world-tools";
 
 type JsonRpcId = string | number | null;
 
@@ -976,13 +976,16 @@ export class GuaBridgeClient {
 
   async findWorldObjects(selector: GuaWorldSelector, timeoutMs = this.requestTimeoutMs): Promise<GuaWorldQueryResult> {
     const state = selector.state;
-    return this.request<GuaWorldQueryResult>({ type: "query_world_objects", worldId: selector.id, kind: selector.kind,
+    const result = await this.request<unknown>({ type: "query_world_objects", worldId: selector.id, kind: selector.kind,
       label: selector.label, tag: selector.tag, parentId: selector.parentId, directChild: selector.directChild ? 1 : 0,
       visibleToPlayer: filter(selector.visibleToPlayer), active: filter(selector.active), stateKey: state?.key,
       stateType: state === undefined ? undefined : state.value === null ? 0 : typeof state.value === "string" ? 1 : typeof state.value === "number" ? 2 : 3,
       stateString: typeof state?.value === "string" ? state.value : undefined,
       stateNumber: typeof state?.value === "number" ? state.value : undefined,
-      stateBool: typeof state?.value === "boolean" ? state.value : undefined }, timeoutMs);
+      stateBool: typeof state?.value === "boolean" ? state.value : undefined,
+      relativeToObjectId: selector.near?.relativeToObjectId, maxDistance: selector.near?.maxDistance,
+      limit: selector.limit }, timeoutMs);
+    return parseWorldQueryResult(result, selector);
   }
 
   async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number) {
@@ -1220,7 +1223,7 @@ export class GuaBridgeClient {
 type BridgeCommandInput =
   | { type: "get_ui_tree" }
   | { type: "get_world_object_tree" }
-  | { type: "query_world_objects"; worldId?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: number; visibleToPlayer?: number; active?: number; stateKey?: string; stateType?: number; stateString?: string; stateNumber?: number; stateBool?: boolean }
+  | { type: "query_world_objects"; worldId?: string; kind?: string; label?: string; tag?: string; parentId?: string; directChild?: number; visibleToPlayer?: number; active?: number; stateKey?: string; stateType?: number; stateString?: string; stateNumber?: number; stateBool?: boolean; relativeToObjectId?: string; maxDistance?: number; limit?: number }
   | { type: "get_logs" }
   | { type: "get_screenshot" }
   | { type: "get_context_status" }

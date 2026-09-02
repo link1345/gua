@@ -6,7 +6,7 @@ describe("World WebMCP tools", () => {
     const tools = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
     const calls: string[] = [];
     const selectors: unknown[] = [];
-    const provider = { getWorldObjectTree: async () => { calls.push("tree"); return { schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "test", objects: [] }; }, findWorldObjects: async (selector: unknown) => { selectors.push(selector); calls.push("find"); return { valid: true, matches: [] }; }, waitForWorldObject: async () => { throw new Error("timeout"); } };
+    const provider = { getWorldObjectTree: async () => { calls.push("tree"); return { schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "test", objects: [] }; }, findWorldObjects: async (selector: unknown) => { selectors.push(selector); calls.push("find"); return { valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches: [] }; }, waitForWorldObject: async () => { throw new Error("timeout"); } };
     expect(registerWorldWebMcpTools(undefined, provider)).toBe(false);
     expect(registerWorldWebMcpTools({ registerTool: (tool) => tools.set(tool.name, tool.execute) }, provider)).toBe(true);
     expect(await tools.get("get_world_object_tree")?.({})).toEqual(expect.objectContaining({ scene: "test" }));
@@ -38,6 +38,17 @@ describe("World WebMCP tools", () => {
     expect(selectorFromArguments({ parentId: "room", directChild: true })).toEqual({ parentId: "room", directChild: true });
   });
 
+  test("requires complete spatial criteria and validates limit", () => {
+    expect(() => selectorFromArguments({ relativeToObjectId: "player" })).toThrow("supplied together");
+    expect(() => selectorFromArguments({ maxDistance: 5 })).toThrow("supplied together");
+    expect(() => selectorFromArguments({ relativeToObjectId: "", maxDistance: 5 })).toThrow("non-empty string");
+    expect(() => selectorFromArguments({ relativeToObjectId: "player", maxDistance: -1 })).toThrow("non-negative");
+    expect(() => selectorFromArguments({ limit: 1 })).toThrow("required when limit");
+    expect(() => selectorFromArguments({ relativeToObjectId: "player", maxDistance: 5, limit: 0 })).toThrow("1 through");
+    expect(selectorFromArguments({ relativeToObjectId: "player", maxDistance: 5, limit: 2 }))
+      .toEqual({ near: { relativeToObjectId: "player", maxDistance: 5 }, limit: 2 });
+  });
+
   test("rejects supplied invalid string criteria instead of dropping them", () => {
     for (const key of ["id", "kind", "label", "tag", "parentId"] as const) {
       expect(() => selectorFromArguments({ [key]: "" })).toThrow(`${key} must be a non-empty string`);
@@ -51,7 +62,7 @@ describe("World WebMCP tools", () => {
   test("rejects unknown direct tool arguments", async () => {
     expect(() => selectorFromArguments({ knd: "enemy" })).toThrow("Unknown world selector argument: knd");
     const tools = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
-    const provider = { getWorldObjectTree: async () => ({ schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "test", objects: [] }), findWorldObjects: async () => ({ valid: true, matches: [] }), waitForWorldObject: async () => { throw new Error("timeout"); } };
+    const provider = { getWorldObjectTree: async () => ({ schemaVersion: 1 as const, sessionEpoch: 1, frameSequence: 1, revision: 1, scene: "test", objects: [] }), findWorldObjects: async () => ({ valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches: [] }), waitForWorldObject: async () => { throw new Error("timeout"); } };
     registerWorldWebMcpTools({ registerTool: (tool) => tools.set(tool.name, tool.execute) }, provider);
     await expect(tools.get("get_world_object_tree")?.({ id: "door" })).rejects.toThrow("Unknown get_world_object_tree argument");
     await expect(tools.get("find_world_objects")?.({ timeoutMs: 10 })).rejects.toThrow("Unknown find_world_objects argument");
@@ -63,7 +74,17 @@ describe("World WebMCP tools", () => {
       visibleToPlayer: true, active: true, agentExposure: "auto", tags: ["interactive"], state: { locked: true } };
     const tree = { schemaVersion: 1, sessionEpoch: 1, frameSequence: 2, revision: 3, scene: "level", objects: [object] };
     expect(parseWorldObjectTree(JSON.stringify(tree))).toEqual(tree);
-    expect(parseWorldQueryResult({ valid: true, matches: [object] })).toEqual({ valid: true, matches: [object] });
+    const query = { valid: true, sessionEpoch: 1, frameSequence: 2, revision: 3, matches: [object],
+      spatial: { relativeToObjectId: "player", truncated: false, distances: [{ objectId: "door", distance: 5 }] } };
+    expect(parseWorldQueryResult(query)).toEqual(query);
+    const near = { near: { relativeToObjectId: "player", maxDistance: 5 }, limit: 1 };
+    expect(parseWorldQueryResult(query, near)).toEqual(query);
+    expect(() => parseWorldQueryResult({ ...query, spatial: undefined }, near)).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult(query, {})).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, relativeToObjectId: "other" } }, near)).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, truncated: true } }, { near: near.near })).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, distances: [] } })).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, distances: [{ objectId: "other", distance: 5 }] } })).toThrow("invalid world query result");
     const projected = { ...object, label: undefined, tags: undefined, position: { x: 1 }, domainId: "", relatedUiNodeId: "" };
     expect(parseWorldObjectTree({ ...tree, objects: [projected] }).objects).toEqual([projected]);
     for (const invalid of [
@@ -74,5 +95,7 @@ describe("World WebMCP tools", () => {
       { ...tree, objects: [{ ...object, state: { distance: Number.NaN } }] },
     ]) expect(() => parseWorldObjectTree(invalid)).toThrow("invalid protocol World Object Tree");
     expect(() => parseWorldQueryResult({ valid: true, matches: [{ ...object, position: null }] })).toThrow("invalid world query result");
+    expect(() => parseWorldQueryResult({ valid: true, matches: [object] })).toThrow("invalid world query result");
+    expect(parseWorldQueryResult({ valid: false, matches: [], error: "invalid selector" })).toEqual({ valid: false, matches: [], error: "invalid selector" });
   });
 });

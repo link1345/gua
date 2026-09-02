@@ -47,6 +47,7 @@ internal static partial class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_abort_world_frame(nint context);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_copy_world_object_tree_json(nint context, int profile, byte* outJson, int outJsonSize);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_query_world_objects_json(nint context, in GuaNativeWorldSelectorV1 selector, int profile, byte* outJson, int outJsonSize);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_query_world_objects_v2_json(nint context, in GuaNativeWorldSelectorV2 selector, int profile, byte* outJson, int outJsonSize);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern nint gua_get_ui_tree_json(nint context);

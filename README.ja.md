@@ -202,6 +202,8 @@ Guaは、明示的にopt-inしたゲーム世界のobjectをSemantic UI Treeと�
 
 native bridgeの既定はdebug viewである。host processに`GUA_OBSERVATION_PROFILE=player`を設定すると、UIとWorldの双方へancestor visibility、`private`除外、field ruleを適用してから公開する。client入力からdebugへ昇格することはできない。World v1は観測専用であり、MCPは`get_world_object_tree`、`find_world_objects`、`wait_for_world_object`を提供し、Inspectorは独立したWorld Object Tree panelへ表示する。
 
+World selectorへ`relativeToObjectId`と`maxDistance`、任意の正の`limit`を渡すと半径検索できる。runtimeは同じ投影済みsnapshot上で`world2d`をXY、`world3d`をXYZとして距離を評価し、snapshot metadataとmatchに対応するdistanceを返す。waitは新しいsnapshotごとに再評価する。距離の単位はhost側のworld unitであり、privateな基準IDと未知IDはいずれも空結果になる。
+
 `GuaAgentPolicy`は公開fieldのomit、redact、同型replace、数値quantizeとUI action allowlistを定義する。Debug snapshotは完全なtreeを維持し、Playerではsnapshot、query、wait、diagnostics、action認可に同じ投影を使う。debug logは公開せず、screenshotも既定で拒否する。hostが必要性を判断した場合に限り、bridge開始前に明示的に許可できる。
 
 engine設定、selector、Player向け公開方法は

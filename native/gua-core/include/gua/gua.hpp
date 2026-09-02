@@ -341,6 +341,22 @@ public:
         });
     }
 
+    [[nodiscard]] std::string world_object_tree_json(ObservationProfile profile = ObservationProfile::debug) const
+    {
+        return copy_json([profile](gua_context_t* context, char* output, int size) {
+            return gua_copy_world_object_tree_json(context, static_cast<int>(profile), output, size);
+        });
+    }
+
+    [[nodiscard]] std::string query_world_objects_json(
+        const gua_world_selector_v2_t& selector,
+        ObservationProfile profile = ObservationProfile::debug) const
+    {
+        return copy_json([&selector, profile](gua_context_t* context, char* output, int size) {
+            return gua_query_world_objects_v2_json(context, &selector, static_cast<int>(profile), output, size);
+        });
+    }
+
     void log(LogLevel level, std::string_view message)
     {
         message_buffer_.assign(message);

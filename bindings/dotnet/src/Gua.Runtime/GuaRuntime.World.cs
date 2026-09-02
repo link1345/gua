@@ -121,15 +121,15 @@ public sealed partial class GuaRuntime
         using var native = new RuntimeWorldSelector(selector);
         var value = native.Value;
         var required = playerProjection
-            ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, null, 0)
-            : Native.gua_runtime_query_world_objects_json(_handle, in value, null, 0);
+            ? Native.gua_runtime_query_player_world_objects_v2_json(_handle, in value, null, 0)
+            : Native.gua_runtime_query_world_objects_v2_json(_handle, in value, null, 0);
         if (required <= 0) throw new InvalidOperationException("World object query is unavailable.");
         while (true) {
             var bytes = new byte[required];
             fixed (byte* output = bytes) {
                 var actual = playerProjection
-                    ? Native.gua_runtime_query_player_world_objects_json(_handle, in value, output, bytes.Length)
-                    : Native.gua_runtime_query_world_objects_json(_handle, in value, output, bytes.Length);
+                    ? Native.gua_runtime_query_player_world_objects_v2_json(_handle, in value, output, bytes.Length)
+                    : Native.gua_runtime_query_world_objects_v2_json(_handle, in value, output, bytes.Length);
                 if (actual <= 0) throw new InvalidOperationException("World object query is unavailable.");
                 if (actual <= bytes.Length) return Encoding.UTF8.GetString(bytes, 0, actual - 1);
                 required = actual;
@@ -141,7 +141,7 @@ public sealed partial class GuaRuntime
 internal sealed class RuntimeWorldSelector : IDisposable
 {
     private readonly List<nint> allocations = [];
-    public Native.WorldSelector Value { get; }
+    public Native.WorldSelectorV2 Value { get; }
 
     public RuntimeWorldSelector(GuaWorldSelector source)
     {
@@ -152,6 +152,12 @@ internal sealed class RuntimeWorldSelector : IDisposable
                 throw new ArgumentException($"World selector criterion '{name}' must be a non-empty string.", nameof(source));
         if (source.DirectChild && source.ParentId is null)
             throw new ArgumentException("World selector ParentId is required when DirectChild is true.", nameof(source));
+        if (source.Limit is 0)
+            throw new ArgumentException("World selector Limit must be positive when supplied.", nameof(source));
+        if (source.Limit.HasValue && source.Near is null)
+            throw new ArgumentException("World selector Near is required when Limit is supplied.", nameof(source));
+        if (source.Near is { } near && (string.IsNullOrEmpty(near.RelativeToObjectId) || double.IsNaN(near.MaxDistance) || double.IsInfinity(near.MaxDistance) || near.MaxDistance < 0))
+            throw new ArgumentException("World selector Near requires a non-empty object ID and a finite non-negative distance.", nameof(source));
         nint Text(string? text) { if (text is null) return 0; var pointer = Marshal.StringToCoTaskMemUTF8(text); allocations.Add(pointer); return pointer; }
         try {
             nint statePointer = 0;
@@ -170,7 +176,7 @@ internal sealed class RuntimeWorldSelector : IDisposable
                 allocations.Add(statePointer);
                 Marshal.StructureToPtr(nativeState, statePointer, false);
             }
-            Value = new Native.WorldSelector {
+            var baseSelector = new Native.WorldSelector {
                 StructSize = (uint)Marshal.SizeOf<Native.WorldSelector>(),
                 Id = Text(source.Id), IdMatch = (int)source.IdMatch,
                 Kind = Text(source.Kind), KindMatch = (int)source.KindMatch,
@@ -179,6 +185,15 @@ internal sealed class RuntimeWorldSelector : IDisposable
                 ParentId = Text(source.ParentId), DirectChild = source.DirectChild ? 1 : 0,
                 VisibleToPlayer = Filter(source.VisibleToPlayer), Active = Filter(source.Active), State = statePointer,
             };
+            nint nearPointer = 0;
+            if (source.Near is { } spatial) {
+                var nativeNear = new Native.WorldNear { StructSize = (uint)Marshal.SizeOf<Native.WorldNear>(),
+                    RelativeToObjectId = Text(spatial.RelativeToObjectId), MaxDistance = spatial.MaxDistance };
+                nearPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<Native.WorldNear>()); allocations.Add(nearPointer);
+                Marshal.StructureToPtr(nativeNear, nearPointer, false);
+            }
+            Value = new Native.WorldSelectorV2 { StructSize = (uint)Marshal.SizeOf<Native.WorldSelectorV2>(),
+                Base = baseSelector, Near = nearPointer, Limit = source.Limit ?? 0 };
         } catch { Dispose(); throw; }
     }
 
