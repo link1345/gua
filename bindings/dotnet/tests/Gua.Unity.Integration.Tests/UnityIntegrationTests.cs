@@ -26,18 +26,28 @@ public sealed class UnityIntegrationTests
         var scene = Environment.GetEnvironmentVariable("GUA_UNITY_SCENE");
         if (string.IsNullOrWhiteSpace(scene)) Assert.Ignore("Set GUA_UNITY_SCENE to run the Unity Editor integration fixture.");
         var batchMode = string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_EDITOR_BATCH_MODE"), "1", StringComparison.Ordinal);
+        var disableAssemblyUpdater = string.Equals(Environment.GetEnvironmentVariable("GUA_UNITY_EDITOR_DISABLE_ASSEMBLY_UPDATER"), "1", StringComparison.Ordinal);
         using var host = UnitySceneTestHost.LoadEditor(scene!, new UnitySceneTestHostOptions
         {
             UnityExecutablePath = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"),
             ProjectPath = Environment.GetEnvironmentVariable("GUA_UNITY_PROJECT"),
             ConnectTimeout = TimeSpan.FromSeconds(60),
             SceneTimeout = TimeSpan.FromSeconds(15),
-            AdditionalArguments = batchMode ? ["-batchmode"] : [],
+            AdditionalArguments = EditorAdditionalArguments(batchMode, disableAssemblyUpdater),
         });
         Assert.That(WaitForText(host, "Start Game"), Is.True);
         Assert.That(WaitForText(host, "Gua Unity Sample"), Is.True);
         Assert.That(WaitForScreen(host, "title"), Is.True);
         Assert.That(host.RemoteContext.GetVersion().AdapterVersions, Contains.Key("unity"));
+    }
+
+    [Test]
+    public void EditorStartupArguments_CanDisableUpdaterAfterBatchMode()
+    {
+        Assert.That(EditorAdditionalArguments(batchMode: true, disableAssemblyUpdater: true),
+            Is.EqualTo(new[] { "-batchmode", "-disable-assembly-updater" }));
+        Assert.That(EditorAdditionalArguments(batchMode: true, disableAssemblyUpdater: false),
+            Is.EqualTo(new[] { "-batchmode" }));
     }
 
     [Test]
@@ -267,6 +277,14 @@ public sealed class UnityIntegrationTests
     private static bool WaitForAction(UnitySceneTestHost host, ulong requestId)
     {
         return WaitForActionEvent(host, requestId, out var action) && action.Succeeded;
+    }
+
+    private static IReadOnlyList<string> EditorAdditionalArguments(bool batchMode, bool disableAssemblyUpdater)
+    {
+        var arguments = new List<string>();
+        if (batchMode) arguments.Add("-batchmode");
+        if (disableAssemblyUpdater) arguments.Add("-disable-assembly-updater");
+        return arguments;
     }
 
     private static bool WaitForActionEvent(UnitySceneTestHost host, ulong requestId, out GuaActionEvent result)

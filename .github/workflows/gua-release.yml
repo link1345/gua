@@ -714,6 +714,10 @@ jobs:
           GUA_UNITY_PROJECT: ${{ github.workspace }}/examples/unity-smoke
           GUA_UNITY_SCENE: Assets/Scenes/GuaUnityFixture.unity
           GUA_UNITY_EDITOR_BATCH_MODE: '1'
+          # The packaged assemblies are built by this workflow with the same Unity
+          # version. On a cold macOS import, the API Updater can run before uGUI's
+          # UnityEngine.UI assembly reaches its search path and block play mode.
+          GUA_UNITY_EDITOR_DISABLE_ASSEMBLY_UPDATER: ${{ matrix.kind == 'macos' && '1' || '0' }}
         run: dotnet test bindings/dotnet/tests/Gua.Unity.Integration.Tests/Gua.Unity.Integration.Tests.csproj -c Release --filter RenderedEditorPlayMode_ReflectsFixture
       - name: Run Editor Play Mode external smoke with Xvfb
         if: matrix.kind == 'linux'
