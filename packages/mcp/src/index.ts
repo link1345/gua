@@ -1176,6 +1176,8 @@ export class GuaBridgeClient {
   private connectForRequest(commandType: BridgeCommandInput["type"], timeoutMs: number,
     signal?: AbortSignal): Promise<WebSocket> {
     const connection = this.connect();
+    const attempt = this.connectionAttempt?.promise === connection ? this.connectionAttempt : null;
+    if (attempt !== null) attempt.waiterCount++;
     return new Promise<WebSocket>((resolve, reject) => {
       let settled = false;
       let timeoutId: ReturnType<typeof setTimeout>;
@@ -1189,6 +1191,7 @@ export class GuaBridgeClient {
         if (settled) return;
         settled = true;
         cleanup();
+        this.releaseConnectionWaiter(attempt);
         resolve(socket);
       };
 
@@ -1196,7 +1199,7 @@ export class GuaBridgeClient {
         if (settled) return;
         settled = true;
         cleanup();
-        this.discardConnectionAttempt(connection, error);
+        this.releaseConnectionWaiter(attempt, error);
         reject(error);
       };
 
@@ -1226,7 +1229,7 @@ export class GuaBridgeClient {
       resolveAttempt = resolve;
       rejectAttempt = reject;
     });
-    const attempt: ConnectionAttempt = { socket, promise, reject: rejectAttempt };
+    const attempt: ConnectionAttempt = { socket, promise, reject: rejectAttempt, waiterCount: 0 };
     this.connectionAttempt = attempt;
 
     socket.addEventListener("open", () => {
@@ -1268,9 +1271,10 @@ export class GuaBridgeClient {
     return promise;
   }
 
-  private discardConnectionAttempt(connection: Promise<WebSocket>, error: unknown): void {
-    const attempt = this.connectionAttempt;
-    if (attempt === null || attempt.promise !== connection) return;
+  private releaseConnectionWaiter(attempt: ConnectionAttempt | null, error?: unknown): void {
+    if (attempt === null) return;
+    attempt.waiterCount--;
+    if (error === undefined || attempt.waiterCount !== 0 || this.connectionAttempt !== attempt) return;
     this.connectionAttempt = null;
     attempt.reject(error);
     closePendingSocket(attempt.socket);
@@ -1357,6 +1361,7 @@ interface ConnectionAttempt {
   socket: WebSocket;
   promise: Promise<WebSocket>;
   reject(error: unknown): void;
+  waiterCount: number;
 }
 
 function closePendingSocket(socket: WebSocket): void {

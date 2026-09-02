@@ -186,6 +186,28 @@ describe("GuaAutomationManager", () => {
     }
   });
 
+  test("keeps a shared connection attempt alive for an uncancelled waiter", async () => {
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket();
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    });
+    const controller = new AbortController();
+    try {
+      const cancelled = bridge.findWorldObjects({ kind: "cancelled" }, 5000, controller.signal);
+      const surviving = bridge.findWorldObjects({ kind: "door" }, 5000);
+      expect(sockets).toHaveLength(1);
+      controller.abort();
+      await expect(cancelled).rejects.toThrow("cancelled");
+      expect(sockets[0]?.closed).toBe(false);
+      sockets[0]!.open();
+      await expect(surviving).resolves.toMatchObject({ valid: true, matches: [] });
+    } finally {
+      bridge.close();
+    }
+  });
+
   test("keeps bundled workspace packages out of published dependencies", async () => {
     const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     expect(Object.values(manifest.dependencies ?? {}).some((version) => String(version).startsWith("workspace:"))).toBe(false);
