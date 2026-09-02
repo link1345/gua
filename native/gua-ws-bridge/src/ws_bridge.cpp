@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
@@ -601,11 +602,11 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
         json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
     if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
         return std::nullopt;
-    const std::string token(json.substr(start, end - start));
-    char* parsed_end = nullptr;
-    errno = 0;
-    const double value = std::strtod(token.c_str(), &parsed_end);
-    return errno != ERANGE && parsed_end == token.c_str() + token.size() && std::isfinite(value)
+    const std::string_view token = json.substr(start, end - start);
+    double value = 0;
+    const auto [parsed_end, error] = std::from_chars(token.data(), token.data() + token.size(), value,
+        std::chars_format::general);
+    return error == std::errc() && parsed_end == token.data() + token.size() && std::isfinite(value)
         ? std::optional<double>(value) : std::nullopt;
 }
 
@@ -781,8 +782,10 @@ Command parse_command(std::string_view json)
     command.world_selector.state_bool = json_bool_field(json, "stateBool");
     command.world_selector.relative_to_object_id = json_string_field(json, "relativeToObjectId").value_or("");
     command.world_selector.max_distance = json_number_field(json, "maxDistance").value_or(0);
-    const auto world_limit = json_uint64_field(json, "limit");
-    command.world_selector.limit = world_limit.has_value() && *world_limit <= UINT32_MAX ? static_cast<unsigned int>(*world_limit) : 0;
+    const auto world_limit = json_number_field(json, "limit");
+    const bool world_limit_valid = world_limit.has_value() && *world_limit >= 1 &&
+        *world_limit <= static_cast<double>(UINT32_MAX) && std::trunc(*world_limit) == *world_limit;
+    command.world_selector.limit = world_limit_valid ? static_cast<unsigned int>(*world_limit) : 0;
     const bool relative_present = json_has_field(json, "relativeToObjectId");
     const bool max_distance_present = json_has_field(json, "maxDistance");
     const bool limit_present = json_has_field(json, "limit");
@@ -804,7 +807,7 @@ Command parse_command(std::string_view json)
         (!command.world_selector.direct_child || !command.world_selector.parent_id.empty()) &&
         (relative_present == max_distance_present) && (!relative_present || (!command.world_selector.relative_to_object_id.empty() &&
             json_number_field(json, "maxDistance").has_value() && command.world_selector.max_distance >= 0)) &&
-        (!limit_present || (command.world_selector.spatial && world_limit.has_value() && *world_limit >= 1 && *world_limit <= UINT32_MAX));
+        (!limit_present || (command.world_selector.spatial && world_limit_valid));
     const bool state_key_present = json_has_field(json, "stateKey");
     const bool state_type_present = json_has_field(json, "stateType");
     const bool state_string_present = json_has_field(json, "stateString");

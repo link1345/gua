@@ -17,6 +17,11 @@ namespace Gua.Selector.Tests;
 [TestFixture]
 public sealed class SelectorParityTests
 {
+    private const int WindowsLcNumeric = 4;
+
+    [DllImport("ucrtbase.dll", EntryPoint = "setlocale", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SetWindowsLocale(int category, string? locale);
+
     [Test]
     public void WorldV2PropertiesPreserveV1RecordConstructionAndDeconstruction()
     {
@@ -256,7 +261,7 @@ public sealed class SelectorParityTests
         });
     }
 
-    [Test]
+    [Test, NonParallelizable]
     public async Task RemoteWorldObjectTreeKeepsTheHostPlayerProfileAndStateSelector()
     {
         var port = ReservePort();
@@ -325,8 +330,29 @@ public sealed class SelectorParityTests
                     "{\"id\":104,\"type\":\"query_world_objects\",\"active\":\"true\"}",
                     "{\"id\":105,\"type\":\"query_world_objects\",\"knd\":\"door\"}",
                     "{\"id\":106,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\"}",
-                    "{\"id\":107,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5,\"limit\":0}" })
+                    "{\"id\":107,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5,\"limit\":0}",
+                    "{\"id\":108,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5,\"limit\":1.5}",
+                    "{\"id\":109,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5,\"limit\":4294967296.0}",
+                    "{\"id\":110,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5,\"limit\":1e400}" })
                     Assert.That((await SendRawCommandAsync(malformed, command)).GetProperty("ok").GetBoolean(), Is.False);
+                string? previousNumericLocale = null;
+                try
+                {
+                    if (OperatingSystem.IsWindows())
+                    {
+                        previousNumericLocale = Marshal.PtrToStringAnsi(SetWindowsLocale(WindowsLcNumeric, null));
+                        Assert.That(SetWindowsLocale(WindowsLcNumeric, "de-DE"), Is.Not.EqualTo(IntPtr.Zero));
+                    }
+                    foreach (var command in new[] {
+                        "{\"id\":111,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5.0,\"limit\":1.0}",
+                        "{\"id\":112,\"type\":\"query_world_objects\",\"relativeToObjectId\":\"player\",\"maxDistance\":5e0,\"limit\":1e0}" })
+                        Assert.That((await SendRawCommandAsync(malformed, command)).GetProperty("ok").GetBoolean(), Is.True);
+                }
+                finally
+                {
+                    if (previousNumericLocale is not null)
+                        SetWindowsLocale(WindowsLcNumeric, previousNumericLocale);
+                }
             }
             Assert.That((await remote.WaitForWorldObjectAsync(new GuaWorldSelector(Kind: "door"), TimeSpan.FromSeconds(1))).Id, Is.EqualTo("door-a"));
             Assert.That(remote.GetContextStatus().WorldObjectCount, Is.EqualTo(2));
