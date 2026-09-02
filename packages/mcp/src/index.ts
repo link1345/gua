@@ -147,6 +147,7 @@ export const guaMcpTools = [
   "scroll",
   "press_key",
   "get_game_input_actions",
+  "find_game_input_actions",
   "press_game_input_action",
   "set_game_input_action",
   "release_game_input_action",
@@ -187,6 +188,13 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
   ...guaWebMcpToolDefinitions.map(toMcpToolDefinition),
   ...worldObservationTools,
   { name: "get_game_input_actions", description: "Read the host-published semantic game action map.", inputSchema: objectSchema({}) },
+  { name: "find_game_input_actions", description: "Search the current host-authorized semantic game action map.", inputSchema: objectSchema({
+    id: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 }, query: { type: "string", minLength: 1, maxLength: 128, pattern: "^[^\\u0000]+$" },
+    valueType: { type: "string", enum: ["button", "axis1d", "vector2", "text"] }, active: { type: "boolean" },
+    context: { type: "string", minLength: 1, pattern: "^[^\\u0000]+$" }, category: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 },
+    tags: { type: "array", maxItems: 16, uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 64, pattern: "^[^\\u0000]+$" } },
+    limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+  }) },
   { name: "press_game_input_action", description: "Press a semantic button action and wait for host completion.", inputSchema: objectSchema({
     actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
   }, ["actionId"]) },
@@ -533,6 +541,7 @@ async function executeTool(
         modifiers: readIntegerArg(args, "modifiers", 0),
       });
     case "get_game_input_actions": return bridge.getGameInputActions();
+    case "find_game_input_actions": return bridge.findGameInputActions(gameInputSearchCommand(args));
     case "get_game_input_state": return bridge.getGameInputState();
     case "press_game_input_action":
       return performGameInput(bridge, automation, { type: name, actionId: readStringArg(args, "actionId"),
@@ -691,6 +700,19 @@ type GameInputCommandInput =
   | { type: "reset_gamepad"; gamepadIndex?: number }
   | { type: "text_input"; text: string; sensitive?: boolean; secretKey?: string };
 
+function gameInputSearchCommand(input: Record<string, unknown>): Omit<Extract<BridgeCommandInput, { type: "find_game_input_actions" }>, "type"> {
+  const valueType = readOptionalStringArg(input, "valueType");
+  const valueTypeCode = valueType === undefined ? undefined : ({ button: 1, axis1d: 2, vector2: 3, text: 4 } as const)[valueType as "button" | "axis1d" | "vector2" | "text"];
+  if (valueType !== undefined && valueTypeCode === undefined) throw new Error("valueType is invalid.");
+  const tags = input.tags;
+  if (tags !== undefined && (!Array.isArray(tags) || !tags.every((tag) => typeof tag === "string" && tag.length > 0)))
+    throw new Error("tags must contain non-empty strings.");
+  return compactResult({ actionId: readOptionalStringArg(input, "id"), query: readOptionalStringArg(input, "query"),
+    valueType: valueTypeCode, active: input.active === undefined ? undefined : readRequiredBooleanArg(input, "active") ? 2 : 1,
+    context: readOptionalStringArg(input, "context"), category: readOptionalStringArg(input, "category"),
+    tags: tags as string[] | undefined, limit: readIntegerArg(input, "limit", 20) });
+}
+
 async function performGameInput(
   bridge: GuaBridgeClient,
   automation: GuaAutomationManager | undefined,
@@ -699,7 +721,7 @@ async function performGameInput(
   signal?: AbortSignal,
 ): Promise<{ ok: true; requestId: number; completion: GameInputCompletion }> {
   if (input.type === "press_game_input_action" || input.type === "set_game_input_action") {
-    const snapshot = await bridge.getGameInputActions();
+    const snapshot = await findGameInputActionSnapshot(bridge, input.actionId);
     if (!isRecord(snapshot) || !Array.isArray(snapshot.actions)) throw new Error("Gua returned an invalid game input action map.");
     const action = snapshot.actions.find((candidate) => isRecord(candidate) && candidate.id === input.actionId);
     if (isRecord(action) && action.requiresConfirmation === true && input.confirmed !== true) {
@@ -920,7 +942,7 @@ function readSecret(secrets: Record<string, unknown>, key: string): string {
 }
 
 async function decodeGameInputSecret(bridge: GuaBridgeClient, actionId: string, secret: string): Promise<unknown> {
-  const snapshot = await bridge.getGameInputActions();
+  const snapshot = await findGameInputActionSnapshot(bridge, actionId);
   if (!isRecord(snapshot) || !Array.isArray(snapshot.actions)) throw new Error("Gua returned an invalid game input action map.");
   const action = snapshot.actions.find((candidate) => isRecord(candidate) && candidate.id === actionId);
   if (!isRecord(action) || typeof action.valueType !== "string") throw new Error(`Unknown game input action '${actionId}'.`);
@@ -948,6 +970,18 @@ async function decodeGameInputSecret(bridge: GuaBridgeClient, actionId: string, 
     return { x: value.x, y: value.y };
   }
   throw new Error(`Unsupported value type for game input action '${actionId}'.`);
+}
+
+async function findGameInputActionSnapshot(bridge: GuaBridgeClient, actionId: string): Promise<unknown> {
+  const compatible = bridge as GuaBridgeClient & { findGameInputActions?: (selector: { actionId: string; limit: number }) => Promise<unknown> };
+  if (typeof compatible.findGameInputActions === "function") {
+    try { return await compatible.findGameInputActions({ actionId, limit: 1 }); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/unsupported|unknown command/i.test(message)) throw error;
+    }
+  }
+  return bridge.getGameInputActions();
 }
 
 function compactResult<T extends Record<string, unknown>>(value: T): T {
@@ -1026,6 +1060,9 @@ export class GuaBridgeClient {
 
   async getClock(): Promise<unknown> { return this.request({ type: "get_clock" }); }
   async getGameInputActions(): Promise<unknown> { return this.request({ type: "get_game_input_actions" }); }
+  async findGameInputActions(selector: Omit<Extract<BridgeCommandInput, { type: "find_game_input_actions" }>, "type">): Promise<unknown> {
+    return this.request({ type: "find_game_input_actions", ...selector });
+  }
   async getGameInputState(): Promise<unknown> { return this.request({ type: "get_game_input_state" }); }
   async performGameInput(input: GameInputCommandInput): Promise<GuaActionReceipt> {
     return this.request<GuaActionReceipt>(input as BridgeCommandInput);
@@ -1330,6 +1367,7 @@ type BridgeCommandInput =
   | { type: "poll_events"; requestId: number }
   | { type: "poll_game_input"; requestId: number }
   | { type: "get_game_input_actions" | "get_game_input_state" }
+  | { type: "find_game_input_actions"; actionId?: string; query?: string; valueType?: number; active?: number; context?: string; category?: string; tags?: string[]; limit?: number }
   | { type: "get_clock" | "clock_pause" | "clock_resume" }
   | { type: "clock_install"; initialTimeMs?: number; stepMs?: number }
   | { type: "clock_run_for"; durationMs: number; stepMs?: number }

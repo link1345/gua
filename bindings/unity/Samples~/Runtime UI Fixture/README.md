@@ -16,5 +16,6 @@ physics, animation, or audio behavior.
 The `Tick` callback receives a `GuaClockDelta`; use `TotalMilliseconds` or
 `TotalSeconds` to retain steps below the 100 ns resolution of `TimeSpan`.
 
-The package targets Windows x64, Unity 6000.5 or newer, and the Mono scripting
-backend. Import TextMeshPro Essential Resources before building a Player.
+The package targets Unity 6000.5 or newer with the Mono scripting backend on
+Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS. Import TextMeshPro
+Essential Resources before building a Player.

@@ -240,6 +240,15 @@ bridge、MCP、Inspectorでも`get_clock`、`clock_install`、`clock_pause`、
 
 ### Semantic Game ActionとRaw Input
 
+大規模なAction Mapではdescriptorに`category`、`tags`、人向けの`aliases`を追加し、
+固定API `find_game_input_actions`で現在のMapを検索できます。条件はAND、複数tagは
+全件一致、結果はAction IDのordinal昇順です。paginationはなく既定20件、最大100件で、
+`truncated`が真なら条件を絞ります。Player投影では`agentExposure: "private"`を件数・
+打ち切り判定より前に除外し、公開Action・公開metadata・contextが変わったときだけ
+Player revisionを進めます。検索結果は実行権限ではなく、enqueue時とhost consume直前に
+最新descriptorを再認可します。ID、description、category、tags、aliasesには、Debug toolや
+recordingに残って困る秘密情報を入れないでください。
+
 ホストはUI Treeと独立したGame Action Mapを明示登録し、button、axis、vector、
 textを`press_game_input_action`、`set_game_input_action`、
 `release_game_input_action`で操作できます。明示opt-inのRaw toolはcommand schemaに
@@ -455,6 +464,7 @@ select
 scroll
 press_key
 get_game_input_actions
+find_game_input_actions
 press_game_input_action
 set_game_input_action
 release_game_input_action

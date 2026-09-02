@@ -226,6 +226,18 @@ registration.
 Local C++ and .NET sessions poll the returned request ID for host completion;
 enqueue acceptance alone does not prove that the adapter injected the input.
 
+Large Action Maps can add `category`, `tags`, and human-facing `aliases` to each
+descriptor and discover the current map with the fixed
+`find_game_input_actions` API. Filters are combined with AND, tags require every
+requested value, and results are ordered by ordinal Action ID. The unpaged result
+defaults to 20 actions, accepts at most 100, and reports `truncated` so clients
+can narrow the query. Player projection omits descriptors marked
+`agentExposure: "private"` before counting or truncation; its revision changes
+only when public actions, public metadata, or the context changes. Search is a
+snapshot, not execution authority: enqueue and host consumption both revalidate
+the latest descriptor. Do not put secrets in IDs, descriptions, categories,
+tags, or aliases because Debug tools and recordings may preserve that metadata.
+
 Unity 6000.5 integration uses `com.unity.inputsystem@1.20.0` virtual devices;
 Godot injects main-thread `InputEvent` values through `Input.parse_input_event`.
 Adapters advertise each input capability only after its pump and cleanup path
@@ -682,6 +694,7 @@ select
 scroll
 press_key
 get_game_input_actions
+find_game_input_actions
 press_game_input_action
 set_game_input_action
 release_game_input_action

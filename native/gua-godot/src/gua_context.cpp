@@ -687,13 +687,26 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
             return false;
         }
         const Dictionary source = actions[index];
+        for (const char* field : { "id", "description", "value_type", "risk", "category", "agent_exposure" }) {
+            if (source.has(field) && source[field].get_type() != Variant::STRING) {
+                gua_runtime_abort_game_input_frame(runtime_);
+                return false;
+            }
+        }
+        if ((source.has("aliases") && source["aliases"].get_type() != Variant::ARRAY) ||
+            (source.has("tags") && source["tags"].get_type() != Variant::ARRAY)) {
+            gua_runtime_abort_game_input_frame(runtime_);
+            return false;
+        }
         const String id = source.get("id", String());
         const String description = source.get("description", String());
         const String type = source.get("value_type", String("button"));
         const String risk = source.get("risk", String("safe"));
+        const String category = source.get("category", String());
+        const String exposure = source.get("agent_exposure", String("auto"));
         const String bindings_json = JSON::stringify(source.get("bindings", Array()));
         const CharString id_utf8 = id.utf8(), description_utf8 = description.utf8();
-        const CharString bindings_utf8 = bindings_json.utf8(), risk_utf8 = risk.utf8();
+        const CharString bindings_utf8 = bindings_json.utf8(), risk_utf8 = risk.utf8(), category_utf8 = category.utf8();
         if (type != "button" && type != "axis1d" && type != "vector2" && type != "text") {
             gua_runtime_abort_game_input_frame(runtime_);
             return false;
@@ -705,7 +718,26 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
             gua_runtime_abort_game_input_frame(runtime_);
             return false;
         }
-        const gua_game_input_action_descriptor_v1_t descriptor {
+        std::vector<CharString> alias_strings, tag_strings;
+        std::vector<const char*> alias_pointers, tag_pointers;
+        const Array aliases = source.get("aliases", Array()), tags = source.get("tags", Array());
+        const auto contains_nul = [](const String& value) {
+            for (int64_t position = 0; position < value.length(); ++position) if (value.unicode_at(position) == 0) return true;
+            return false;
+        };
+        if (contains_nul(category)) { gua_runtime_abort_game_input_frame(runtime_); return false; }
+        alias_strings.reserve(aliases.size()); tag_strings.reserve(tags.size());
+        for (int i = 0; i < aliases.size(); ++i) {
+            if (aliases[i].get_type() != Variant::STRING || contains_nul(String(aliases[i]))) { gua_runtime_abort_game_input_frame(runtime_); return false; }
+            alias_strings.push_back(String(aliases[i]).utf8());
+        }
+        for (int i = 0; i < tags.size(); ++i) {
+            if (tags[i].get_type() != Variant::STRING || contains_nul(String(tags[i]))) { gua_runtime_abort_game_input_frame(runtime_); return false; }
+            tag_strings.push_back(String(tags[i]).utf8());
+        }
+        for (const auto& value : alias_strings) alias_pointers.push_back(value.get_data());
+        for (const auto& value : tag_strings) tag_pointers.push_back(value.get_data());
+        const gua_game_input_action_descriptor_v1_t base {
             sizeof(gua_game_input_action_descriptor_v1_t), id_utf8.get_data(), description_utf8.get_data(), value_type,
             source.get("minimum", 0.0), source.get("maximum", 0.0), has_range ? 1 : 0,
             static_cast<bool>(source.get("holdable", false)) ? 1 : 0,
@@ -713,7 +745,11 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
             bindings_utf8.get_data(), risk_utf8.get_data(),
             static_cast<bool>(source.get("requires_confirmation", false)) ? 1 : 0
         };
-        if (gua_runtime_register_game_input_action_v1(runtime_, &descriptor) == 0) {
+        const gua_game_input_action_descriptor_v2_t descriptor { sizeof(descriptor), base,
+            category.is_empty() ? nullptr : category_utf8.get_data(), alias_pointers.empty() ? nullptr : alias_pointers.data(),
+            static_cast<uint32_t>(alias_pointers.size()), tag_pointers.empty() ? nullptr : tag_pointers.data(),
+            static_cast<uint32_t>(tag_pointers.size()), exposure == "private" ? GUA_AGENT_EXPOSURE_PRIVATE : GUA_AGENT_EXPOSURE_AUTO };
+        if ((exposure != "auto" && exposure != "private") || gua_runtime_register_game_input_action_v2(runtime_, &descriptor) == 0) {
             gua_runtime_abort_game_input_frame(runtime_);
             return false;
         }
@@ -724,6 +760,50 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
 String GuaContext::get_game_input_actions_json() const
 {
     return copy_runtime_json(runtime_, gua_runtime_copy_game_input_actions_json);
+}
+
+String GuaContext::get_player_game_input_actions_json() const
+{
+    return copy_runtime_json(runtime_, gua_runtime_copy_player_game_input_actions_json);
+}
+
+String GuaContext::find_game_input_actions_json(const Dictionary& selector, int observation_profile) const
+{
+    for (const char* field : { "id", "query", "context", "category", "value_type" })
+        if (selector.has(field) && selector[field].get_type() != Variant::STRING) return String();
+    if (selector.has("active") && selector["active"].get_type() != Variant::BOOL) return String();
+    if (selector.has("limit") && selector["limit"].get_type() != Variant::INT) return String();
+    const String id = selector.get("id", String()), query = selector.get("query", String()), context = selector.get("context", String());
+    const String category = selector.get("category", String()), value_type = selector.get("value_type", String());
+    const auto contains_nul = [](const String& value) {
+        for (int64_t index = 0; index < value.length(); ++index) if (value.unicode_at(index) == 0) return true;
+        return false;
+    };
+    if (contains_nul(id) || contains_nul(query) || contains_nul(context) || contains_nul(category)) return String();
+    const CharString id_utf8 = id.utf8(), query_utf8 = query.utf8(), context_utf8 = context.utf8(), category_utf8 = category.utf8();
+    const Array tags = selector.get("tags", Array());
+    if (selector.has("tags") && selector["tags"].get_type() != Variant::ARRAY) return String();
+    const int limit = selector.get("limit", 20);
+    if (limit < 1 || limit > 100 || tags.size() > 16) return String();
+    std::vector<CharString> tag_strings; std::vector<const char*> tag_pointers;
+    for (int i = 0; i < tags.size(); ++i) {
+        if (tags[i].get_type() != Variant::STRING || String(tags[i]).is_empty() || contains_nul(String(tags[i]))) return String();
+        tag_strings.push_back(String(tags[i]).utf8());
+    }
+    for (const auto& tag : tag_strings) tag_pointers.push_back(tag.get_data());
+    const int native_type = value_type == "button" ? GUA_GAME_INPUT_BUTTON : value_type == "axis1d" ? GUA_GAME_INPUT_AXIS1D :
+        value_type == "vector2" ? GUA_GAME_INPUT_VECTOR2 : value_type == "text" ? GUA_GAME_INPUT_TEXT : 0;
+    if (!value_type.is_empty() && native_type == 0) return String();
+    int active = GUA_FILTER_ANY;
+    if (selector.has("active")) active = static_cast<bool>(selector["active"]) ? GUA_FILTER_TRUE : GUA_FILTER_FALSE;
+    gua_game_input_action_selector_v1_t native { sizeof(native), id.is_empty() ? nullptr : id_utf8.get_data(),
+        query.is_empty() ? nullptr : query_utf8.get_data(), native_type, active, context.is_empty() ? nullptr : context_utf8.get_data(),
+        category.is_empty() ? nullptr : category_utf8.get_data(), tag_pointers.empty() ? nullptr : tag_pointers.data(),
+        static_cast<uint32_t>(tag_pointers.size()), static_cast<uint32_t>(limit) };
+    const auto copy = [&](char* output, int size) { return gua_runtime_query_game_input_actions_json(runtime_, &native, observation_profile, output, size); };
+    const int required = copy(nullptr, 0); if (required <= 0) return String();
+    std::vector<char> output(static_cast<std::size_t>(required)); copy(output.data(), required);
+    return String::utf8(output.data());
 }
 
 void GuaContext::enable_game_input_adapter(int capabilities, int player_capabilities)
@@ -951,6 +1031,8 @@ void GuaContext::_bind_methods()
     ClassDB::bind_method(D_METHOD("enable_virtual_clock_adapter"), &GuaContext::enable_virtual_clock_adapter);
     ClassDB::bind_method(D_METHOD("publish_game_input_actions", "input_context", "actions"), &GuaContext::publish_game_input_actions);
     ClassDB::bind_method(D_METHOD("get_game_input_actions_json"), &GuaContext::get_game_input_actions_json);
+    ClassDB::bind_method(D_METHOD("get_player_game_input_actions_json"), &GuaContext::get_player_game_input_actions_json);
+    ClassDB::bind_method(D_METHOD("find_game_input_actions_json", "selector", "observation_profile"), &GuaContext::find_game_input_actions_json, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("enable_game_input_adapter", "capabilities", "player_capabilities"),
         &GuaContext::enable_game_input_adapter, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("get_game_input_capabilities", "observation_profile"),

@@ -48,7 +48,7 @@ std::string build_version_json(const char* godot_plugin_version = nullptr)
     return "{\"protocolSchemaVersion\":\"2\",\"coreVersion\":\"" GUA_VERSION
         "\",\"runtimeVersion\":\"" GUA_VERSION "\",\"godotPluginVersion\":" + plugin + ",\"adapterVersions\":{}" +
         ",\"abiVersion\":1,\"buildId\":\"" GUA_BUILD_ID
-        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\",\"semantic_game_input_v1\",\"raw_keyboard_input_v1\",\"raw_pointer_input_v1\",\"raw_gamepad_input_v1\",\"text_input_v1\",\"game_input_lease_v1\",\"world_object_tree_v1\",\"agent_projection_v1\"]}";
+        "\",\"capabilities\":[\"semantic_ui_tree_v2\",\"detailed_semantic_state_v1\",\"semantic_actions_v2\",\"context_reset_v1\",\"diagnostics_v1\",\"version_v1\",\"capture_screenshot_v1\",\"virtual_clock_v1\",\"semantic_game_input_v1\",\"semantic_game_input_search_v1\",\"raw_keyboard_input_v1\",\"raw_pointer_input_v1\",\"raw_gamepad_input_v1\",\"text_input_v1\",\"game_input_lease_v1\",\"world_object_tree_v1\",\"agent_projection_v1\"]}";
 }
 
 struct AgentFieldRule {
@@ -194,6 +194,10 @@ struct GameInputAction {
     std::string bindings_json = "[]";
     std::string risk = "safe";
     bool requires_confirmation = false;
+    std::string category;
+    std::vector<std::string> aliases;
+    std::vector<std::string> tags;
+    int agent_exposure = GUA_AGENT_EXPOSURE_AUTO;
 };
 
 struct GameInputRequest {
@@ -213,6 +217,7 @@ struct GameInputRequest {
     bool lease_expired = false;
     bool suppress_result = false;
     double remaining_lease_ms = 0.0;
+    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG;
 };
 
 struct HeldGameInput {
@@ -1197,7 +1202,9 @@ struct gua_context_t {
     bool game_input_frame_in_progress = false;
     bool game_input_staging_valid = true;
     unsigned long long game_input_revision = 0;
+    unsigned long long player_game_input_revision = 0;
     std::string previous_game_input_snapshot;
+    std::string previous_player_game_input_snapshot;
     unsigned long long next_game_input_owner_id = 1;
     std::unordered_set<unsigned long long> game_input_owners;
     unsigned long long next_game_input_request_id = 1;
@@ -1273,6 +1280,31 @@ bool valid_game_input_id(std::string_view value)
     return std::all_of(value.begin(), value.end(), [](char ch) {
         return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-';
     });
+}
+
+bool valid_utf8_text(std::string_view value, std::size_t maximum_code_points)
+{
+    if (value.empty()) return false;
+    std::size_t code_points = 0;
+    for (std::size_t index = 0; index < value.size();) {
+        const unsigned char first = static_cast<unsigned char>(value[index]);
+        std::size_t width = first < 0x80U ? 1U : first >= 0xC2U && first <= 0xDFU ? 2U :
+            first >= 0xE0U && first <= 0xEFU ? 3U : first >= 0xF0U && first <= 0xF4U ? 4U : 0U;
+        if (width == 0 || index + width > value.size()) return false;
+        for (std::size_t offset = 1; offset < width; ++offset)
+            if ((static_cast<unsigned char>(value[index + offset]) & 0xC0U) != 0x80U) return false;
+        if (width == 3U) {
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if ((first == 0xE0U && second < 0xA0U) || (first == 0xEDU && second >= 0xA0U)) return false;
+        }
+        if (width == 4U) {
+            const unsigned char second = static_cast<unsigned char>(value[index + 1U]);
+            if ((first == 0xF0U && second < 0x90U) || (first == 0xF4U && second >= 0x90U)) return false;
+        }
+        index += width;
+        if (++code_points > maximum_code_points) return false;
+    }
+    return true;
 }
 
 void skip_json_whitespace(std::string_view value, std::size_t& index)
@@ -1493,13 +1525,16 @@ bool one_of(int value, std::initializer_list<int> allowed)
 }
 
 int validate_semantic_game_input(const std::vector<GameInputAction>& actions, int operation,
-    std::string_view target, std::string_view value, bool confirmed)
+    std::string_view target, std::string_view value, bool confirmed,
+    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG)
 {
     if (operation == GUA_GAME_INPUT_RELEASE)
         return valid_game_input_id(target) ? GUA_GAME_INPUT_OK : GUA_GAME_INPUT_ERROR_INVALID_VALUE;
     const auto action = std::find_if(actions.begin(), actions.end(),
         [&](const auto& item) { return item.id == target; });
     if (action == actions.end()) return GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND;
+    if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && action->agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE)
+        return GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND;
     if (!action->active) return GUA_GAME_INPUT_ERROR_INACTIVE;
     if ((operation == GUA_GAME_INPUT_PRESS || operation == GUA_GAME_INPUT_SET) &&
         action->requires_confirmation && !confirmed)
@@ -1529,12 +1564,15 @@ int validate_semantic_game_input(const std::vector<GameInputAction>& actions, in
     return GUA_GAME_INPUT_OK;
 }
 
-std::string build_game_input_semantic_snapshot(const std::string& context, const std::vector<GameInputAction>& actions)
+std::string build_game_input_semantic_snapshot(const std::string& context, const std::vector<GameInputAction>& actions,
+    int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG)
 {
     std::string json = "{\"context\":\"" + escape_json(context) + "\",\"actions\":[";
-    for (std::size_t index = 0; index < actions.size(); ++index) {
-        const auto& action = actions[index];
-        if (index != 0) json += ",";
+    bool first_action = true;
+    for (const auto& action : actions) {
+        if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && action.agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE) continue;
+        if (!first_action) json += ",";
+        first_action = false;
         const char* type = action.value_type == GUA_GAME_INPUT_BUTTON ? "button" :
             action.value_type == GUA_GAME_INPUT_AXIS1D ? "axis1d" :
             action.value_type == GUA_GAME_INPUT_VECTOR2 ? "vector2" : "text";
@@ -1544,17 +1582,71 @@ std::string build_game_input_semantic_snapshot(const std::string& context, const
         json += ",\"holdable\":" + std::string(action.holdable ? "true" : "false") +
             ",\"active\":" + std::string(action.active ? "true" : "false") +
             ",\"bindings\":" + action.bindings_json + ",\"risk\":\"" + escape_json(action.risk) +
-            "\",\"requiresConfirmation\":" + (action.requires_confirmation ? "true" : "false") + "}";
+            "\",\"requiresConfirmation\":" + (action.requires_confirmation ? "true" : "false");
+        if (!action.category.empty()) json += ",\"category\":\"" + escape_json(action.category) + "\"";
+        json += ",\"aliases\":[";
+        for (std::size_t i = 0; i < action.aliases.size(); ++i) { if (i != 0) json += ','; json += "\"" + escape_json(action.aliases[i]) + "\""; }
+        json += "],\"tags\":[";
+        for (std::size_t i = 0; i < action.tags.size(); ++i) { if (i != 0) json += ','; json += "\"" + escape_json(action.tags[i]) + "\""; }
+        json += "],\"agentExposure\":\"" + std::string(action.agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE ? "private" : "auto") + "\"}";
     }
     return json + "]}";
 }
 
-std::string build_game_input_actions_json(const gua_context_t& ctx)
+std::string build_game_input_actions_json(const gua_context_t& ctx, int observation_profile)
 {
-    std::string semantic = build_game_input_semantic_snapshot(ctx.game_input_context, ctx.game_input_actions);
+    std::string semantic = build_game_input_semantic_snapshot(ctx.game_input_context, ctx.game_input_actions, observation_profile);
     semantic.erase(semantic.begin());
+    const auto revision = observation_profile == GUA_OBSERVATION_PROFILE_PLAYER
+        ? ctx.player_game_input_revision : ctx.game_input_revision;
     return "{\"schemaVersion\":1,\"sessionEpoch\":" + std::to_string(ctx.session_epoch) +
-        ",\"revision\":" + std::to_string(ctx.game_input_revision) + "," + semantic;
+        ",\"revision\":" + std::to_string(revision) + "," + semantic;
+}
+
+bool game_input_action_matches(const GameInputAction& action, const gua_game_input_action_selector_v1_t& selector)
+{
+    if (selector.id != nullptr && selector.id[0] != '\0' && action.id != selector.id) return false;
+    if (selector.query != nullptr && selector.query[0] != '\0') {
+        const std::string_view query(selector.query);
+        bool matched = action.id.find(query) != std::string::npos || action.description.find(query) != std::string::npos;
+        for (const auto& alias : action.aliases) matched = matched || alias.find(query) != std::string::npos;
+        if (!matched) return false;
+    }
+    if (selector.value_type != 0 && action.value_type != selector.value_type) return false;
+    if (selector.active == GUA_FILTER_FALSE && action.active) return false;
+    if (selector.active == GUA_FILTER_TRUE && !action.active) return false;
+    if (selector.category != nullptr && selector.category[0] != '\0' && action.category != selector.category) return false;
+    for (std::uint32_t i = 0; i < selector.tag_count; ++i)
+        if (std::find(action.tags.begin(), action.tags.end(), selector.tags[i]) == action.tags.end()) return false;
+    return true;
+}
+
+std::string build_game_input_query_json(const gua_context_t& ctx,
+    const gua_game_input_action_selector_v1_t& selector, int observation_profile)
+{
+    std::vector<const GameInputAction*> matches;
+    if (selector.context == nullptr || selector.context[0] == '\0' || ctx.game_input_context == selector.context) {
+        for (const auto& action : ctx.game_input_actions) {
+            if (observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && action.agent_exposure == GUA_AGENT_EXPOSURE_PRIVATE) continue;
+            if (game_input_action_matches(action, selector)) matches.push_back(&action);
+        }
+    }
+    std::sort(matches.begin(), matches.end(), [](const auto* left, const auto* right) { return left->id < right->id; });
+    const std::size_t limit = selector.limit == 0 ? 20U : selector.limit;
+    const bool truncated = matches.size() > limit;
+    if (truncated) matches.resize(limit);
+    std::vector<GameInputAction> selected;
+    selected.reserve(matches.size());
+    for (const auto* action : matches) selected.push_back(*action);
+    std::string semantic = build_game_input_semantic_snapshot(ctx.game_input_context, selected, observation_profile);
+    const auto actions_at = semantic.find("\"actions\":");
+    const std::string actions_json = semantic.substr(actions_at + 10U, semantic.size() - actions_at - 11U);
+    const auto revision = observation_profile == GUA_OBSERVATION_PROFILE_PLAYER
+        ? ctx.player_game_input_revision : ctx.game_input_revision;
+    return "{\"schemaVersion\":1,\"sessionEpoch\":" + std::to_string(ctx.session_epoch) +
+        ",\"revision\":" + std::to_string(revision) + ",\"context\":\"" + escape_json(ctx.game_input_context) +
+        "\",\"count\":" + std::to_string(selected.size()) + ",\"truncated\":" + (truncated ? "true" : "false") +
+        ",\"actions\":" + actions_json + "}";
 }
 
 bool held_key_matches(const HeldGameInput& held, unsigned long long owner_id, int kind,
@@ -3391,6 +3483,47 @@ extern "C" int gua_register_game_input_action_v1(gua_context_t* ctx, const gua_g
     return 1;
 }
 
+extern "C" int gua_register_game_input_action_v2(gua_context_t* ctx, const gua_game_input_action_descriptor_v2_t* descriptor)
+{
+    if (ctx == nullptr) return 0;
+    const auto reject = [&] {
+        const std::lock_guard lock(ctx->mutex);
+        if (ctx->game_input_frame_in_progress) ctx->game_input_staging_valid = false;
+        return 0;
+    };
+    if (descriptor == nullptr || descriptor->struct_size < sizeof(*descriptor) ||
+        descriptor->base.struct_size < sizeof(descriptor->base) || descriptor->alias_count > 16 || descriptor->tag_count > 16 ||
+        (descriptor->alias_count != 0 && descriptor->aliases == nullptr) ||
+        (descriptor->tag_count != 0 && descriptor->tags == nullptr) ||
+        !one_of(descriptor->agent_exposure, { GUA_AGENT_EXPOSURE_AUTO, GUA_AGENT_EXPOSURE_PRIVATE })) return reject();
+    if (descriptor->category != nullptr && descriptor->category[0] != '\0' && !valid_game_input_id(descriptor->category)) return reject();
+    std::vector<std::string> aliases, tags;
+    std::unordered_set<std::string> unique_aliases, unique_tags;
+    for (std::uint32_t i = 0; i < descriptor->alias_count; ++i) {
+        if (descriptor->aliases[i] == nullptr || !valid_utf8_text(descriptor->aliases[i], 64) ||
+            !unique_aliases.insert(descriptor->aliases[i]).second) return reject();
+        aliases.emplace_back(descriptor->aliases[i]);
+    }
+    for (std::uint32_t i = 0; i < descriptor->tag_count; ++i) {
+        if (descriptor->tags[i] == nullptr || !valid_utf8_text(descriptor->tags[i], 64) ||
+            !unique_tags.insert(descriptor->tags[i]).second) return reject();
+        tags.emplace_back(descriptor->tags[i]);
+    }
+    if (gua_register_game_input_action_v1(ctx, &descriptor->base) == 0) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    if (!ctx->game_input_frame_in_progress || ctx->staging_game_input_actions.empty() ||
+        ctx->staging_game_input_actions.back().id != descriptor->base.id) {
+        ctx->game_input_staging_valid = false;
+        return 0;
+    }
+    auto& action = ctx->staging_game_input_actions.back();
+    action.category = descriptor->category != nullptr ? descriptor->category : "";
+    action.aliases = std::move(aliases);
+    action.tags = std::move(tags);
+    action.agent_exposure = descriptor->agent_exposure;
+    return 1;
+}
+
 extern "C" int gua_end_game_input_frame(gua_context_t* ctx)
 {
     if (ctx == nullptr) return 0;
@@ -3402,7 +3535,9 @@ extern "C" int gua_end_game_input_frame(gua_context_t* ctx)
         return 0;
     }
     const std::string snapshot = build_game_input_semantic_snapshot(
-        ctx->staging_game_input_context, ctx->staging_game_input_actions);
+        ctx->staging_game_input_context, ctx->staging_game_input_actions, GUA_OBSERVATION_PROFILE_DEBUG);
+    const std::string player_snapshot = build_game_input_semantic_snapshot(
+        ctx->staging_game_input_context, ctx->staging_game_input_actions, GUA_OBSERVATION_PROFILE_PLAYER);
     ctx->game_input_context.swap(ctx->staging_game_input_context);
     ctx->game_input_actions.swap(ctx->staging_game_input_actions);
     ctx->staging_game_input_actions.clear();
@@ -3410,6 +3545,10 @@ extern "C" int gua_end_game_input_frame(gua_context_t* ctx)
     if (snapshot != ctx->previous_game_input_snapshot) {
         ++ctx->game_input_revision;
         ctx->previous_game_input_snapshot = snapshot;
+    }
+    if (player_snapshot != ctx->previous_player_game_input_snapshot) {
+        ++ctx->player_game_input_revision;
+        ctx->previous_player_game_input_snapshot = player_snapshot;
     }
     return 1;
 }
@@ -3427,9 +3566,36 @@ extern "C" int gua_abort_game_input_frame(gua_context_t* ctx)
 
 extern "C" int gua_copy_game_input_actions_json(gua_context_t* ctx, char* out_json, int out_json_size)
 {
-    if (ctx == nullptr) return 0;
+    return gua_copy_game_input_actions_json_for_profile(ctx, GUA_OBSERVATION_PROFILE_DEBUG, out_json, out_json_size);
+}
+
+extern "C" int gua_copy_game_input_actions_json_for_profile(gua_context_t* ctx, int observation_profile,
+    char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || !one_of(observation_profile, { GUA_OBSERVATION_PROFILE_DEBUG, GUA_OBSERVATION_PROFILE_PLAYER })) return 0;
     const std::lock_guard lock(ctx->mutex);
-    return copy_json_string(build_game_input_actions_json(*ctx), out_json, out_json_size);
+    return copy_json_string(build_game_input_actions_json(*ctx, observation_profile), out_json, out_json_size);
+}
+
+extern "C" int gua_query_game_input_actions_json(gua_context_t* ctx,
+    const gua_game_input_action_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size)
+{
+    if (ctx == nullptr || selector == nullptr || selector->struct_size < sizeof(*selector) ||
+        !one_of(observation_profile, { GUA_OBSERVATION_PROFILE_DEBUG, GUA_OBSERVATION_PROFILE_PLAYER }) ||
+        selector->value_type < 0 || selector->value_type > GUA_GAME_INPUT_TEXT ||
+        selector->active < GUA_FILTER_ANY || selector->active > GUA_FILTER_TRUE || selector->limit > 100 ||
+        selector->tag_count > 16 || (selector->tag_count != 0 && selector->tags == nullptr)) return 0;
+    if (selector->id != nullptr && selector->id[0] != '\0' && !valid_game_input_id(selector->id)) return 0;
+    if (selector->query != nullptr && selector->query[0] != '\0' && !valid_utf8_text(selector->query, 128)) return 0;
+    if (selector->context != nullptr && selector->context[0] != '\0' &&
+        !valid_utf8_text(selector->context, std::numeric_limits<std::size_t>::max())) return 0;
+    if (selector->category != nullptr && selector->category[0] != '\0' && !valid_game_input_id(selector->category)) return 0;
+    std::unordered_set<std::string> unique_tags;
+    for (std::uint32_t i = 0; i < selector->tag_count; ++i)
+        if (selector->tags[i] == nullptr || !valid_utf8_text(selector->tags[i], 64) ||
+            !unique_tags.insert(selector->tags[i]).second) return 0;
+    const std::lock_guard lock(ctx->mutex);
+    return copy_json_string(build_game_input_query_json(*ctx, *selector, observation_profile), out_json, out_json_size);
 }
 
 extern "C" uint64_t gua_create_game_input_owner(gua_context_t* ctx)
@@ -3481,7 +3647,14 @@ extern "C" int gua_enqueue_game_input(gua_context_t* ctx,
 extern "C" int gua_enqueue_game_input_v2(gua_context_t* ctx,
     const gua_game_input_request_descriptor_v2_t* descriptor, uint64_t* out_request_id)
 {
+    return gua_enqueue_game_input_for_profile_v2(ctx, descriptor, GUA_OBSERVATION_PROFILE_DEBUG, out_request_id);
+}
+
+extern "C" int gua_enqueue_game_input_for_profile_v2(gua_context_t* ctx,
+    const gua_game_input_request_descriptor_v2_t* descriptor, int observation_profile, uint64_t* out_request_id)
+{
     if (ctx == nullptr || descriptor == nullptr || descriptor->struct_size < sizeof(*descriptor) ||
+        !one_of(observation_profile, { GUA_OBSERVATION_PROFILE_DEBUG, GUA_OBSERVATION_PROFILE_PLAYER }) ||
         descriptor->owner_id == 0 || descriptor->kind < GUA_GAME_INPUT_SEMANTIC || descriptor->kind > GUA_GAME_INPUT_CLEANUP ||
         descriptor->operation < GUA_GAME_INPUT_PRESS || descriptor->operation > GUA_GAME_INPUT_RELEASE_ALL ||
         descriptor->lease_ms > 60000 || !std::isfinite(descriptor->x) || !std::isfinite(descriptor->y) ||
@@ -3496,7 +3669,7 @@ extern "C" int gua_enqueue_game_input_v2(gua_context_t* ctx,
         if (!one_of(descriptor->operation, { GUA_GAME_INPUT_PRESS, GUA_GAME_INPUT_SET, GUA_GAME_INPUT_RELEASE }))
             return GUA_GAME_INPUT_ERROR_INVALID_VALUE;
         const int validation = validate_semantic_game_input(ctx->game_input_actions, descriptor->operation, target, value,
-            descriptor->confirmed != 0);
+            descriptor->confirmed != 0, observation_profile);
         if (validation != GUA_GAME_INPUT_OK) return validation;
     } else if (descriptor->kind == GUA_GAME_INPUT_KEYBOARD) {
         if (!one_of(descriptor->operation, { GUA_GAME_INPUT_PRESS, GUA_GAME_INPUT_DOWN, GUA_GAME_INPUT_UP }) ||
@@ -3542,9 +3715,11 @@ extern "C" int gua_enqueue_game_input_v2(gua_context_t* ctx,
     }
     const unsigned int lease = descriptor->lease_ms == 0 ? 5000U : descriptor->lease_ms;
     const auto request_id = ctx->next_game_input_request_id++;
-    ctx->game_input_requests.push_back(GameInputRequest { request_id, descriptor->owner_id, descriptor->kind,
+    GameInputRequest request { request_id, descriptor->owner_id, descriptor->kind,
         descriptor->operation, target, value, descriptor->x, descriptor->y,
-        lease, descriptor->device_index, descriptor->sensitive != 0, false, descriptor->confirmed != 0 });
+        lease, descriptor->device_index, descriptor->sensitive != 0, false, descriptor->confirmed != 0 };
+    request.observation_profile = observation_profile;
+    ctx->game_input_requests.push_back(std::move(request));
     if (out_request_id != nullptr) *out_request_id = request_id;
     return GUA_GAME_INPUT_OK;
 }
@@ -3557,7 +3732,7 @@ extern "C" int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input
         const auto& request = ctx->game_input_requests.front();
         if (request.kind != GUA_GAME_INPUT_SEMANTIC) break;
         const int validation = validate_semantic_game_input(ctx->game_input_actions, request.operation,
-            request.target, request.value_json, request.confirmed);
+            request.target, request.value_json, request.confirmed, request.observation_profile);
         if (validation == GUA_GAME_INPUT_OK) break;
         append_game_input_result(*ctx, GameInputResult { request.request_id, request.owner_id, false, validation });
         ctx->game_input_requests.pop_front();

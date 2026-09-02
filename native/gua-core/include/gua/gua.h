@@ -85,6 +85,30 @@ typedef struct gua_game_input_action_descriptor_v1_t {
     int requires_confirmation;
 } gua_game_input_action_descriptor_v1_t;
 
+typedef struct gua_game_input_action_descriptor_v2_t {
+    uint32_t struct_size;
+    gua_game_input_action_descriptor_v1_t base;
+    const char* category;
+    const char* const* aliases;
+    uint32_t alias_count;
+    const char* const* tags;
+    uint32_t tag_count;
+    int agent_exposure;
+} gua_game_input_action_descriptor_v2_t;
+
+typedef struct gua_game_input_action_selector_v1_t {
+    uint32_t struct_size;
+    const char* id;
+    const char* query;
+    int value_type;
+    int active;
+    const char* context;
+    const char* category;
+    const char* const* tags;
+    uint32_t tag_count;
+    uint32_t limit;
+} gua_game_input_action_selector_v1_t;
+
 typedef struct gua_game_input_request_descriptor_v1_t {
     uint32_t struct_size;
     uint64_t owner_id;
@@ -659,14 +683,20 @@ int gua_reset_context(gua_context_t* ctx, const gua_reset_options_t* options, gu
 /* Game input action-map publication is atomic and independent from the UI tree. */
 int gua_begin_game_input_frame(gua_context_t* ctx, const char* input_context);
 int gua_register_game_input_action_v1(gua_context_t* ctx, const gua_game_input_action_descriptor_v1_t* descriptor);
+int gua_register_game_input_action_v2(gua_context_t* ctx, const gua_game_input_action_descriptor_v2_t* descriptor);
 int gua_end_game_input_frame(gua_context_t* ctx);
 int gua_abort_game_input_frame(gua_context_t* ctx);
 int gua_copy_game_input_actions_json(gua_context_t* ctx, char* out_json, int out_json_size);
+int gua_copy_game_input_actions_json_for_profile(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
+int gua_query_game_input_actions_json(gua_context_t* ctx, const gua_game_input_action_selector_v1_t* selector,
+    int observation_profile, char* out_json, int out_json_size);
 /* Owners isolate held inputs. A zero owner is invalid. */
 uint64_t gua_create_game_input_owner(gua_context_t* ctx);
 int gua_release_game_input_owner(gua_context_t* ctx, uint64_t owner_id);
 int gua_enqueue_game_input(gua_context_t* ctx, const gua_game_input_request_descriptor_v1_t* descriptor, uint64_t* out_request_id);
 int gua_enqueue_game_input_v2(gua_context_t* ctx, const gua_game_input_request_descriptor_v2_t* descriptor, uint64_t* out_request_id);
+int gua_enqueue_game_input_for_profile_v2(gua_context_t* ctx, const gua_game_input_request_descriptor_v2_t* descriptor,
+    int observation_profile, uint64_t* out_request_id);
 int gua_consume_game_input_request(gua_context_t* ctx, gua_game_input_request_v1_t* out_request);
 int gua_complete_game_input_request(gua_context_t* ctx, uint64_t request_id, int succeeded, int error_code);
 /* Advance safety leases with unscaled host time, never GuaClock time. */

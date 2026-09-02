@@ -42,10 +42,10 @@ public static class GuaUnityFixture
         inputMap.EnableRawInput = true;
         inputMap.AllowPlayerAgentSemanticInput = true;
         inputMap.AllowPlayerAgentRawInput = true;
-        inputMap.Actions.Add(new GuaGameInputAction { Id = "jump", Description = "Jump", ValueType = Gua.Runtime.GuaGameInputValueType.Button, Holdable = true, Bindings = new[] { "Space" } });
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "jump", Description = "Jump", ValueType = Gua.Runtime.GuaGameInputValueType.Button, Holdable = true, Bindings = new[] { "Space" }, Category = "movement", Aliases = new[] { "hop" }, Tags = new[] { "gameplay", "air" }, AgentExposure = Gua.Core.GuaAgentExposure.Auto });
         inputMap.Actions.Add(new GuaGameInputAction { Id = "throttle", Description = "Throttle", ValueType = Gua.Runtime.GuaGameInputValueType.Axis1D, HasRange = true, Minimum = -1, Maximum = 1, Holdable = true });
         inputMap.Actions.Add(new GuaGameInputAction { Id = "move", Description = "Move", ValueType = Gua.Runtime.GuaGameInputValueType.Vector2, HasRange = true, Minimum = -1, Maximum = 1, Holdable = true });
-        inputMap.Actions.Add(new GuaGameInputAction { Id = "chat", Description = "Chat", ValueType = Gua.Runtime.GuaGameInputValueType.Text });
+        inputMap.Actions.Add(new GuaGameInputAction { Id = "chat", Description = "Chat", ValueType = Gua.Runtime.GuaGameInputValueType.Text, AgentExposure = Gua.Core.GuaAgentExposure.Private });
 
         if (Object.FindFirstObjectByType<EventSystem>() == null)
         {

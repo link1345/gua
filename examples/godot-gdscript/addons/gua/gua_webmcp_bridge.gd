@@ -12,6 +12,7 @@ var poll_callback: JavaScriptObject
 var cancel_callback: JavaScriptObject
 var get_game_input_capabilities_callback: JavaScriptObject
 var get_game_input_actions_callback: JavaScriptObject
+var find_game_input_actions_callback: JavaScriptObject
 var get_game_input_state_callback: JavaScriptObject
 var enqueue_game_input_callback: JavaScriptObject
 var poll_game_input_callback: JavaScriptObject
@@ -37,6 +38,7 @@ func attach(gua_adapter: RefCounted) -> bool:
 	cancel_callback = JavaScriptBridge.create_callback(_cancel_action)
 	get_game_input_capabilities_callback = JavaScriptBridge.create_callback(_get_game_input_capabilities)
 	get_game_input_actions_callback = JavaScriptBridge.create_callback(_get_game_input_actions)
+	find_game_input_actions_callback = JavaScriptBridge.create_callback(_find_game_input_actions)
 	get_game_input_state_callback = JavaScriptBridge.create_callback(_get_game_input_state)
 	enqueue_game_input_callback = JavaScriptBridge.create_callback(_enqueue_game_input)
 	poll_game_input_callback = JavaScriptBridge.create_callback(_poll_game_input)
@@ -49,6 +51,7 @@ func attach(gua_adapter: RefCounted) -> bool:
 	window.__guaGodotCancelAction = cancel_callback
 	window.__guaGodotGetGameInputCapabilities = get_game_input_capabilities_callback
 	window.__guaGodotGetGameInputActions = get_game_input_actions_callback
+	window.__guaGodotFindGameInputActions = find_game_input_actions_callback
 	window.__guaGodotGetGameInputState = get_game_input_state_callback
 	window.__guaGodotEnqueueGameInput = enqueue_game_input_callback
 	window.__guaGodotPollGameInput = poll_game_input_callback
@@ -68,6 +71,7 @@ func attach(gua_adapter: RefCounted) -> bool:
   const cancelAction = globalThis.__guaGodotCancelAction;
   const getGameInputCapabilities = globalThis.__guaGodotGetGameInputCapabilities;
   const getGameInputActions = globalThis.__guaGodotGetGameInputActions;
+  const findGameInputActions = globalThis.__guaGodotFindGameInputActions;
   const getGameInputState = globalThis.__guaGodotGetGameInputState;
   const enqueueGameInput = globalThis.__guaGodotEnqueueGameInput;
   const pollGameInput = globalThis.__guaGodotPollGameInput;
@@ -125,6 +129,7 @@ func attach(gua_adapter: RefCounted) -> bool:
       }
       if (command.type === 'get_game_input_capabilities') return JSON.parse(callGodot(getGameInputCapabilities));
       if (command.type === 'get_game_input_actions') return JSON.parse(callGodot(getGameInputActions));
+      if (command.type === 'find_game_input_actions') return JSON.parse(callGodot(findGameInputActions, JSON.stringify(command)));
       if (command.type === 'get_game_input_state') return JSON.parse(callGodot(getGameInputState));
       if (command.type === 'perform_game_input') {
         const receipt = JSON.parse(callGodot(enqueueGameInput, JSON.stringify(command.request)));
@@ -258,6 +263,7 @@ func detach() -> void:
   delete globalThis.__guaGodotCancelAction;
   delete globalThis.__guaGodotGetGameInputCapabilities;
   delete globalThis.__guaGodotGetGameInputActions;
+  delete globalThis.__guaGodotFindGameInputActions;
   delete globalThis.__guaGodotGetGameInputState;
   delete globalThis.__guaGodotEnqueueGameInput;
   delete globalThis.__guaGodotPollGameInput;
@@ -274,6 +280,7 @@ func detach() -> void:
 	cancel_callback = null
 	get_game_input_capabilities_callback = null
 	get_game_input_actions_callback = null
+	find_game_input_actions_callback = null
 	get_game_input_state_callback = null
 	enqueue_game_input_callback = null
 	poll_game_input_callback = null
@@ -403,6 +410,7 @@ func _game_input_capabilities(adapter: RefCounted) -> Array:
 	var mask := int(adapter.get_game_input_capabilities(1))
 	var result: Array = []
 	if mask & 1: result.push_back("semantic_game_input_v1")
+	if mask & 1: result.push_back("semantic_game_input_search_v1")
 	if mask & 2: result.push_back("raw_keyboard_input_v1")
 	if mask & 4: result.push_back("raw_pointer_input_v1")
 	if mask & 8: result.push_back("raw_gamepad_input_v1")
@@ -421,7 +429,25 @@ func _get_game_input_actions(arguments: Array) -> void:
 	if adapter == null or not "semantic_game_input_v1" in _game_input_capabilities(adapter):
 		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input is unavailable."}))
 		return
-	_respond(arguments, adapter.get_game_input_actions_json())
+	_respond(arguments, adapter.get_player_game_input_actions_json())
+
+
+func _find_game_input_actions(arguments: Array) -> void:
+	var adapter := _adapter()
+	if adapter == null or not "semantic_game_input_search_v1" in _game_input_capabilities(adapter):
+		_respond(arguments, JSON.stringify({"code": "engine_unsupported", "message": "Semantic game input search is unavailable."}))
+		return
+	var source = JSON.parse_string(str(_request_argument(arguments)))
+	if not source is Dictionary:
+		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "Invalid game input selector."}))
+		return
+	var selector := {
+		"id": source.get("id", ""), "query": source.get("query", ""), "value_type": source.get("valueType", ""),
+		"active": source.get("active") if source.has("active") else null, "context": source.get("context", ""),
+		"category": source.get("category", ""), "tags": source.get("tags", []), "limit": source.get("limit", 20),
+	}
+	if selector.active == null: selector.erase("active")
+	_respond(arguments, adapter.find_game_input_actions_json(selector, 1))
 
 
 func _get_game_input_state(arguments: Array) -> void:
@@ -447,7 +473,8 @@ func _enqueue_game_input(arguments: Array) -> void:
 		return
 	var request: Dictionary = source
 	if request.get("type", "") in ["press_game_input_action", "set_game_input_action"]:
-		var action_map = JSON.parse_string(adapter.get_game_input_actions_json())
+		var action_map = JSON.parse_string(adapter.find_game_input_actions_json(
+			{"id": request.get("actionId", ""), "limit": 1}, 1))
 		if action_map is Dictionary:
 			for action in action_map.get("actions", []):
 				if action is Dictionary and action.get("id", "") == request.get("actionId", "") and action.get("requiresConfirmation", false) and not request.get("confirmed", false):

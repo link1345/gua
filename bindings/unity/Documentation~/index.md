@@ -1,15 +1,16 @@
 # Gua for Unity
 
-The package automatically starts the Gua runtime in Play Mode and Windows
-players, reflects UI Toolkit, uGUI, and TextMeshPro runtime controls, and listens on
+The package automatically starts the Gua runtime in Play Mode and desktop Mono
+players on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS. It
+reflects UI Toolkit, uGUI, and TextMeshPro runtime controls and listens on
 `GUA_BRIDGE_PORT` (8765 by default). Add `GuaId` only where a stable explicit id
 is required; semantic registration is otherwise automatic.
 
-The stable support range is Windows x64, Unity 6000.5 or newer, and Mono. The
-package contains precompiled managed assemblies and Windows Editor/Player native
-libraries. Other IL2CPP targets, other operating systems, IMGUI, and EditorWindow
-UI automation remain outside that stable range; the WebGL path below is
-experimental.
+The stable support range is Unity 6000.5 or newer with Mono on Windows x64,
+Linux x64, Intel macOS, and Apple Silicon macOS. The package contains
+precompiled managed assemblies and OS/CPU-scoped native libraries for the
+supported Editors and Players. IL2CPP, IMGUI, and EditorWindow UI automation
+remain outside that stable range; the WebGL path below is experimental.
 
 ## Unity WebGL and browser-native WebMCP (experimental)
 
@@ -30,7 +31,10 @@ an optional positive `limit`. Unity publishes positions in Unity world units;
 the native core evaluates a single projected snapshot and returns its
 epoch/frame/revision plus aligned distances.
 When `GuaGameInputMap` initializes the input pump, the same page bridge exposes
-only the matching Semantic Game Action and Raw Input capabilities. Calls wait
+only the matching Semantic Game Action and Raw Input capabilities. The Action
+Map component exposes category, aliases, tags, and Player agent exposure;
+`find_game_input_actions` performs bounded discovery without generating dynamic
+tools. Keep secrets out of descriptor metadata. Calls wait
 for correlated host completion and use a page-owned session that is released on
 abort, timeout, bridge uninstall, or runtime destruction.
 

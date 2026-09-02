@@ -107,7 +107,7 @@ export async function replayRecording(
   perform: (action: SemanticActionInput) => Promise<ActionOutcome>,
   secrets: Record<string, string> = {},
   performGameInput?: (command: GameInputCommandInput) => Promise<unknown>,
-  getGameInputActions?: () => Promise<GuaGameInputActions>,
+  getGameInputActions?: (actionId: string) => Promise<GuaGameInputActions>,
   confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
 ): Promise<void> {
   validateRecording(recording);
@@ -162,13 +162,13 @@ export async function replayRecording(
 
 export async function prepareManualGameInput(
   command: GameInputCommandInput,
-  getGameInputActions: () => Promise<GuaGameInputActions>,
+  getGameInputActions: (actionId: string) => Promise<GuaGameInputActions>,
   confirmGameInputAction?: (action: GuaGameInputAction) => boolean | Promise<boolean>,
 ): Promise<GameInputCommandInput | null> {
   if (command.type !== "press_game_input_action" && command.type !== "set_game_input_action") return command;
   const current = { ...command } as GameInputCommandInput & { confirmed?: boolean };
   delete current.confirmed;
-  const action = (await getGameInputActions()).actions.find((candidate) => candidate.id === command.actionId);
+  const action = (await getGameInputActions(command.actionId)).actions.find((candidate) => candidate.id === command.actionId);
   if (action === undefined) throw new Error(`Game input action '${command.actionId}' is not currently published.`);
   if (!action.requiresConfirmation) return current;
   if (confirmGameInputAction === undefined || !await confirmGameInputAction(action)) return null;

@@ -1,6 +1,7 @@
 import {
   GuaWebError, guaGameInputCapabilities, type GuaBridgeCallOptions, type GuaBrowserBridge,
   type GuaGameInputActionMap, type GuaGameInputCapability, type GuaGameInputCompletion, type GuaGameInputRequest,
+  type GuaGameInputActionSearchResult, type GuaGameInputActionSelector,
   type GuaGameInputState, type GuaScreenshot, type GuaUiTree, type GuaWebActionCompletion, type GuaWebActionRequest,
 } from "./index.js";
 import {
@@ -21,6 +22,7 @@ export type GuaInPageCommand =
   | { type: "perform_action"; request: GuaWebActionRequest }
   | { type: "get_game_input_capabilities" }
   | { type: "get_game_input_actions" }
+  | ({ type: "find_game_input_actions" } & GuaGameInputActionSelector)
   | { type: "get_game_input_state" }
   | { type: "perform_game_input"; request: GuaGameInputRequest }
   | { type: "get_screenshot" };
@@ -62,6 +64,7 @@ export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBri
   if (options.gameInput) {
     bridge.getGameInputCapabilities = async () => parseGameInputCapabilities(await invoke(port, { type: "get_game_input_capabilities" }));
     bridge.getGameInputActions = async () => parseGameInputActions(await invoke(port, { type: "get_game_input_actions" }));
+    bridge.findGameInputActions = async (selector) => parseGameInputActionSearch(await invoke(port, { type: "find_game_input_actions", ...selector }));
     bridge.getGameInputState = async () => parseGameInputState(await invoke(port, { type: "get_game_input_state" }));
     bridge.performGameInput = async (request, callOptions) => parseGameInputCompletion(await invoke(
       port, { type: "perform_game_input", request: validateGameInputRequest(request) }, callOptions,
@@ -348,6 +351,17 @@ function parseGameInputActions(value: unknown): GuaGameInputActionMap {
   return parsed as GuaGameInputActionMap;
 }
 
+function parseGameInputActionSearch(value: unknown): GuaGameInputActionSearchResult {
+  const parsed = parseJson(value);
+  const record = asRecord(parsed);
+  if (!record || record.schemaVersion !== 1 || !Number.isInteger(record.sessionEpoch) || (record.sessionEpoch as number) < 1 ||
+      !Number.isInteger(record.revision) || (record.revision as number) < 0 || !isNonEmptyString(record.context) ||
+      !Number.isInteger(record.count) || (record.count as number) < 0 || typeof record.truncated !== "boolean" ||
+      !Array.isArray(record.actions) || record.count !== record.actions.length || !record.actions.every(isGameInputAction))
+    throw new GuaWebError("invalid_request", "The engine returned an invalid game input action search result.");
+  return parsed as GuaGameInputActionSearchResult;
+}
+
 function isGameInputAction(value: unknown): boolean {
   const action = asRecord(value);
   if (!action || !isNonEmptyString(action.id) || typeof action.description !== "string" ||
@@ -355,6 +369,10 @@ function isGameInputAction(value: unknown): boolean {
       typeof action.holdable !== "boolean" || typeof action.active !== "boolean" ||
       !Array.isArray(action.bindings) || !action.bindings.every(isNonEmptyString) ||
       typeof action.risk !== "string" || typeof action.requiresConfirmation !== "boolean") return false;
+  if (action.category !== undefined && !isNonEmptyString(action.category)) return false;
+  if (action.aliases !== undefined && (!Array.isArray(action.aliases) || !action.aliases.every(isNonEmptyString))) return false;
+  if (action.tags !== undefined && (!Array.isArray(action.tags) || !action.tags.every(isNonEmptyString))) return false;
+  if (action.agentExposure !== undefined && action.agentExposure !== "auto" && action.agentExposure !== "private") return false;
   if (action.minimum !== undefined || action.maximum !== undefined) return false;
   if (action.range === undefined) return true;
   const range = asRecord(action.range);

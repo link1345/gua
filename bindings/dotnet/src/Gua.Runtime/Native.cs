@@ -21,6 +21,8 @@ internal static unsafe class Native
     [StructLayout(LayoutKind.Sequential)] internal struct ClockStatus { internal uint StructSize; internal int Installed, Paused; internal double NowMs, DefaultStepMs, PendingMs; internal ulong Generation; }
     [StructLayout(LayoutKind.Sequential)] internal struct ClockStep { internal uint StructSize; internal double DeltaMs; internal int FinalStep; internal ulong Generation; }
     [StructLayout(LayoutKind.Sequential)] internal struct GameInputAction { internal uint StructSize; internal nint Id, Description; internal int ValueType; internal double Minimum, Maximum; internal int HasRange, Holdable, Active; internal nint BindingsJson, Risk; internal int RequiresConfirmation; }
+    [StructLayout(LayoutKind.Sequential)] internal struct GameInputActionV2 { internal uint StructSize; internal GameInputAction Base; internal nint Category, Aliases; internal uint AliasCount; internal nint Tags; internal uint TagCount; internal int AgentExposure; }
+    [StructLayout(LayoutKind.Sequential)] internal struct GameInputActionSelector { internal uint StructSize; internal nint Id, Query; internal int ValueType, Active; internal nint Context, Category, Tags; internal uint TagCount, Limit; }
     [StructLayout(LayoutKind.Sequential)] internal struct GameInputRequestDescriptor { internal uint StructSize; internal ulong OwnerId; internal int Kind, Operation; internal nint Target, ValueJson; internal double X, Y; internal uint LeaseMs; internal int DeviceIndex, Sensitive; }
     [StructLayout(LayoutKind.Sequential)] internal struct GameInputRequestDescriptorV2 { internal uint StructSize; internal ulong OwnerId; internal int Kind, Operation; internal nint Target, ValueJson; internal double X, Y; internal uint LeaseMs; internal int DeviceIndex, Sensitive, Confirmed; }
     [StructLayout(LayoutKind.Sequential)] internal unsafe struct GameInputRequest { internal uint StructSize; internal ulong RequestId, OwnerId; internal int Kind, Operation; internal fixed byte Target[128]; internal fixed byte ValueJson[512]; internal double X, Y; internal uint LeaseMs; internal int DeviceIndex, Sensitive; }
@@ -104,6 +106,7 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern uint gua_runtime_get_game_input_capabilities(nint runtime, int observationProfile);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_begin_game_input_frame(nint runtime, [MarshalAs(UnmanagedType.LPUTF8Str)] string inputContext);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_register_game_input_action_v1(nint runtime, in GameInputAction action);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_register_game_input_action_v2(nint runtime, in GameInputActionV2 action);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_end_game_input_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_abort_game_input_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern ulong gua_runtime_create_game_input_owner(nint runtime);
@@ -115,6 +118,8 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_complete_game_input_request(nint runtime, ulong requestId, int succeeded, int errorCode);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_tick_game_input_leases(nint runtime, double elapsedMs);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_actions_json(nint runtime, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_player_game_input_actions_json(nint runtime, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_game_input_actions_json(nint runtime, in GameInputActionSelector selector, int observationProfile, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_state_json(nint runtime, ulong ownerId, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_game_input_result_json(nint runtime, ulong ownerId, ulong requestId, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void gua_runtime_set_world_object_tree_enabled(nint runtime, int enabled);

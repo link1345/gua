@@ -31,7 +31,9 @@ public sealed class UnityIntegrationTests
         {
             UnityExecutablePath = Environment.GetEnvironmentVariable("UNITY_EXECUTABLE"),
             ProjectPath = Environment.GetEnvironmentVariable("GUA_UNITY_PROJECT"),
-            ConnectTimeout = TimeSpan.FromSeconds(60),
+            // A cold Intel macOS import can still be reloading assemblies when the
+            // default 60-second deadline expires, even with the API Updater disabled.
+            ConnectTimeout = TimeSpan.FromSeconds(120),
             SceneTimeout = TimeSpan.FromSeconds(15),
             AdditionalArguments = EditorAdditionalArguments(batchMode, disableAssemblyUpdater),
         });
