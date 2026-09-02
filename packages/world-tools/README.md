@@ -26,5 +26,6 @@ const selector = selectorFromArguments({
 
 Nearby queries use the provider's world units and one Player-projected snapshot.
 Results include `sessionEpoch`, `frameSequence`, `revision`, and aligned spatial
-distances. Private, unknown, or coordinate-omitted reference objects all produce
+distances ordered by distance and then object ID compared as UTF-8 bytes. Private,
+unknown, or coordinate-omitted reference objects all produce
 the same valid empty result.

@@ -12,6 +12,42 @@ import { validateRecording as validateInspectorRecording } from "../../inspector
 
 const roots: string[] = [];
 
+class ControlledWebSocket extends EventTarget {
+  readyState = WebSocket.CONNECTING;
+  closed = false;
+  lastRequestId: number | undefined;
+
+  constructor(private readonly respondAutomatically = true) { super(); }
+
+  open(): void {
+    this.readyState = WebSocket.OPEN;
+    this.dispatchEvent(new Event("open"));
+  }
+
+  send(payload: string): void {
+    const request = JSON.parse(payload);
+    this.lastRequestId = request.id;
+    if (this.respondAutomatically) queueMicrotask(() => this.respond(request.id));
+  }
+
+  respond(id: number, matches: unknown[] = []): void {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+      id,
+      ok: true,
+      result: { valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches },
+    }) }));
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = WebSocket.CLOSED;
+    this.dispatchEvent(new Event("close"));
+  }
+
+  terminate(): void { this.close(); }
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -97,32 +133,41 @@ describe("GuaAutomationManager", () => {
   });
 
   test("bounds world waits while the bridge connection is pending", async () => {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Promise<Response>(() => {});
-      },
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket(false);
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
     });
-    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
     const startedAt = performance.now();
     try {
       await expect(bridge.waitForWorldObject({ kind: "door" }, 50)).rejects
         .toThrow("Timed out waiting for a Gua world object");
       expect(performance.now() - startedAt).toBeLessThan(500);
+      expect(sockets[0]?.closed).toBe(true);
+      const recovered = bridge.findWorldObjects({ kind: "door" });
+      expect(sockets).toHaveLength(2);
+      sockets[1]!.open();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const requestId = sockets[1]!.lastRequestId;
+      expect(requestId).toBeDefined();
+      if (requestId === undefined) throw new Error("The recovered request was not sent.");
+      sockets[0]!.respond(requestId, [{ id: "stale", kind: "enemy", space: "world2d", position: { x: 1, y: 1 },
+        visibleToPlayer: true, active: true, agentExposure: "auto", state: {} }]);
+      sockets[1]!.respond(requestId);
+      await expect(recovered).resolves.toMatchObject({ valid: true, matches: [] });
     } finally {
       bridge.close();
-      server.stop(true);
     }
   });
 
   test("cancels world waits while the bridge connection is pending", async () => {
-    const server = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Promise<Response>(() => {});
-      },
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket();
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
     });
-    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
     const controller = new AbortController();
     const startedAt = performance.now();
     try {
@@ -131,9 +176,13 @@ describe("GuaAutomationManager", () => {
       controller.abort();
       await expect(waiting).rejects.toThrow("cancelled");
       expect(performance.now() - startedAt).toBeLessThan(500);
+      expect(sockets[0]?.closed).toBe(true);
+      const recovered = bridge.findWorldObjects({ kind: "door" });
+      expect(sockets).toHaveLength(2);
+      sockets[1]!.open();
+      await expect(recovered).resolves.toMatchObject({ valid: true, matches: [] });
     } finally {
       bridge.close();
-      server.stop(true);
     }
   });
 

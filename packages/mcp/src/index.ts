@@ -956,13 +956,14 @@ function compactResult<T extends Record<string, unknown>>(value: T): T {
 
 export class GuaBridgeClient {
   private socket: WebSocket | null = null;
-  private connectPromise: Promise<WebSocket> | null = null;
+  private connectionAttempt: ConnectionAttempt | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
 
   constructor(
     private readonly url: string,
     private readonly requestTimeoutMs = 5000,
+    private readonly createWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   ) {
   }
 
@@ -1116,10 +1117,14 @@ export class GuaBridgeClient {
   }
 
   close(): void {
-    this.rejectAll(new Error("Gua MCP bridge client closed."));
+    const error = new Error("Gua MCP bridge client closed.");
+    this.rejectAll(error);
+    const attempt = this.connectionAttempt;
+    this.connectionAttempt = null;
+    attempt?.reject(error);
+    if (attempt !== null) closePendingSocket(attempt.socket);
     this.socket?.close();
     this.socket = null;
-    this.connectPromise = null;
   }
 
   private async request<T>(command: BridgeCommandInput, timeoutMs = this.requestTimeoutMs,
@@ -1173,28 +1178,31 @@ export class GuaBridgeClient {
     const connection = this.connect();
     return new Promise<WebSocket>((resolve, reject) => {
       let settled = false;
-      const timeoutId = setTimeout(() => finishReject(
-        new Error(`Timed out waiting for Gua bridge command: ${commandType}`)), timeoutMs);
-      const aborted = () => finishReject(new RpcFailure(-32800, "MCP request was cancelled."));
+      let timeoutId: ReturnType<typeof setTimeout>;
 
-      function cleanup() {
+      const cleanup = () => {
         clearTimeout(timeoutId);
         signal?.removeEventListener("abort", aborted);
-      }
+      };
 
-      function finishResolve(socket: WebSocket) {
+      const finishResolve = (socket: WebSocket) => {
         if (settled) return;
         settled = true;
         cleanup();
         resolve(socket);
-      }
+      };
 
-      function finishReject(error: unknown) {
+      const finishReject = (error: unknown) => {
         if (settled) return;
         settled = true;
         cleanup();
+        this.discardConnectionAttempt(connection, error);
         reject(error);
-      }
+      };
+
+      const aborted = () => finishReject(new RpcFailure(-32800, "MCP request was cancelled."));
+      timeoutId = setTimeout(() => finishReject(
+        new Error(`Timed out waiting for Gua bridge command: ${commandType}`)), timeoutMs);
 
       signal?.addEventListener("abort", aborted, { once: true });
       connection.then(finishResolve, finishReject);
@@ -1202,43 +1210,70 @@ export class GuaBridgeClient {
     });
   }
 
-  private async connect(): Promise<WebSocket> {
+  private connect(): Promise<WebSocket> {
     if (this.socket !== null && this.socket.readyState === WebSocket.OPEN) {
-      return this.socket;
+      return Promise.resolve(this.socket);
     }
 
-    if (this.connectPromise !== null) {
-      return this.connectPromise;
+    if (this.connectionAttempt !== null) {
+      return this.connectionAttempt.promise;
     }
 
-    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(this.url);
+    const socket = this.createWebSocket(this.url);
+    let resolveAttempt!: (socket: WebSocket) => void;
+    let rejectAttempt!: (error: unknown) => void;
+    const promise = new Promise<WebSocket>((resolve, reject) => {
+      resolveAttempt = resolve;
+      rejectAttempt = reject;
+    });
+    const attempt: ConnectionAttempt = { socket, promise, reject: rejectAttempt };
+    this.connectionAttempt = attempt;
 
-      socket.addEventListener("open", () => {
-        this.socket = socket;
-        this.connectPromise = null;
-        resolve(socket);
-      });
-
-      socket.addEventListener("message", (event) => {
-        this.handleMessage(event.data);
-      });
-
-      socket.addEventListener("close", () => {
-        this.socket = null;
-        this.connectPromise = null;
-        this.rejectAll(new Error("Gua bridge WebSocket connection closed."));
-      });
-
-      socket.addEventListener("error", () => {
-        const error = new Error(`Failed to connect to Gua bridge at ${this.url}.`);
-        this.connectPromise = null;
-        reject(error);
-        this.rejectAll(error);
-      });
+    socket.addEventListener("open", () => {
+      if (this.connectionAttempt !== attempt) {
+        socket.close();
+        return;
+      }
+      this.socket = socket;
+      this.connectionAttempt = null;
+      resolveAttempt(socket);
     });
 
-    return this.connectPromise;
+    socket.addEventListener("message", (event) => {
+      if (this.socket === socket) this.handleMessage(event.data);
+    });
+
+    socket.addEventListener("close", () => {
+      if (this.connectionAttempt === attempt) {
+        this.connectionAttempt = null;
+        rejectAttempt(new Error("Gua bridge WebSocket connection closed."));
+      }
+      if (this.socket === socket) {
+        this.socket = null;
+        this.rejectAll(new Error("Gua bridge WebSocket connection closed."));
+      }
+    });
+
+    socket.addEventListener("error", () => {
+      const error = new Error(`Failed to connect to Gua bridge at ${this.url}.`);
+      if (this.connectionAttempt === attempt) {
+        this.connectionAttempt = null;
+        rejectAttempt(error);
+      }
+      if (this.socket === socket) {
+        this.rejectAll(error);
+      }
+    });
+
+    return promise;
+  }
+
+  private discardConnectionAttempt(connection: Promise<WebSocket>, error: unknown): void {
+    const attempt = this.connectionAttempt;
+    if (attempt === null || attempt.promise !== connection) return;
+    this.connectionAttempt = null;
+    attempt.reject(error);
+    closePendingSocket(attempt.socket);
   }
 
   private handleMessage(data: unknown): void {
@@ -1316,6 +1351,21 @@ interface PendingRequest {
   resolve(value: unknown): void;
   reject(reason: Error): void;
   timeoutId: ReturnType<typeof setTimeout>;
+}
+
+interface ConnectionAttempt {
+  socket: WebSocket;
+  promise: Promise<WebSocket>;
+  reject(error: unknown): void;
+}
+
+function closePendingSocket(socket: WebSocket): void {
+  const terminate = (socket as WebSocket & { terminate?: () => void }).terminate;
+  if (socket.readyState === WebSocket.CONNECTING && typeof terminate === "function") {
+    terminate.call(socket);
+    return;
+  }
+  socket.close();
 }
 
 interface TestStep {

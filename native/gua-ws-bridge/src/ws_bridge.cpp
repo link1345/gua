@@ -4,18 +4,17 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cerrno>
-#include <charconv>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -602,11 +601,12 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
         json[delimiter] == '\r' || json[delimiter] == '\n')) ++delimiter;
     if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
         return std::nullopt;
-    const std::string_view token = json.substr(start, end - start);
+    const std::string token(json.substr(start, end - start));
+    std::istringstream stream(token);
+    stream.imbue(std::locale::classic());
     double value = 0;
-    const auto [parsed_end, error] = std::from_chars(token.data(), token.data() + token.size(), value,
-        std::chars_format::general);
-    return error == std::errc() && parsed_end == token.data() + token.size() && std::isfinite(value)
+    stream >> value;
+    return !stream.fail() && stream.peek() == std::char_traits<char>::eof() && std::isfinite(value)
         ? std::optional<double>(value) : std::nullopt;
 }
 

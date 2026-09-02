@@ -37,12 +37,26 @@ export function parseWorldQueryResult(value: unknown, selector?: GuaWorldSelecto
     typeof spatial.truncated === "boolean" && distances !== undefined && distances.every((item) => {
       const distance = record(item);
       return !!distance && only(distance, distanceKeys) && nonEmptyString(distance.objectId) && finiteNumber(distance.distance) && distance.distance >= 0;
+    }) && distances.every((item, index) => {
+      if (index === 0) return true;
+      const previous = record(distances[index - 1])!;
+      const current = record(item)!;
+      return (previous.distance as number) < (current.distance as number) ||
+        (previous.distance === current.distance && utf8OrdinalLess(
+          previous.objectId as string, current.objectId as string));
     }) && matches !== undefined && distances.length === matches.length &&
     distances.every((item, index) => record(item)?.objectId === record(matches[index])?.id));
   const selectorSpatial = !result?.valid || selector === undefined || (selector.near === undefined
     ? spatial === undefined
-    : spatial !== undefined && distances !== undefined && spatial.relativeToObjectId === selector.near.relativeToObjectId &&
+    : spatial !== undefined && distances !== undefined && matches !== undefined &&
+      spatial.relativeToObjectId === selector.near.relativeToObjectId &&
       distances.every((item) => (record(item)?.distance as number) <= selector.near!.maxDistance) &&
+      matches.every((item) => {
+        const match = record(item)!;
+        const position = record(match.position)!;
+        return match.id !== selector.near!.relativeToObjectId && finiteNumber(position.x) &&
+          finiteNumber(position.y) && (match.space === "world2d" || finiteNumber(position.z));
+      }) &&
       (selector.limit === undefined
         ? spatial.truncated === false
         : matches !== undefined && matches.length <= selector.limit && (!spatial.truncated || matches.length === selector.limit)));
@@ -98,6 +112,17 @@ function parseJson(value: unknown): unknown {
 }
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+const utf8Encoder = new TextEncoder();
+function utf8OrdinalLess(left: string, right: string): boolean {
+  const leftBytes = utf8Encoder.encode(left);
+  const rightBytes = utf8Encoder.encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index++) {
+    if (leftBytes[index] !== rightBytes[index]) return leftBytes[index]! < rightBytes[index]!;
+  }
+  return leftBytes.length < rightBytes.length;
 }
 function only(value: Record<string, unknown>, keys: Set<string>): boolean { return Object.keys(value).every((key) => keys.has(key)); }
 function nonEmptyString(value: unknown): value is string { return typeof value === "string" && value.length > 0; }

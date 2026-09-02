@@ -82,9 +82,29 @@ describe("World WebMCP tools", () => {
     expect(() => parseWorldQueryResult({ ...query, spatial: undefined }, near)).toThrow("invalid world query result");
     expect(() => parseWorldQueryResult(query, {})).toThrow("invalid world query result");
     expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, relativeToObjectId: "other" } }, near)).toThrow("invalid world query result");
+    const selfMatch = { ...object, id: "player" };
+    expect(() => parseWorldQueryResult({ ...query, matches: [selfMatch], spatial: { ...query.spatial,
+      distances: [{ objectId: "player", distance: 0 }] } }, near)).toThrow("invalid world query result");
+    const incompleteMatch = { ...object, position: { x: 1 } };
+    expect(() => parseWorldQueryResult({ ...query, matches: [incompleteMatch] }, near)).toThrow("invalid world query result");
     expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, truncated: true } }, { near: near.near })).toThrow("invalid world query result");
     expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, distances: [] } })).toThrow("invalid world query result");
     expect(() => parseWorldQueryResult({ ...query, spatial: { ...query.spatial, distances: [{ objectId: "other", distance: 5 }] } })).toThrow("invalid world query result");
+    const secondObject = { ...object, id: "enemy" };
+    const unordered = { ...query, matches: [object, secondObject], spatial: { ...query.spatial,
+      distances: [{ objectId: "door", distance: 5 }, { objectId: "enemy", distance: 4 }] } };
+    expect(() => parseWorldQueryResult(unordered)).toThrow("invalid world query result");
+    const unorderedTie = { ...query, matches: [secondObject, object], spatial: { ...query.spatial,
+      distances: [{ objectId: "enemy", distance: 5 }, { objectId: "door", distance: 5 }] } };
+    expect(() => parseWorldQueryResult(unorderedTie)).toThrow("invalid world query result");
+    const bmpObject = { ...object, id: "\uE000" };
+    const astralObject = { ...object, id: "\u{10000}" };
+    const unicodeTie = { ...query, matches: [bmpObject, astralObject], spatial: { ...query.spatial,
+      distances: [{ objectId: bmpObject.id, distance: 5 }, { objectId: astralObject.id, distance: 5 }] } };
+    expect(parseWorldQueryResult(unicodeTie)).toEqual(unicodeTie);
+    expect(() => parseWorldQueryResult({ ...unicodeTie, matches: [...unicodeTie.matches].reverse(), spatial: {
+      ...unicodeTie.spatial, distances: [...unicodeTie.spatial.distances].reverse(),
+    } })).toThrow("invalid world query result");
     const projected = { ...object, label: undefined, tags: undefined, position: { x: 1 }, domainId: "", relatedUiNodeId: "" };
     expect(parseWorldObjectTree({ ...tree, objects: [projected] }).objects).toEqual([projected]);
     for (const invalid of [
