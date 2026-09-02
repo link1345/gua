@@ -70,6 +70,8 @@ public:
     void enable_virtual_clock_adapter();
     bool publish_game_input_actions(const String& input_context, const Array& actions);
     String get_game_input_actions_json() const;
+    String get_player_game_input_actions_json() const;
+    String find_game_input_actions_json(const Dictionary& selector, int observation_profile = 0) const;
     void enable_game_input_adapter(int capabilities, int player_capabilities = 0);
     int get_game_input_capabilities(int observation_profile) const;
     uint64_t create_game_input_owner();

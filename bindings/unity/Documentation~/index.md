@@ -26,7 +26,10 @@ read-only `get_world_object_tree`, `find_world_objects`, and
 by `gua-world-tools`; WebMCP callers cannot elevate the runtime observation
 profile or invoke actions on world objects.
 When `GuaGameInputMap` initializes the input pump, the same page bridge exposes
-only the matching Semantic Game Action and Raw Input capabilities. Calls wait
+only the matching Semantic Game Action and Raw Input capabilities. The Action
+Map component exposes category, aliases, tags, and Player agent exposure;
+`find_game_input_actions` performs bounded discovery without generating dynamic
+tools. Keep secrets out of descriptor metadata. Calls wait
 for correlated host completion and use a page-owned session that is released on
 abort, timeout, bridge uninstall, or runtime destruction.
 

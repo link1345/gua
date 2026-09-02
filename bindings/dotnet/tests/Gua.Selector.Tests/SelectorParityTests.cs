@@ -1756,6 +1756,39 @@ public sealed class SelectorParityTests
         });
     }
 
+    [Test]
+    public void GameInputSearchUsesCoreMetadataAndPlayerProjection()
+    {
+        using var runtime = new GuaRuntime();
+        runtime.EnableGameInput(GuaGameInputCapabilities.Semantic, () => { }, GuaGameInputCapabilities.Semantic);
+        runtime.PublishGameInputActions("inventory", [
+            new GuaGameInputActionDescriptor("open_inventory", "Open inventory", GuaGameInputValueType.Button,
+                Category: "menu", Aliases: ["show items"], Tags: ["inventory", "ui"]),
+            new GuaGameInputActionDescriptor("debug_cheat", "Debug cheat", GuaGameInputValueType.Button,
+                Category: "debug", AgentExposure: GuaAgentExposure.Private),
+        ]);
+
+        var debug = runtime.FindGameInputActions(new(Query: "items", Category: "menu", Tags: ["inventory"]));
+        Assert.Multiple(() => {
+            Assert.That(debug.Count, Is.EqualTo(1));
+            Assert.That(debug.Actions.Single().Id, Is.EqualTo("open_inventory"));
+            Assert.That(debug.Context, Is.EqualTo("inventory"));
+        });
+        var player = runtime.FindGameInputActions(new(Limit: 100), GuaObservationProfile.Player);
+        Assert.That(player.Actions.Select(action => action.Id), Is.EqualTo(new[] { "open_inventory" }));
+        Assert.Throws<ArgumentException>(() => runtime.FindGameInputActions(new(Query: "before\0after")));
+        Assert.Throws<ArgumentException>(() => runtime.FindGameInputActions(new(Tags: ["inventory\0hidden"])));
+        Assert.Throws<ArgumentException>(() => runtime.PublishGameInputActions("invalid", [
+            new GuaGameInputActionDescriptor("invalid", "Invalid", GuaGameInputValueType.Button, Aliases: ["hop\0hidden"]),
+        ]));
+        Assert.Throws<ArgumentException>(() => runtime.PublishGameInputActions("invalid", [
+            new GuaGameInputActionDescriptor("invalid", "Invalid", GuaGameInputValueType.Button, Category: "movement\0hidden"),
+        ]));
+        using var playerSession = runtime.CreateGameInputSession(GuaObservationProfile.Player);
+        Assert.Throws<InvalidOperationException>(() => playerSession.Send(
+            GuaGameInputKind.Semantic, GuaGameInputOperation.Press, "debug_cheat", true));
+    }
+
     private static int ScheduledCount(object clock)
     {
         var field = clock.GetType().GetField("scheduled", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)

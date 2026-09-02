@@ -142,23 +142,38 @@ describe("registerGuaWebMcp", () => {
   test("advertises game-input tools only for initialized engine capabilities", async () => {
     const page = modelDocument();
     const requests: unknown[] = [];
+    const searchSelectors: unknown[] = [];
     const bridge: GuaBrowserBridge = {
       getUiTree: async () => tree(),
       performAction: async (request) => ({ requestId: 1, action: request.action, succeeded: true }),
-      getGameInputCapabilities: async () => ["semantic_game_input_v1", "raw_keyboard_input_v1", "game_input_lease_v1"],
+      getGameInputCapabilities: async () => ["semantic_game_input_v1", "semantic_game_input_search_v1", "raw_keyboard_input_v1", "game_input_lease_v1"],
       getGameInputActions: async () => ({ schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "play", actions: [{
         id: "jump", description: "Jump", valueType: "button", holdable: false, active: true,
         bindings: ["Space"], risk: "safe", requiresConfirmation: false,
       }] }),
+      findGameInputActions: async (selector) => { searchSelectors.push(selector); return { schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "play",
+        count: selector.id === "jump" || selector.query === "Jump" ? 1 : 0, truncated: false, actions: selector.id === "jump" || selector.query === "Jump" ? [{
+          id: "jump", description: "Jump", valueType: "button", holdable: false, active: true,
+          bindings: ["Space"], risk: "safe", requiresConfirmation: false,
+        }] : [] }; },
       getGameInputState: async () => ({ schemaVersion: 1, held: [] }),
       performGameInput: async (request) => { requests.push(request); return { completed: true, requestId: 21, succeeded: true, errorCode: 0 }; },
     };
     const registration = await registerGuaWebMcp(bridge, { document: page.document });
     expect(registration.registeredTools).toEqual(expect.arrayContaining([
-      "get_game_input_actions", "press_game_input_action", "get_game_input_state", "release_all_game_inputs", "key_down",
+      "get_game_input_actions", "find_game_input_actions", "press_game_input_action", "get_game_input_state", "release_all_game_inputs", "key_down",
     ]));
     expect(registration.registeredTools).not.toContain("pointer_move");
     expect(registration.registeredTools).not.toContain("set_gamepad_axis");
+    const found = await page.tools.get("find_game_input_actions")!.execute({ query: "Jump", active: true }) as { content: Array<{ text: string }> };
+    expect(JSON.parse(found.content[0]!.text).actions[0].id).toBe("jump");
+    for (const invalid of [{ id: "Invalid" }, { tags: ["same", "same"] }, { query: "q".repeat(129) }, { query: "before\0after" }]) {
+      const rejected = await page.tools.get("find_game_input_actions")!.execute(invalid) as { isError: boolean; content: Array<{ text: string }> };
+      expect(rejected.isError).toBe(true);
+      expect(JSON.parse(rejected.content[0]!.text).error.code).toBe("invalid_request");
+    }
+    expect(searchSelectors).toHaveLength(1);
+    expect(searchSelectors[0]).toMatchObject({ query: "Jump", active: true, limit: 20 });
     await page.tools.get("press_game_input_action")!.execute({ actionId: "jump" });
     expect(requests).toContainEqual({ type: "press_game_input_action", actionId: "jump", confirmed: false });
   });
@@ -237,6 +252,7 @@ describe("registerGuaWebMcp", () => {
         id: "self_destruct", description: "Danger", valueType: "button", holdable: false, active: true,
         bindings: [], risk: "dangerous", requiresConfirmation: true,
       }] }),
+      findGameInputActions: async () => { throw new Error("legacy runtime must use get_game_input_actions"); },
       getGameInputState: async () => ({ schemaVersion: 1, held: [] }),
       performGameInput: async (request) => { requests.push(request); return { completed: true, requestId: 22, succeeded: true, errorCode: 0 }; },
     };

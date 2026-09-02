@@ -49,6 +49,8 @@ const REQUIRED_CONTEXT_METHODS := [
 	"enable_virtual_clock_adapter",
 	"publish_game_input_actions",
 	"get_game_input_actions_json",
+	"get_player_game_input_actions_json",
+	"find_game_input_actions_json",
 	"enable_game_input_adapter",
 	"get_game_input_capabilities",
 	"create_game_input_owner",
@@ -448,6 +450,14 @@ func get_game_input_actions_json() -> String:
 	if not _ensure_context():
 		return "{}"
 	return context.get_game_input_actions_json()
+
+
+func get_player_game_input_actions_json() -> String:
+	return context.get_player_game_input_actions_json() if _ensure_context() else "{}"
+
+
+func find_game_input_actions_json(selector: Dictionary, observation_profile := 0) -> String:
+	return context.find_game_input_actions_json(selector, observation_profile) if _ensure_context() else "{}"
 
 
 func create_game_input_owner() -> int:

@@ -7,6 +7,8 @@ import type {
   GuaClockStatus,
   GuaContextStatus,
   GuaGameInputActions,
+  GuaGameInputActionSearchResult,
+  GuaGameInputActionSelector,
   GuaGameInputState,
   GameInputCommandInput,
   GuaWorldObjectTree,
@@ -45,6 +47,11 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
       case "clock_run_for": return ok(command.id, target.runClockFor(command.durationMs, command.stepMs));
       case "clock_resume": return ok(command.id, target.resumeClock());
       case "get_game_input_actions": return ok(command.id, target.getGameInputActions());
+      case "find_game_input_actions": {
+        const selector = gameInputSelectorFromWire(command as unknown as Record<string, unknown>);
+        return selector === null ? { id: command.id, ok: false, error: "invalid game input selector" } :
+          ok(command.id, target.findGameInputActions(selector));
+      }
       case "get_game_input_state": return ok(command.id, target.getGameInputState());
       case "poll_game_input": return ok(command.id, { completed: true, succeeded: true, errorCode: 0 });
       case "poll_events":
@@ -80,6 +87,35 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
   } catch (error) {
     return { id: command.id, ok: false, error: (error as Error).message };
   }
+}
+
+function gameInputSelectorFromWire(command: Record<string, unknown>): GuaGameInputActionSelector | null {
+  const allowed = new Set(["id", "type", "actionId", "query", "valueType", "active", "context", "category", "tags", "limit"]);
+  if (Object.keys(command).some((field) => !allowed.has(field))) return null;
+  const text = (field: string, maximumCodePoints?: number): string | undefined | null => {
+    const value = command[field];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length === 0 || value.includes("\0") ||
+        maximumCodePoints !== undefined && [...value].length > maximumCodePoints) return null;
+    return value;
+  };
+  const actionId = text("actionId"), query = text("query", 128), context = text("context"), category = text("category");
+  if (actionId === null || query === null || context === null || category === null ||
+      actionId !== undefined && !/^[a-z][a-z0-9_.-]{0,126}$/.test(actionId) ||
+      category !== undefined && !/^[a-z][a-z0-9_.-]{0,126}$/.test(category)) return null;
+  const valueType = command.valueType;
+  const active = command.active;
+  const limit = command.limit ?? 20;
+  if (valueType !== undefined && (!Number.isInteger(valueType) || (valueType as number) < 1 || (valueType as number) > 4) ||
+      active !== undefined && (!Number.isInteger(active) || (active as number) < 0 || (active as number) > 2) ||
+      !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100) return null;
+  const tagValues = command.tags ?? [];
+  if (!Array.isArray(tagValues) || tagValues.length > 16 || tagValues.some((tag) => typeof tag !== "string" ||
+      tag.length === 0 || tag.includes("\0") || [...tag].length > 64) || new Set(tagValues).size !== tagValues.length) return null;
+  return { id: actionId, query: query ?? undefined,
+    valueType: valueType === undefined ? undefined : ({ 1: "button", 2: "axis1d", 3: "vector2", 4: "text" } as const)[valueType as 1 | 2 | 3 | 4],
+    active: active === undefined || active === 0 ? undefined : active === 2,
+    context: context ?? undefined, category: category ?? undefined, tags: tagValues as string[], limit: limit as number };
 }
 
 function ok(id: number, result: GuaInspectorResult): GuaInspectorResponse {
@@ -198,6 +234,17 @@ export class DemoRuntime {
     { id: "jump", description: "Jump", valueType: "button", holdable: true, active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false },
     { id: "move", description: "Move", valueType: "vector2", range: { minimum: -1, maximum: 1 }, holdable: true, active: true, bindings: ["Gamepad.leftStick"], risk: "safe", requiresConfirmation: false },
   ] }; }
+  findGameInputActions(selector: GuaGameInputActionSelector): GuaGameInputActionSearchResult {
+    const map = this.getGameInputActions();
+    const matches = map.actions.filter((action) => (!selector.id || action.id === selector.id) &&
+      (!selector.query || action.id.includes(selector.query) || action.description?.includes(selector.query) || action.aliases?.some((alias) => alias.includes(selector.query!))) &&
+      (!selector.valueType || action.valueType === selector.valueType) && (selector.active === undefined || action.active === selector.active) &&
+      (!selector.context || selector.context === map.context) && (!selector.category || action.category === selector.category) &&
+      (!selector.tags || selector.tags.every((tag) => action.tags?.includes(tag))))
+      .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    const limit = selector.limit ?? 20;
+    return { ...map, count: Math.min(matches.length, limit), truncated: matches.length > limit, actions: matches.slice(0, limit) };
+  }
   getGameInputState(): GuaGameInputState { return { schemaVersion: 1, held: [...this.heldGameInputs] }; }
   performGameInput(command: GameInputCommandInput): { requestId: number } {
     const requestId = this.nextGameInputRequestId++;

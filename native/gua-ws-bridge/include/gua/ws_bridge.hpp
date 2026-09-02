@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gua::ws {
 
@@ -35,6 +36,22 @@ struct WorldQuerySelector {
     double state_number = 0;
     bool state_bool = false;
 };
+
+struct GameInputQuerySelector {
+    std::string id;
+    std::string query;
+    int value_type = 0;
+    int active = 0;
+    std::string context;
+    std::string category;
+    std::vector<std::string> tags;
+    unsigned int limit = 20;
+};
+
+namespace detail {
+[[nodiscard]] bool valid_game_input_query_selector(const GameInputQuerySelector& selector);
+[[nodiscard]] bool valid_game_input_query_request_json(std::string_view json);
+}
 
 struct ActionCommand {
     std::string type;
@@ -92,6 +109,7 @@ struct BridgeHandlers {
     std::function<void(unsigned long long owner_id)> release_game_input_owner;
     std::function<bool(unsigned int capability)> game_input_supported;
     std::function<std::string()> get_game_input_actions_json;
+    std::function<std::string(const GameInputQuerySelector& selector)> query_game_input_actions_json;
     std::function<std::string(unsigned long long owner_id)> get_game_input_state_json;
     std::function<long long(unsigned long long owner_id, const GameInputCommand& command)> enqueue_game_input;
     std::function<std::string(unsigned long long owner_id, unsigned long long request_id)> poll_game_input_result_json;
