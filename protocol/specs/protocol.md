@@ -349,6 +349,10 @@ Descriptor v2 adds optional `category`, `aliases`, `tags`, and `agentExposure`.
 Category follows the Action ID ASCII identifier and byte limits. Aliases and
 tags contain at most 16 distinct, non-empty values of 1-64 Unicode code points;
 metadata is compared exactly without Unicode normalization or case folding.
+Aliases and tags reject embedded U+0000 before conversion to the stable
+NUL-terminated v1 C ABI.
+Selector query, context, and tag strings reject embedded U+0000 because the
+stable v1 C ABI represents them as NUL-terminated UTF-8 strings.
 `find_game_input_actions` accepts exact `id`, ordinal case-sensitive substring
 `query` over ID/description/aliases, `valueType`, `active`, exact `context`,
 exact `category`, all-of `tags`, and `limit`. Conditions are ANDed and Action IDs

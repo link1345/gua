@@ -1023,6 +1023,16 @@ extern "C" int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime,
     return gua_register_game_input_action_v1(runtime->context, descriptor);
 }
 
+int copy_game_input_result_unlocked(gua_runtime_t* runtime, uint64_t owner_id, uint64_t request_id,
+    char* out_json, int out_json_size)
+{
+    const int required_size = gua_copy_game_input_result_json(runtime->context, owner_id, request_id, out_json, out_json_size);
+    if (required_size > 0 && out_json != nullptr && out_json_size >= required_size &&
+        std::string_view(out_json, static_cast<std::size_t>(required_size - 1)).starts_with("{\"completed\":true"))
+        runtime->game_input_request_profiles.erase(request_id);
+    return required_size;
+}
+
 extern "C" int gua_runtime_register_game_input_action_v2(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v2_t* descriptor)
 {
     if (!valid_runtime(runtime)) return 0;
@@ -1172,7 +1182,7 @@ extern "C" int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, u
 {
     if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
     const std::lock_guard lock(runtime->context_mutex);
-    return gua_copy_game_input_result_json(runtime->context, owner_id, request_id, out_json, out_json_size);
+    return copy_game_input_result_unlocked(runtime, owner_id, request_id, out_json, out_json_size);
 }
 
 extern "C" void gua_runtime_set_world_object_tree_enabled(gua_runtime_t* runtime, int enabled)
@@ -1783,6 +1793,9 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
             return json;
         },
         .query_game_input_actions_json = [runtime](const gua::ws::GameInputQuerySelector& selector) {
+            const auto contains_nul = [](const std::string& value) { return value.find('\0') != std::string::npos; };
+            if (contains_nul(selector.id) || contains_nul(selector.query) || contains_nul(selector.context) ||
+                contains_nul(selector.category) || std::any_of(selector.tags.begin(), selector.tags.end(), contains_nul)) return std::string();
             std::vector<const char*> tag_pointers;
             tag_pointers.reserve(selector.tags.size());
             for (const auto& tag : selector.tags) tag_pointers.push_back(tag.c_str());
@@ -1855,10 +1868,10 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .poll_game_input_result_json = [runtime](unsigned long long owner_id, unsigned long long request_id) {
             const std::lock_guard lock(runtime->context_mutex);
-            const int size = gua_copy_game_input_result_json(runtime->context, owner_id, request_id, nullptr, 0);
+            const int size = copy_game_input_result_unlocked(runtime, owner_id, request_id, nullptr, 0);
             if (size <= 0) return std::string("null");
             std::string json(static_cast<std::size_t>(size), '\0');
-            gua_copy_game_input_result_json(runtime->context, owner_id, request_id, json.data(), size);
+            copy_game_input_result_unlocked(runtime, owner_id, request_id, json.data(), size);
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
         },

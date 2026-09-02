@@ -9,6 +9,13 @@ describe("DemoRuntime virtual clock", () => {
 
     const exact = handleMessage(JSON.stringify({ id: 10, type: "find_game_input_actions", actionId: "jump", valueType: 1, active: 2, limit: 1 }), runtime);
     expect(exact).toMatchObject({ id: 10, ok: true, result: { count: 1, actions: [{ id: "jump" }] } });
+
+    for (const invalid of [
+      { actionId: "Invalid" }, { limit: 0 }, { tags: ["same", "same"] }, { query: "before\0after" },
+    ]) {
+      expect(handleMessage(JSON.stringify({ id: 11, type: "find_game_input_actions", ...invalid }), runtime))
+        .toEqual({ id: 11, ok: false, error: "invalid game input selector" });
+    }
   });
 
   test("rejects installation until the current timeline is reset", () => {

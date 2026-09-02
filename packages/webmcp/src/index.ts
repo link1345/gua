@@ -441,22 +441,29 @@ async function waitForWorldObject(
 
 function gameInputSelector(input: Record<string, unknown>): GuaGameInputActionSelector {
   rejectUnknownArguments(input, new Set(["id", "query", "valueType", "active", "context", "category", "tags", "limit"]));
-  const stringValue = (key: string): string | undefined => {
+  const stringValue = (key: string, maximumCodePoints?: number): string | undefined => {
     const value = input[key];
     if (value === undefined) return undefined;
-    if (typeof value !== "string" || value.length === 0) throw new GuaWebError("invalid_request", `${key} must be a non-empty string.`);
+    if (typeof value !== "string" || value.length === 0 || value.includes("\0") ||
+        maximumCodePoints !== undefined && [...value].length > maximumCodePoints)
+      throw new GuaWebError("invalid_request", `${key} is invalid.`);
     return value;
   };
   const tags = input.tags;
-  if (tags !== undefined && (!Array.isArray(tags) || !tags.every((tag) => typeof tag === "string" && tag.length > 0)))
-    throw new GuaWebError("invalid_request", "tags must contain non-empty strings.");
+  if (tags !== undefined && (!Array.isArray(tags) || tags.length > 16 || !tags.every((tag) => typeof tag === "string" &&
+      tag.length > 0 && !tag.includes("\0") && [...tag].length <= 64) || new Set(tags).size !== tags.length))
+    throw new GuaWebError("invalid_request", "tags are invalid.");
   const valueType = stringValue("valueType");
   if (valueType !== undefined && !["button", "axis1d", "vector2", "text"].includes(valueType))
     throw new GuaWebError("invalid_request", "valueType is invalid.");
   if (input.active !== undefined && typeof input.active !== "boolean") throw new GuaWebError("invalid_request", "active must be boolean.");
+  const id = stringValue("id"), category = stringValue("category");
+  if (id !== undefined && !/^[a-z][a-z0-9_.-]{0,126}$/.test(id) ||
+      category !== undefined && !/^[a-z][a-z0-9_.-]{0,126}$/.test(category))
+    throw new GuaWebError("invalid_request", "id or category is invalid.");
   return {
-    id: stringValue("id"), query: stringValue("query"), valueType: valueType as GuaGameInputValueType | undefined,
-    active: input.active as boolean | undefined, context: stringValue("context"), category: stringValue("category"),
+    id, query: stringValue("query", 128), valueType: valueType as GuaGameInputValueType | undefined,
+    active: input.active as boolean | undefined, context: stringValue("context"), category,
     tags: tags as string[] | undefined, limit: optionalInteger(input, "limit", 20, 1, 100),
   };
 }

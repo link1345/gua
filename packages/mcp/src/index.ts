@@ -189,10 +189,10 @@ export const guaMcpToolDefinitions: readonly McpTool[] = [
   ...worldObservationTools,
   { name: "get_game_input_actions", description: "Read the host-published semantic game action map.", inputSchema: objectSchema({}) },
   { name: "find_game_input_actions", description: "Search the current host-authorized semantic game action map.", inputSchema: objectSchema({
-    id: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 }, query: { type: "string", minLength: 1, maxLength: 128 },
+    id: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 }, query: { type: "string", minLength: 1, maxLength: 128, pattern: "^[^\\u0000]+$" },
     valueType: { type: "string", enum: ["button", "axis1d", "vector2", "text"] }, active: { type: "boolean" },
-    context: { type: "string", minLength: 1 }, category: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 },
-    tags: { type: "array", maxItems: 16, uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 64 } },
+    context: { type: "string", minLength: 1, pattern: "^[^\\u0000]+$" }, category: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 },
+    tags: { type: "array", maxItems: 16, uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 64, pattern: "^[^\\u0000]+$" } },
     limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
   }) },
   { name: "press_game_input_action", description: "Press a semantic button action and wait for host completion.", inputSchema: objectSchema({

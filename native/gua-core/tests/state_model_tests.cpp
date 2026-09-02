@@ -1684,6 +1684,28 @@ int main()
     assert(search_size > 0 && gua_query_game_input_actions_json(context, &action_selector,
         GUA_OBSERVATION_PROFILE_DEBUG, search.data(), search_size) == search_size);
     assert(search.find("\"count\":1") != std::string::npos && search.find("\"id\":\"discover\"") != std::string::npos);
+    {
+        gua::Context cpp_context;
+        gua::GameInputActionSelector cpp_selector;
+        cpp_selector.query = std::string("before\0after", 12);
+        bool rejected_embedded_nul = false;
+        try { (void)cpp_context.find_game_input_actions_json(cpp_selector); }
+        catch (const std::invalid_argument&) { rejected_embedded_nul = true; }
+        assert(rejected_embedded_nul);
+        gua::GameInputAction cpp_action;
+        cpp_action.id = "jump"; cpp_action.description = "Jump";
+        cpp_action.aliases = { std::string("hop\0hidden", 10) };
+        rejected_embedded_nul = false;
+        try { cpp_context.publish_game_input_actions("gameplay", { cpp_action }); }
+        catch (const std::invalid_argument&) { rejected_embedded_nul = true; }
+        assert(rejected_embedded_nul);
+        cpp_action.aliases.clear();
+        cpp_action.category = std::string("movement\0hidden", 15);
+        rejected_embedded_nul = false;
+        try { cpp_context.publish_game_input_actions("gameplay", { cpp_action }); }
+        catch (const std::invalid_argument&) { rejected_embedded_nul = true; }
+        assert(rejected_embedded_nul);
+    }
     const std::string long_query(129, 'q');
     auto invalid_selector = action_selector;
     invalid_selector.query = long_query.c_str();

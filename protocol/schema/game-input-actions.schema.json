@@ -31,8 +31,8 @@
         "risk": { "enum": ["safe", "caution", "dangerous"] },
         "requiresConfirmation": { "type": "boolean" },
         "category": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 127 },
-        "aliases": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
-        "tags": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "aliases": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000]+$" } },
+        "tags": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000]+$" } },
         "agentExposure": { "enum": ["auto", "private"] }
       }
     }

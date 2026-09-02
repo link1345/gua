@@ -122,6 +122,10 @@ public sealed partial class GuaRuntime
             {
                 if (action.Minimum.HasValue != action.Maximum.HasValue)
                     throw new ArgumentException($"Action '{action.Id}' must specify both range bounds.");
+                if ((action.Category?.Contains('\0') ?? false) ||
+                    (action.Aliases?.Any(value => value.Contains('\0')) ?? false) ||
+                    (action.Tags?.Any(value => value.Contains('\0')) ?? false))
+                    throw new ArgumentException($"Action '{action.Id}' category, aliases, and tags must not contain embedded NUL characters.", nameof(actions));
                 var strings = new[] { action.Id, action.Description, JsonSerializer.Serialize(action.Bindings ?? []), action.Risk, action.Category };
                 var pointers = strings.Select(value => value is null ? 0 : (nint)Marshal.StringToCoTaskMemUTF8(value)).ToArray();
                 var aliases = AllocateStrings(action.Aliases ?? [], out var aliasArray);
@@ -253,6 +257,10 @@ public sealed partial class GuaRuntime
     {
         ThrowIfDisposed();
         if (selector is null) throw new ArgumentNullException(nameof(selector));
+        static bool ContainsNul(string? value) => value?.Contains('\0') == true;
+        if (ContainsNul(selector.Id) || ContainsNul(selector.Query) || ContainsNul(selector.Context) ||
+            ContainsNul(selector.Category) || (selector.Tags?.Any(ContainsNul) ?? false))
+            throw new ArgumentException("Game input selectors must not contain embedded NUL characters.", nameof(selector));
         var allocations = new List<nint>();
         nint Text(string? value) { if (string.IsNullOrEmpty(value)) return 0; var pointer = (nint)Marshal.StringToCoTaskMemUTF8(value); allocations.Add(pointer); return pointer; }
         var tagPointers = AllocateStrings(selector.Tags ?? [], out var tagArray);

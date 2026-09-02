@@ -2,6 +2,7 @@
 
 #include "gua/gua.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <cstdint>
 #include <optional>
@@ -499,6 +500,13 @@ public:
         std::string context(input_context);
         if (!gua_begin_game_input_frame(context_, context.c_str())) throw std::runtime_error("Failed to begin game input frame");
         for (const auto& action : actions) {
+            const auto contains_nul = [](const std::string& value) { return value.find('\0') != std::string::npos; };
+            if (contains_nul(action.category) ||
+                std::any_of(action.aliases.begin(), action.aliases.end(), contains_nul) ||
+                std::any_of(action.tags.begin(), action.tags.end(), contains_nul)) {
+                gua_abort_game_input_frame(context_);
+                throw std::invalid_argument("Game input category, aliases, and tags must not contain embedded NUL characters");
+            }
             const bool has_range = action.minimum.has_value() || action.maximum.has_value();
             if (has_range && (!action.minimum.has_value() || !action.maximum.has_value())) {
                 gua_abort_game_input_frame(context_);
@@ -529,6 +537,10 @@ public:
     [[nodiscard]] std::string find_game_input_actions_json(const GameInputActionSelector& selector,
         int observation_profile = GUA_OBSERVATION_PROFILE_DEBUG) const
     {
+        const auto contains_nul = [](const std::string& value) { return value.find('\0') != std::string::npos; };
+        if (contains_nul(selector.id) || contains_nul(selector.query) || contains_nul(selector.context) ||
+            contains_nul(selector.category) || std::any_of(selector.tags.begin(), selector.tags.end(), contains_nul))
+            throw std::invalid_argument("Game input selectors must not contain embedded NUL characters");
         std::vector<const char*> tags;
         for (const auto& tag : selector.tags) tags.push_back(tag.c_str());
         gua_game_input_action_selector_v1_t native { sizeof(native), selector.id.empty() ? nullptr : selector.id.c_str(),

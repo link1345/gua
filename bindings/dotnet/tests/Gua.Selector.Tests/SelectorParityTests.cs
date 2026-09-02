@@ -1776,6 +1776,14 @@ public sealed class SelectorParityTests
         });
         var player = runtime.FindGameInputActions(new(Limit: 100), GuaObservationProfile.Player);
         Assert.That(player.Actions.Select(action => action.Id), Is.EqualTo(new[] { "open_inventory" }));
+        Assert.Throws<ArgumentException>(() => runtime.FindGameInputActions(new(Query: "before\0after")));
+        Assert.Throws<ArgumentException>(() => runtime.FindGameInputActions(new(Tags: ["inventory\0hidden"])));
+        Assert.Throws<ArgumentException>(() => runtime.PublishGameInputActions("invalid", [
+            new GuaGameInputActionDescriptor("invalid", "Invalid", GuaGameInputValueType.Button, Aliases: ["hop\0hidden"]),
+        ]));
+        Assert.Throws<ArgumentException>(() => runtime.PublishGameInputActions("invalid", [
+            new GuaGameInputActionDescriptor("invalid", "Invalid", GuaGameInputValueType.Button, Category: "movement\0hidden"),
+        ]));
         using var playerSession = runtime.CreateGameInputSession(GuaObservationProfile.Player);
         Assert.Throws<InvalidOperationException>(() => playerSession.Send(
             GuaGameInputKind.Semantic, GuaGameInputOperation.Press, "debug_cheat", true));

@@ -48,6 +48,11 @@ struct GameInputQuerySelector {
     unsigned int limit = 20;
 };
 
+namespace detail {
+[[nodiscard]] bool valid_game_input_query_selector(const GameInputQuerySelector& selector);
+[[nodiscard]] bool valid_game_input_query_request_json(std::string_view json);
+}
+
 struct ActionCommand {
     std::string type;
     std::string node_id;

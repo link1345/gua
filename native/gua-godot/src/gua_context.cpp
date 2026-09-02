@@ -706,13 +706,18 @@ bool GuaContext::publish_game_input_actions(const String& input_context, const A
         std::vector<CharString> alias_strings, tag_strings;
         std::vector<const char*> alias_pointers, tag_pointers;
         const Array aliases = source.get("aliases", Array()), tags = source.get("tags", Array());
+        const auto contains_nul = [](const String& value) {
+            for (int64_t position = 0; position < value.length(); ++position) if (value.unicode_at(position) == 0) return true;
+            return false;
+        };
+        if (contains_nul(category)) { gua_runtime_abort_game_input_frame(runtime_); return false; }
         alias_strings.reserve(aliases.size()); tag_strings.reserve(tags.size());
         for (int i = 0; i < aliases.size(); ++i) {
-            if (aliases[i].get_type() != Variant::STRING) { gua_runtime_abort_game_input_frame(runtime_); return false; }
+            if (aliases[i].get_type() != Variant::STRING || contains_nul(String(aliases[i]))) { gua_runtime_abort_game_input_frame(runtime_); return false; }
             alias_strings.push_back(String(aliases[i]).utf8());
         }
         for (int i = 0; i < tags.size(); ++i) {
-            if (tags[i].get_type() != Variant::STRING) { gua_runtime_abort_game_input_frame(runtime_); return false; }
+            if (tags[i].get_type() != Variant::STRING || contains_nul(String(tags[i]))) { gua_runtime_abort_game_input_frame(runtime_); return false; }
             tag_strings.push_back(String(tags[i]).utf8());
         }
         for (const auto& value : alias_strings) alias_pointers.push_back(value.get_data());
@@ -755,6 +760,11 @@ String GuaContext::find_game_input_actions_json(const Dictionary& selector, int 
     if (selector.has("limit") && selector["limit"].get_type() != Variant::INT) return String();
     const String id = selector.get("id", String()), query = selector.get("query", String()), context = selector.get("context", String());
     const String category = selector.get("category", String()), value_type = selector.get("value_type", String());
+    const auto contains_nul = [](const String& value) {
+        for (int64_t index = 0; index < value.length(); ++index) if (value.unicode_at(index) == 0) return true;
+        return false;
+    };
+    if (contains_nul(id) || contains_nul(query) || contains_nul(context) || contains_nul(category)) return String();
     const CharString id_utf8 = id.utf8(), query_utf8 = query.utf8(), context_utf8 = context.utf8(), category_utf8 = category.utf8();
     const Array tags = selector.get("tags", Array());
     if (selector.has("tags") && selector["tags"].get_type() != Variant::ARRAY) return String();
@@ -762,7 +772,7 @@ String GuaContext::find_game_input_actions_json(const Dictionary& selector, int 
     if (limit < 1 || limit > 100 || tags.size() > 16) return String();
     std::vector<CharString> tag_strings; std::vector<const char*> tag_pointers;
     for (int i = 0; i < tags.size(); ++i) {
-        if (tags[i].get_type() != Variant::STRING || String(tags[i]).is_empty()) return String();
+        if (tags[i].get_type() != Variant::STRING || String(tags[i]).is_empty() || contains_nul(String(tags[i]))) return String();
         tag_strings.push_back(String(tags[i]).utf8());
     }
     for (const auto& tag : tag_strings) tag_pointers.push_back(tag.get_data());
