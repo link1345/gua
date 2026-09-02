@@ -11,6 +11,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <iomanip>
 #include <limits>
 #include <locale>

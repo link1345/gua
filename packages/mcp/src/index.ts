@@ -497,9 +497,9 @@ async function executeTool(
     case "get_world_object_tree":
       return bridge.getWorldObjectTree();
     case "find_world_objects":
-      return bridge.findWorldObjects(selectorFromArguments(args));
+      return bridge.findWorldObjects(selectorFromArguments(args), undefined, signal);
     case "wait_for_world_object":
-      return bridge.waitForWorldObject(selectorFromArguments(args), readIntegerArg(args, "timeoutMs", 5000));
+      return bridge.waitForWorldObject(selectorFromArguments(args), readIntegerArg(args, "timeoutMs", 5000), signal);
     case "click_node":
       return performAndRecord(bridge, automation, { action: "click", nodeId: readStringArg(args, "nodeId") });
     case "focus_node":
@@ -974,7 +974,8 @@ export class GuaBridgeClient {
     return this.request<GuaWorldObjectTree>({ type: "get_world_object_tree" });
   }
 
-  async findWorldObjects(selector: GuaWorldSelector, timeoutMs = this.requestTimeoutMs): Promise<GuaWorldQueryResult> {
+  async findWorldObjects(selector: GuaWorldSelector, timeoutMs = this.requestTimeoutMs,
+    signal?: AbortSignal): Promise<GuaWorldQueryResult> {
     const state = selector.state;
     const result = await this.request<unknown>({ type: "query_world_objects", worldId: selector.id, kind: selector.kind,
       label: selector.label, tag: selector.tag, parentId: selector.parentId, directChild: selector.directChild ? 1 : 0,
@@ -984,17 +985,18 @@ export class GuaBridgeClient {
       stateNumber: typeof state?.value === "number" ? state.value : undefined,
       stateBool: typeof state?.value === "boolean" ? state.value : undefined,
       relativeToObjectId: selector.near?.relativeToObjectId, maxDistance: selector.near?.maxDistance,
-      limit: selector.limit }, timeoutMs);
+      limit: selector.limit }, timeoutMs, signal);
     return parseWorldQueryResult(result, selector);
   }
 
-  async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number) {
+  async waitForWorldObject(selector: GuaWorldSelector, timeoutMs: number, signal?: AbortSignal) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() <= deadline) {
+      throwIfAborted(signal);
       const remainingRequestMs = Math.max(1, deadline - Date.now());
       let result: GuaWorldQueryResult;
       try {
-        result = await this.findWorldObjects(selector, remainingRequestMs);
+        result = await this.findWorldObjects(selector, remainingRequestMs, signal);
       } catch (error) {
         if (Date.now() >= deadline) break;
         throw error;
@@ -1004,7 +1006,7 @@ export class GuaBridgeClient {
       if (match !== undefined) return match;
       const remainingSleepMs = deadline - Date.now();
       if (remainingSleepMs <= 0) break;
-      await sleep(Math.min(50, remainingSleepMs));
+      await sleep(Math.min(50, remainingSleepMs), signal);
     }
     throw new Error("Timed out waiting for a Gua world object.");
   }
@@ -1120,24 +1122,83 @@ export class GuaBridgeClient {
     this.connectPromise = null;
   }
 
-  private async request<T>(command: BridgeCommandInput, timeoutMs = this.requestTimeoutMs): Promise<T> {
-    const socket = await this.connect();
+  private async request<T>(command: BridgeCommandInput, timeoutMs = this.requestTimeoutMs,
+    signal?: AbortSignal): Promise<T> {
+    throwIfAborted(signal);
+    const deadline = Date.now() + timeoutMs;
+    const socket = await this.connectForRequest(command.type, timeoutMs, signal);
+    throwIfAborted(signal);
+    const remainingTimeoutMs = deadline - Date.now();
+    if (remainingTimeoutMs <= 0) {
+      throw new Error(`Timed out waiting for Gua bridge command: ${command.type}`);
+    }
     const id = this.nextId++;
     const payload = { ...command, id } as BridgeCommand;
 
     return new Promise<T>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pending.delete(id);
+        signal?.removeEventListener("abort", aborted);
         reject(new Error(`Timed out waiting for Gua bridge command: ${command.type}`));
-      }, timeoutMs);
+      }, remainingTimeoutMs);
+
+      const aborted = () => {
+        const pending = this.pending.get(id);
+        if (pending === undefined) return;
+        clearTimeout(pending.timeoutId);
+        this.pending.delete(id);
+        signal?.removeEventListener("abort", aborted);
+        reject(new RpcFailure(-32800, "MCP request was cancelled."));
+      };
 
       this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
+        resolve: (value) => {
+          signal?.removeEventListener("abort", aborted);
+          resolve(value as T);
+        },
+        reject: (reason) => {
+          signal?.removeEventListener("abort", aborted);
+          reject(reason);
+        },
         timeoutId,
       });
 
+      signal?.addEventListener("abort", aborted, { once: true });
       socket.send(JSON.stringify(payload));
+    });
+  }
+
+  private connectForRequest(commandType: BridgeCommandInput["type"], timeoutMs: number,
+    signal?: AbortSignal): Promise<WebSocket> {
+    const connection = this.connect();
+    return new Promise<WebSocket>((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => finishReject(
+        new Error(`Timed out waiting for Gua bridge command: ${commandType}`)), timeoutMs);
+      const aborted = () => finishReject(new RpcFailure(-32800, "MCP request was cancelled."));
+
+      function cleanup() {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", aborted);
+      }
+
+      function finishResolve(socket: WebSocket) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(socket);
+      }
+
+      function finishReject(error: unknown) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+
+      signal?.addEventListener("abort", aborted, { once: true });
+      connection.then(finishResolve, finishReject);
+      if (signal?.aborted) aborted();
     });
   }
 

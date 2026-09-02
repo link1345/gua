@@ -67,6 +67,76 @@ describe("GuaAutomationManager", () => {
     }
   });
 
+  test("cancels world waits while a bridge query is pending", async () => {
+    let queryReceived!: () => void;
+    const received = new Promise<void>((resolve) => { queryReceived = resolve; });
+    const server = Bun.serve({
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return undefined;
+        return new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message() {
+          queryReceived();
+          // Intentionally withhold the query response until cancellation.
+        },
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    const controller = new AbortController();
+    try {
+      const waiting = bridge.waitForWorldObject({ kind: "door" }, 5000, controller.signal);
+      await received;
+      controller.abort();
+      await expect(waiting).rejects.toThrow("cancelled");
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
+  test("bounds world waits while the bridge connection is pending", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Promise<Response>(() => {});
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    const startedAt = performance.now();
+    try {
+      await expect(bridge.waitForWorldObject({ kind: "door" }, 50)).rejects
+        .toThrow("Timed out waiting for a Gua world object");
+      expect(performance.now() - startedAt).toBeLessThan(500);
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
+  test("cancels world waits while the bridge connection is pending", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Promise<Response>(() => {});
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    const controller = new AbortController();
+    const startedAt = performance.now();
+    try {
+      const waiting = bridge.waitForWorldObject({ kind: "door" }, 5000, controller.signal);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      controller.abort();
+      await expect(waiting).rejects.toThrow("cancelled");
+      expect(performance.now() - startedAt).toBeLessThan(500);
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
   test("keeps bundled workspace packages out of published dependencies", async () => {
     const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     expect(Object.values(manifest.dependencies ?? {}).some((version) => String(version).startsWith("workspace:"))).toBe(false);
