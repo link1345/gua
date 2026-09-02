@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
+using GuaUnityWorldObject = Gua.Unity.GuaWorldObject;
 
 public static class GuaRuntimeUiSample
 {
@@ -36,7 +37,7 @@ public static class GuaRuntimeUiSample
 
         var doorObject = new GameObject("Door A");
         doorObject.transform.position = new Vector3(640, 180, 0);
-        var door = doorObject.AddComponent<GuaWorldObject>();
+        var door = doorObject.AddComponent<GuaUnityWorldObject>();
         door.Id = "door-a";
         door.Kind = "door";
         door.Label = "Door A";
@@ -53,11 +54,11 @@ public static class GuaRuntimeUiSample
         AddWorldObject("3D Target", "target-3d", "target", GuaWorldSpace.World3D, new Vector3(1, 2, 2));
     }
 
-    private static GuaWorldObject AddWorldObject(string name, string id, string kind, GuaWorldSpace space, Vector3 position)
+    private static GuaUnityWorldObject AddWorldObject(string name, string id, string kind, GuaWorldSpace space, Vector3 position)
     {
         var objectGameObject = new GameObject(name);
         objectGameObject.transform.position = position;
-        var worldObject = objectGameObject.AddComponent<GuaWorldObject>();
+        var worldObject = objectGameObject.AddComponent<GuaUnityWorldObject>();
         worldObject.Id = id;
         worldObject.Kind = kind;
         worldObject.Space = space;
