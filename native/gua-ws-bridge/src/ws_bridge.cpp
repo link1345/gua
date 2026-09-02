@@ -36,6 +36,7 @@ struct Command {
     std::string key;
     gua::ws::QuerySelector selector;
     gua::ws::WorldQuerySelector world_selector;
+    gua::ws::GameInputQuerySelector game_input_selector;
     std::string value;
     float delta_x = 0;
     float delta_y = 0;
@@ -72,6 +73,7 @@ struct Command {
     double input_x = 0;
     double input_y = 0;
     bool world_selector_valid = true;
+    bool game_input_selector_valid = true;
 };
 
 struct ClientConnection {
@@ -527,6 +529,37 @@ std::optional<std::string> json_string_field(std::string_view json, std::string_
     return std::nullopt;
 }
 
+std::optional<std::vector<std::string>> json_string_array_field(std::string_view json, std::string_view field)
+{
+    const auto start = json_top_level_field_start(json, field);
+    if (!start.has_value()) return std::vector<std::string> {};
+    std::size_t index = *start;
+    if (index >= json.size() || json[index++] != '[') return std::nullopt;
+    std::vector<std::string> values;
+    while (true) {
+        index = json.find_first_not_of(" \t\r\n", index);
+        if (index == std::string_view::npos) return std::nullopt;
+        if (json[index] == ']') return values;
+        if (json[index] != '"') return std::nullopt;
+        const std::size_t value_start = index;
+        bool escaped = false;
+        for (++index; index < json.size(); ++index) {
+            if (escaped) { escaped = false; continue; }
+            if (json[index] == '\\') { escaped = true; continue; }
+            if (json[index] == '"') break;
+        }
+        if (index >= json.size()) return std::nullopt;
+        const std::string wrapped = std::string("{\"value\":") + std::string(json.substr(value_start, index - value_start + 1U)) + "}";
+        const auto parsed = json_string_field(wrapped, "value");
+        if (!parsed.has_value()) return std::nullopt;
+        values.push_back(*parsed);
+        index = json.find_first_not_of(" \t\r\n", index + 1U);
+        if (index == std::string_view::npos) return std::nullopt;
+        if (json[index] == ']') return values;
+        if (json[index++] != ',') return std::nullopt;
+    }
+}
+
 std::optional<int> json_int_field(std::string_view json, std::string_view field)
 {
     const auto value_start = json_top_level_field_start(json, field);
@@ -806,6 +839,26 @@ Command parse_command(std::string_view json)
              (command.world_selector.state_type == 1 && state_string_present && json_string_field(json, "stateString").has_value() && !state_number_present && !state_bool_present) ||
              (command.world_selector.state_type == 2 && state_number_present && json_number_field(json, "stateNumber").has_value() && !state_string_present && !state_bool_present) ||
              (command.world_selector.state_type == 3 && state_bool_present && json_bool_field_optional(json, "stateBool").has_value() && !state_string_present && !state_number_present))));
+    command.game_input_selector.id = json_string_field(json, "actionId").value_or("");
+    command.game_input_selector.query = json_string_field(json, "query").value_or("");
+    command.game_input_selector.value_type = json_int_field(json, "valueType").value_or(0);
+    command.game_input_selector.active = json_int_field(json, "active").value_or(0);
+    command.game_input_selector.context = json_string_field(json, "context").value_or("");
+    command.game_input_selector.category = json_string_field(json, "category").value_or("");
+    const auto game_input_tags = json_string_array_field(json, "tags");
+    if (game_input_tags.has_value()) command.game_input_selector.tags = *game_input_tags;
+    const auto game_input_limit = json_int_field(json, "limit");
+    command.game_input_selector.limit = static_cast<unsigned int>(game_input_limit.value_or(20));
+    constexpr std::array game_input_query_fields { std::string_view("id"), std::string_view("type"),
+        std::string_view("actionId"), std::string_view("query"), std::string_view("valueType"),
+        std::string_view("active"), std::string_view("context"), std::string_view("category"),
+        std::string_view("tags"), std::string_view("limit") };
+    command.game_input_selector_valid = command.type != "find_game_input_actions" ||
+        (json_has_only_top_level_fields(json, game_input_query_fields) && game_input_tags.has_value() &&
+            valid_optional_non_empty_string(json, "actionId") && valid_optional_non_empty_string(json, "query") &&
+            valid_optional_non_empty_string(json, "context") && valid_optional_non_empty_string(json, "category") &&
+            valid_optional_int_range(json, "valueType", 1, 4) && valid_optional_int_range(json, "active", 0, 2) &&
+            valid_optional_int_range(json, "limit", 1, 100));
     command.value = json_string_field(json, "value").value_or("");
     command.delta_x = static_cast<float>(json_number_field(json, "deltaX").value_or(0));
     command.delta_y = static_cast<float>(json_number_field(json, "deltaY").value_or(0));
@@ -1234,6 +1287,13 @@ private:
                         handlers_.game_input_supported(1U)
                     ? ok_response(command.id, handlers_.get_game_input_actions_json())
                     : error_response(command.id, "unsupported");
+            }
+            if (command.type == "find_game_input_actions") {
+                if (!command.game_input_selector_valid) return error_response(command.id, "invalid game input selector");
+                if (!handlers_.query_game_input_actions_json || !handlers_.game_input_supported || !handlers_.game_input_supported(1U))
+                    return error_response(command.id, "unsupported");
+                const auto result = handlers_.query_game_input_actions_json(command.game_input_selector);
+                return result.empty() ? error_response(command.id, "invalid game input selector") : ok_response(command.id, result);
             }
             if (command.type == "get_game_input_state") {
                 return game_input_owner_id != 0 && handlers_.get_game_input_state_json

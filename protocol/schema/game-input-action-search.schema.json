@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/game-input-action-search.schema.json",
+  "title": "Gua Game Input Action Search Result",
+  "type": "object",
+  "required": ["schemaVersion", "sessionEpoch", "revision", "context", "count", "truncated", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "context": { "type": "string", "minLength": 1 },
+    "count": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "truncated": { "type": "boolean" },
+    "actions": { "type": "array", "maxItems": 100, "items": { "$ref": "game-input-actions.schema.json#/$defs/action" } }
+  }
+}

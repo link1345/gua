@@ -20,7 +20,41 @@ public enum GuaGameInputOperation { Press = 1, Set = 2, Release = 3, Down = 4, U
 public sealed record GuaGameInputActionDescriptor(
     string Id, string Description, GuaGameInputValueType ValueType,
     double? Minimum = null, double? Maximum = null, bool Holdable = false, bool Active = true,
-    IReadOnlyList<string>? Bindings = null, string Risk = "safe", bool RequiresConfirmation = false);
+    IReadOnlyList<string>? Bindings = null, string Risk = "safe", bool RequiresConfirmation = false,
+    string? Category = null, IReadOnlyList<string>? Aliases = null, IReadOnlyList<string>? Tags = null,
+    GuaAgentExposure AgentExposure = GuaAgentExposure.Auto);
+
+public sealed record GuaGameInputActionSelector(
+    string? Id = null, string? Query = null, GuaGameInputValueType? ValueType = null, bool? Active = null,
+    string? Context = null, string? Category = null, IReadOnlyList<string>? Tags = null, uint Limit = 20);
+
+public sealed record GuaGameInputAction(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("valueType")] string ValueType,
+    [property: JsonPropertyName("holdable")] bool Holdable,
+    [property: JsonPropertyName("active")] bool Active,
+    [property: JsonPropertyName("requiresConfirmation")] bool RequiresConfirmation,
+    [property: JsonPropertyName("range")] GuaGameInputActionRange? Range = null,
+    [property: JsonPropertyName("bindings")] IReadOnlyList<string>? Bindings = null,
+    [property: JsonPropertyName("risk")] string Risk = "safe",
+    [property: JsonPropertyName("category")] string? Category = null,
+    [property: JsonPropertyName("aliases")] IReadOnlyList<string>? Aliases = null,
+    [property: JsonPropertyName("tags")] IReadOnlyList<string>? Tags = null,
+    [property: JsonPropertyName("agentExposure")] string AgentExposure = "auto");
+
+public sealed record GuaGameInputActionRange(
+    [property: JsonPropertyName("minimum")] double Minimum,
+    [property: JsonPropertyName("maximum")] double Maximum);
+
+public sealed record GuaGameInputActionSearchResult(
+    [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
+    [property: JsonPropertyName("sessionEpoch")] ulong SessionEpoch,
+    [property: JsonPropertyName("revision")] ulong Revision,
+    [property: JsonPropertyName("context")] string Context,
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("actions")] IReadOnlyList<GuaGameInputAction> Actions);
 
 public sealed record GuaGameInputRequest(
     ulong RequestId, ulong OwnerId, GuaGameInputKind Kind, GuaGameInputOperation Operation,
@@ -88,21 +122,32 @@ public sealed partial class GuaRuntime
             {
                 if (action.Minimum.HasValue != action.Maximum.HasValue)
                     throw new ArgumentException($"Action '{action.Id}' must specify both range bounds.");
-                var strings = new[] { action.Id, action.Description, JsonSerializer.Serialize(action.Bindings ?? []), action.Risk };
-                var pointers = strings.Select(Marshal.StringToCoTaskMemUTF8).Select(pointer => (nint)pointer).ToArray();
+                var strings = new[] { action.Id, action.Description, JsonSerializer.Serialize(action.Bindings ?? []), action.Risk, action.Category };
+                var pointers = strings.Select(value => value is null ? 0 : (nint)Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+                var aliases = AllocateStrings(action.Aliases ?? [], out var aliasArray);
+                var tags = AllocateStrings(action.Tags ?? [], out var tagArray);
                 try
                 {
-                    var native = new Native.GameInputAction
+                    var baseAction = new Native.GameInputAction
                     {
                         StructSize = (uint)Marshal.SizeOf<Native.GameInputAction>(), Id = pointers[0], Description = pointers[1],
                         ValueType = (int)action.ValueType, Minimum = action.Minimum ?? 0, Maximum = action.Maximum ?? 0,
                         HasRange = action.Minimum.HasValue ? 1 : 0, Holdable = action.Holdable ? 1 : 0, Active = action.Active ? 1 : 0,
                         BindingsJson = pointers[2], Risk = pointers[3], RequiresConfirmation = action.RequiresConfirmation ? 1 : 0,
                     };
-                    if (Native.gua_runtime_register_game_input_action_v1(_handle, in native) == 0)
+                    var native = new Native.GameInputActionV2 { StructSize = (uint)Marshal.SizeOf<Native.GameInputActionV2>(),
+                        Base = baseAction, Category = pointers[4], Aliases = aliasArray, AliasCount = (uint)aliases.Length,
+                        Tags = tagArray, TagCount = (uint)tags.Length, AgentExposure = (int)action.AgentExposure };
+                    if (Native.gua_runtime_register_game_input_action_v2(_handle, in native) == 0)
                         throw new ArgumentException($"Invalid game input action '{action.Id}'.", nameof(actions));
                 }
-                finally { foreach (var pointer in pointers) Marshal.FreeCoTaskMem(pointer); }
+                finally {
+                    foreach (var pointer in pointers) if (pointer != 0) Marshal.FreeCoTaskMem(pointer);
+                    foreach (var pointer in aliases) Marshal.FreeCoTaskMem(pointer);
+                    foreach (var pointer in tags) Marshal.FreeCoTaskMem(pointer);
+                    if (aliasArray != 0) Marshal.FreeCoTaskMem(aliasArray);
+                    if (tagArray != 0) Marshal.FreeCoTaskMem(tagArray);
+                }
             }
             if (Native.gua_runtime_end_game_input_frame(_handle) == 0)
                 throw new InvalidOperationException("Failed to commit the game input action frame.");
@@ -191,6 +236,39 @@ public sealed partial class GuaRuntime
     }
 
     public unsafe string GetGameInputActionsJson() => CopyGameInputJson(0, false);
+    public unsafe string GetPlayerGameInputActionsJson()
+    {
+        int Copy(byte* output, int size) => Native.gua_runtime_copy_player_game_input_actions_json(_handle, output, size);
+        return CopyGameInputJson(Copy);
+    }
+    public GuaGameInputActionSearchResult FindGameInputActions(GuaGameInputActionSelector selector,
+        GuaObservationProfile observationProfile = GuaObservationProfile.Debug)
+    {
+        var json = FindGameInputActionsJson(selector, observationProfile);
+        return JsonSerializer.Deserialize<GuaGameInputActionSearchResult>(json)
+            ?? throw new InvalidOperationException("Native game input search JSON is invalid.");
+    }
+    public unsafe string FindGameInputActionsJson(GuaGameInputActionSelector selector,
+        GuaObservationProfile observationProfile = GuaObservationProfile.Debug)
+    {
+        ThrowIfDisposed();
+        if (selector is null) throw new ArgumentNullException(nameof(selector));
+        var allocations = new List<nint>();
+        nint Text(string? value) { if (string.IsNullOrEmpty(value)) return 0; var pointer = (nint)Marshal.StringToCoTaskMemUTF8(value); allocations.Add(pointer); return pointer; }
+        var tagPointers = AllocateStrings(selector.Tags ?? [], out var tagArray);
+        try {
+            var native = new Native.GameInputActionSelector { StructSize = (uint)Marshal.SizeOf<Native.GameInputActionSelector>(),
+                Id = Text(selector.Id), Query = Text(selector.Query), ValueType = selector.ValueType.HasValue ? (int)selector.ValueType.Value : 0,
+                Active = selector.Active.HasValue ? (selector.Active.Value ? 2 : 1) : 0, Context = Text(selector.Context),
+                Category = Text(selector.Category), Tags = tagArray, TagCount = (uint)tagPointers.Length, Limit = selector.Limit };
+            int Copy(byte* output, int size) => Native.gua_runtime_query_game_input_actions_json(_handle, in native, (int)observationProfile, output, size);
+            return CopyGameInputJson(Copy);
+        } finally {
+            foreach (var pointer in allocations) Marshal.FreeCoTaskMem(pointer);
+            foreach (var pointer in tagPointers) Marshal.FreeCoTaskMem(pointer);
+            if (tagArray != 0) Marshal.FreeCoTaskMem(tagArray);
+        }
+    }
     internal unsafe string GetGameInputStateJson(ulong ownerId) => CopyGameInputJson(ownerId, true);
     internal unsafe GuaGameInputResult GetGameInputResult(ulong ownerId, ulong requestId)
     {
@@ -223,5 +301,13 @@ public sealed partial class GuaRuntime
                 required = actual;
             }
         }
+    }
+
+    private static nint[] AllocateStrings(IReadOnlyList<string> values, out nint array)
+    {
+        var pointers = values.Select(value => (nint)Marshal.StringToCoTaskMemUTF8(value)).ToArray();
+        array = 0;
+        if (pointers.Length != 0) { array = (nint)Marshal.AllocCoTaskMem(IntPtr.Size * pointers.Length); Marshal.Copy(pointers, 0, array, pointers.Length); }
+        return pointers;
     }
 }

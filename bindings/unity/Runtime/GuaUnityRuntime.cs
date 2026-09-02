@@ -186,7 +186,15 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         if (envelope.command.type == "get_game_input_actions")
         {
             if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) == 0) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity Player game input is not authorized."); return; }
-            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetGameInputActionsJson(), 0);
+            GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.GetPlayerGameInputActionsJson(), 0);
+            return;
+        }
+        if (envelope.command.type == "find_game_input_actions")
+        {
+            if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) == 0) { ResolveWebError(envelope.callId, "engine_unsupported", "Unity Player game input is not authorized."); return; }
+            if (!TryGameInputSelector(json, out var selector, out var selectorError)) { ResolveWebError(envelope.callId, "invalid_request", selectorError); return; }
+            try { GuaUnityWebResolve(webOwnerId, envelope.callId, runtime.FindGameInputActionsJson(selector, GuaObservationProfile.Player), 0); }
+            catch (Exception error) { ResolveWebError(envelope.callId, "invalid_request", error.Message); }
             return;
         }
         if (envelope.command.type == "get_game_input_state")
@@ -317,6 +325,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     {
         var result = new List<string>();
         if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) != 0) result.Add("semantic_game_input_v1");
+        if ((playerGameInputCapabilities & GuaGameInputCapabilities.Semantic) != 0) result.Add("semantic_game_input_search_v1");
         if ((playerGameInputCapabilities & GuaGameInputCapabilities.Keyboard) != 0) result.Add("raw_keyboard_input_v1");
         if ((playerGameInputCapabilities & GuaGameInputCapabilities.Pointer) != 0) result.Add("raw_pointer_input_v1");
         if ((playerGameInputCapabilities & GuaGameInputCapabilities.Gamepad) != 0) result.Add("raw_gamepad_input_v1");
@@ -459,11 +468,47 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     private bool WebGameInputRequiresConfirmation(string actionId)
     {
         if (runtime == null) return false;
-        using var document = JsonDocument.Parse(runtime.GetGameInputActionsJson());
+        using var document = JsonDocument.Parse(runtime.FindGameInputActionsJson(new GuaGameInputActionSelector(Id: actionId, Limit: 1), GuaObservationProfile.Player));
         foreach (var action in document.RootElement.GetProperty("actions").EnumerateArray())
             if (action.GetProperty("id").GetString() == actionId)
                 return action.TryGetProperty("requiresConfirmation", out var confirmation) && confirmation.ValueKind == JsonValueKind.True;
         return false;
+    }
+
+    private static bool TryGameInputSelector(string json, out GuaGameInputActionSelector selector, out string error)
+    {
+        selector = new(); error = "Invalid game input selector.";
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var command = document.RootElement.GetProperty("command");
+            var allowed = new HashSet<string>(new[] { "type", "id", "query", "valueType", "active", "context", "category", "tags", "limit" }, StringComparer.Ordinal);
+            if (command.EnumerateObject().Any(property => !allowed.Contains(property.Name))) throw new FormatException("Unknown game input selector field.");
+            string? Text(string name)
+            {
+                if (!command.TryGetProperty(name, out var value)) return null;
+                if (value.ValueKind != JsonValueKind.String) throw new FormatException($"{name} must be a string.");
+                var text = value.GetString();
+                if (string.IsNullOrEmpty(text)) throw new FormatException($"{name} must not be empty.");
+                return text;
+            }
+            var valueTypeText = Text("valueType");
+            GuaGameInputValueType? valueType = valueTypeText switch { null => null, "button" => GuaGameInputValueType.Button,
+                "axis1d" => GuaGameInputValueType.Axis1D, "vector2" => GuaGameInputValueType.Vector2, "text" => GuaGameInputValueType.Text, _ => throw new FormatException("valueType is invalid.") };
+            bool? active = command.TryGetProperty("active", out var activeValue)
+                ? activeValue.ValueKind is JsonValueKind.True or JsonValueKind.False ? activeValue.GetBoolean() : throw new FormatException("active must be boolean.")
+                : null;
+            var tags = command.TryGetProperty("tags", out var tagValues)
+                ? tagValues.ValueKind == JsonValueKind.Array ? tagValues.EnumerateArray().Select(value => value.ValueKind == JsonValueKind.String
+                    ? value.GetString() ?? string.Empty : throw new FormatException("tags must contain strings.")).ToArray()
+                    : throw new FormatException("tags must be an array.") : Array.Empty<string>();
+            var limit = command.TryGetProperty("limit", out var limitValue) ? limitValue.GetUInt32() : 20U;
+            if (limit is < 1 or > 100 || tags.Length > 16 || tags.Any(string.IsNullOrEmpty) || tags.Distinct(StringComparer.Ordinal).Count() != tags.Length)
+                throw new FormatException("Game input selector limits or tags are invalid.");
+            selector = new(Text("id"), Text("query"), valueType, active, Text("context"), Text("category"), tags, limit);
+            error = string.Empty; return true;
+        }
+        catch (Exception parseError) { error = parseError.Message; return false; }
     }
 
     private readonly struct ParsedGameInput

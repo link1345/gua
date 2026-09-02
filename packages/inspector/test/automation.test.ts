@@ -1,19 +1,28 @@
 import { describe, expect, test } from "bun:test";
 
 import { InspectorRecorder, prepareManualGameInput, replayRecording, validateRecording } from "../src/automation";
-import { MockInspectorClient, createCoalescedAsyncRunner, formatBounds, hasCompleteBounds, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
+import { MockInspectorClient, createCoalescedAsyncRunner, findGameInputActionsCompatible, formatBounds, hasCompleteBounds, readSnapshot, worldObjectDepths, type GuaWorldObject } from "../src/core";
 
 describe("InspectorRecorder", () => {
+  test("falls back to a bounded legacy action map when search is unsupported", async () => {
+    const client = new MockInspectorClient();
+    client.findGameInputActions = async () => { throw new Error("unknown command"); };
+    const result = await findGameInputActionsCompatible(client, { id: "move", limit: 1 });
+    expect(result).toMatchObject({ count: 1, truncated: false, actions: [{ id: "move" }] });
+  });
+
   test("re-resolves confirmation immediately before manual game input", async () => {
     const prompts: string[] = [];
+    const resolvedIds: string[] = [];
     const command = await prepareManualGameInput(
       { type: "press_game_input_action", actionId: "launch" },
-      async () => ({ schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "combat", actions: [{
+      async (actionId) => { resolvedIds.push(actionId); return { schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "combat", actions: [{
         id: "launch", valueType: "button", holdable: false, active: true, bindings: [], risk: "dangerous", requiresConfirmation: true,
-      }] }),
+      }] }; },
       (action) => { prompts.push(action.id); return true; },
     );
     expect(command).toEqual({ type: "press_game_input_action", actionId: "launch", confirmed: true });
+    expect(resolvedIds).toEqual(["launch"]);
     expect(prompts).toEqual(["launch"]);
   });
 

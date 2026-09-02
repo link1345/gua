@@ -20,7 +20,7 @@ export const guaWebMcpToolNames = [
 export type GuaWebMcpToolName = (typeof guaWebMcpToolNames)[number];
 
 export const guaGameInputToolNames = [
-  "get_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action",
+  "get_game_input_actions", "find_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action",
   "get_game_input_state", "release_all_game_inputs", "key_down", "key_up", "press_physical_key", "pointer_move",
   "pointer_button_down", "pointer_button_up", "pointer_wheel", "gamepad_button_down", "gamepad_button_up",
   "set_gamepad_axis", "reset_gamepad", "text_input",
@@ -121,6 +121,14 @@ export const guaWebMcpToolDefinitions: readonly GuaToolDefinition<GuaWebMcpToolN
 
 export const guaGameInputToolDefinitions: readonly GuaToolDefinition<GuaGameInputToolName>[] = [
   { name: "get_game_input_actions", description: "Read the host-published semantic game action map.", inputSchema: objectSchema({}) },
+  { name: "find_game_input_actions", description: "Search the current host-authorized semantic game action map.", inputSchema: objectSchema({
+    id: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 },
+    query: { type: "string", minLength: 1, maxLength: 128 },
+    valueType: { type: "string", enum: ["button", "axis1d", "vector2", "text"] }, active: { type: "boolean" },
+    context: { type: "string", minLength: 1 }, category: { type: "string", pattern: "^[a-z][a-z0-9_.-]*$", maxLength: 127 },
+    tags: { type: "array", maxItems: 16, uniqueItems: true, items: { type: "string", minLength: 1, maxLength: 64 } },
+    limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+  }) },
   { name: "press_game_input_action", description: "Press a semantic button action and wait for host completion.", inputSchema: objectSchema({
     actionId: stringProperty("Stable host-published action id."), confirmed: { type: "boolean" },
   }, ["actionId"]) },

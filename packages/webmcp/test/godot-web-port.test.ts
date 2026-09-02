@@ -24,6 +24,7 @@ const godotGlobals = globalThis as typeof globalThis & {
   __guaGodotCancelAction?: GodotCallback<[requestId: string]>;
   __guaGodotGetGameInputCapabilities?: GodotCallback;
   __guaGodotGetGameInputActions?: GodotCallback;
+  __guaGodotFindGameInputActions?: GodotCallback<[request: string]>;
   __guaGodotGetGameInputState?: GodotCallback;
   __guaGodotEnqueueGameInput?: GodotCallback<[request: string]>;
   __guaGodotPollGameInput?: GodotCallback<[requestId: string]>;
@@ -41,6 +42,7 @@ afterEach(() => {
   delete godotGlobals.__guaGodotCancelAction;
   delete godotGlobals.__guaGodotGetGameInputCapabilities;
   delete godotGlobals.__guaGodotGetGameInputActions;
+  delete godotGlobals.__guaGodotFindGameInputActions;
   delete godotGlobals.__guaGodotGetGameInputState;
   delete godotGlobals.__guaGodotEnqueueGameInput;
   delete godotGlobals.__guaGodotPollGameInput;
@@ -71,6 +73,13 @@ async function installGodotWebPort(
   godotGlobals.__guaGodotCancelAction = godotCallback((requestId) => { cancelled.push(requestId); return options.cancellationResult ?? 1; });
   godotGlobals.__guaGodotGetGameInputCapabilities = godotCallback(() => JSON.stringify(["raw_keyboard_input_v1"]));
   godotGlobals.__guaGodotGetGameInputActions = godotCallback(() => JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, revision: 1, context: "", actions: [] }));
+  godotGlobals.__guaGodotFindGameInputActions = godotCallback((request) => {
+    const selector = JSON.parse(request) as { id?: string };
+    return JSON.stringify({ schemaVersion: 1, sessionEpoch: 1, revision: 2, context: "gameplay", count: 1,
+      truncated: false, actions: [{ id: selector.id, description: "Jump", valueType: "button", holdable: true,
+        active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false, category: "movement",
+        aliases: ["hop"], tags: ["gameplay"], agentExposure: "auto" }] });
+  });
   godotGlobals.__guaGodotGetGameInputState = godotCallback(() => JSON.stringify({ schemaVersion: 1, held: [] }));
   godotGlobals.__guaGodotEnqueueGameInput = godotCallback(options.enqueueGameInput ?? (() => JSON.stringify({ requestId: 23 })));
   godotGlobals.__guaGodotPollGameInput = godotCallback(options.pollGameInput ?? (() => "null"));
@@ -80,6 +89,12 @@ async function installGodotWebPort(
 }
 
 describe("Godot Web same-page port", () => {
+  test("routes bounded semantic action search through the Godot callback", async () => {
+    const port = await installGodotWebPort([]);
+    await expect(port.invoke({ type: "find_game_input_actions", id: "jump", limit: 1 })).resolves.toMatchObject({
+      context: "gameplay", count: 1, truncated: false, actions: [{ id: "jump", category: "movement" }],
+    });
+  });
   test("routes World Object Tree reads and queries through Godot callbacks", async () => {
     const port = await installGodotWebPort([]);
     await expect(port.invoke({ type: "get_world_object_tree" })).resolves.toMatchObject({ scene: "level" });

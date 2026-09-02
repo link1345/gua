@@ -191,10 +191,10 @@ func _run() -> void:
 		_fail("Gua Player game input must be denied before explicit host opt-in.")
 		return
 	if not ui.configure_game_input_actions("gameplay", [
-		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"]},
+		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"], "category": "movement", "aliases": ["hop"], "tags": ["gameplay", "air"]},
 		{"id": "throttle", "description": "Throttle", "value_type": "axis1d", "minimum": -1.0, "maximum": 1.0, "holdable": true},
 		{"id": "move", "description": "Move", "value_type": "vector2", "minimum": -1.0, "maximum": 1.0, "holdable": true},
-		{"id": "chat", "description": "Chat", "value_type": "text"},
+		{"id": "chat", "description": "Chat", "value_type": "text", "agent_exposure": "private"},
 	], true) or not ui.enable_raw_input(true):
 		_fail("Gua smoke failed to initialize game input capabilities.")
 		return
@@ -205,6 +205,28 @@ func _run() -> void:
 	var game_input_actions: String = ui.context.get_game_input_actions_json()
 	if not game_input_actions.contains("\"button\"") or not game_input_actions.contains("\"axis1d\"") or not game_input_actions.contains("\"vector2\"") or not game_input_actions.contains("\"text\""):
 		_fail("Gua smoke did not publish every game input action type: %s" % game_input_actions)
+		return
+	var player_actions: String = ui.context.get_player_game_input_actions_json()
+	var jump_search: String = ui.context.find_game_input_actions_json({"query": "hop", "category": "movement", "tags": ["gameplay"], "limit": 1}, 1)
+	if player_actions.contains("\"chat\"") or not jump_search.contains("\"jump\"") or not jump_search.contains("\"truncated\":false"):
+		_fail("Gua Player game-input projection/search did not enforce descriptor v2 metadata: %s / %s" % [player_actions, jump_search])
+		return
+	if not ui.configure_game_input_actions("menu", [
+		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "category": "movement", "aliases": ["hop"], "tags": ["menu"]},
+	], true):
+		_fail("Gua smoke could not republish the Action Map in another context.")
+		return
+	var menu_search: String = ui.context.find_game_input_actions_json({"id": "jump", "context": "menu"}, 1)
+	if not menu_search.contains("\"context\":\"menu\"") or not menu_search.contains("\"jump\""):
+		_fail("Gua smoke did not expose the republished Action Map context: %s" % menu_search)
+		return
+	if not ui.configure_game_input_actions("gameplay", [
+		{"id": "jump", "description": "Jump", "value_type": "button", "holdable": true, "bindings": ["Space"], "category": "movement", "aliases": ["hop"], "tags": ["gameplay", "air"]},
+		{"id": "throttle", "description": "Throttle", "value_type": "axis1d", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "move", "description": "Move", "value_type": "vector2", "minimum": -1.0, "maximum": 1.0, "holdable": true},
+		{"id": "chat", "description": "Chat", "value_type": "text", "agent_exposure": "private"},
+	], true):
+		_fail("Gua smoke could not restore the gameplay Action Map after context search.")
 		return
 	var web_input_bridge = load("res://addons/gua/gua_webmcp_bridge.gd").new()
 	var wheel_request: Dictionary = web_input_bridge._native_game_input_request({

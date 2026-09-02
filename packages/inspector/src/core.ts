@@ -63,8 +63,10 @@ export interface GuaScreenshot {
 export interface GuaClockStatus { schemaVersion: 1; installed: boolean; state: "running" | "paused"; nowMs: number; defaultStepMs: number; pendingMs: number; generation: number; completedOperationSequence: number; operationSequence?: number; completionSessionEpoch?: number; completionAfterFrameSequence?: number; }
 export interface GuaContextStatus { sessionEpoch: number; frameSequence: number; revision: number; nodeCount: number; pendingRequestCount: number; inFlightRequestCount: number; unconsumedEventCount: number; logCount: number; hasScreenshot: boolean; firstPendingAction: number; firstPendingNodeId: string; firstEventAction: number; firstEventNodeId: string; }
 export type GuaGameInputValueType = "button" | "axis1d" | "vector2" | "text";
-export interface GuaGameInputAction { id: string; description?: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number }; holdable: boolean; active: boolean; bindings: unknown[]; risk: string; requiresConfirmation: boolean; }
+export interface GuaGameInputAction { id: string; description?: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number }; holdable: boolean; active: boolean; bindings: unknown[]; risk: string; requiresConfirmation: boolean; category?: string; aliases?: string[]; tags?: string[]; agentExposure?: "auto" | "private"; }
 export interface GuaGameInputActions { schemaVersion: 1; sessionEpoch: number; revision: number; context: string; actions: GuaGameInputAction[]; }
+export interface GuaGameInputActionSelector { id?: string; query?: string; valueType?: GuaGameInputValueType; active?: boolean; context?: string; category?: string; tags?: string[]; limit?: number; }
+export interface GuaGameInputActionSearchResult extends GuaGameInputActions { count: number; truncated: boolean; }
 export interface GuaHeldGameInput { kind: number; target: string; deviceIndex: number; value: unknown; remainingLeaseMs: number; }
 export interface GuaGameInputState { schemaVersion: 1; held: GuaHeldGameInput[]; }
 export type GameInputCommandInput =
@@ -112,6 +114,7 @@ export interface GuaInspectorClient {
   runClockFor(durationMs: number, stepMs?: number): Promise<GuaClockStatus>;
   resumeClock(): Promise<GuaClockStatus>;
   getGameInputActions(): Promise<GuaGameInputActions>;
+  findGameInputActions(selector: GuaGameInputActionSelector): Promise<GuaGameInputActionSearchResult>;
   getGameInputState(): Promise<GuaGameInputState>;
   performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }>;
 }
@@ -135,6 +138,8 @@ export type GuaInspectorCommand =
   | { id: number; type: "press_key"; nodeId?: string; key: string; modifiers?: number }
   | ({ id: number } & GameInputCommandInput)
   | { id: number; type: "get_game_input_actions" | "get_game_input_state" }
+  | { id: number; type: "find_game_input_actions"; actionId?: string; query?: string; valueType?: 1 | 2 | 3 | 4;
+      active?: 0 | 1 | 2; context?: string; category?: string; tags?: string[]; limit?: number }
   | { id: number; type: "poll_game_input"; requestId: number };
 
 type GuaInspectorCommandInput =
@@ -156,6 +161,7 @@ type GuaInspectorCommandInput =
   | { type: "press_key"; nodeId?: string; key: string; modifiers?: number }
   | GameInputCommandInput
   | { type: "get_game_input_actions" | "get_game_input_state" }
+  | ({ type: "find_game_input_actions" } & GuaGameInputActionSelector)
   | { type: "poll_game_input"; requestId: number };
 
 export type GuaInspectorResponse =
@@ -430,6 +436,16 @@ export class MockInspectorClient implements GuaInspectorClient {
     { id: "jump", description: "Jump", valueType: "button", holdable: true, active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false },
     { id: "move", description: "Move", valueType: "vector2", range: { minimum: -1, maximum: 1 }, holdable: true, active: true, bindings: ["Gamepad.leftStick"], risk: "safe", requiresConfirmation: false },
   ] }; }
+  async findGameInputActions(selector: GuaGameInputActionSelector): Promise<GuaGameInputActionSearchResult> {
+    const map = await this.getGameInputActions();
+    const actions = map.actions.filter((action) => (!selector.id || action.id === selector.id) &&
+      (!selector.query || action.id.includes(selector.query) || action.description?.includes(selector.query) || action.aliases?.some((alias) => alias.includes(selector.query!))) &&
+      (!selector.valueType || action.valueType === selector.valueType) && (selector.active === undefined || action.active === selector.active) &&
+      (!selector.context || selector.context === map.context) && (!selector.category || action.category === selector.category) &&
+      (!selector.tags || selector.tags.every((tag) => action.tags?.includes(tag)))).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    const limit = selector.limit ?? 20;
+    return { ...map, count: Math.min(actions.length, limit), truncated: actions.length > limit, actions: actions.slice(0, limit) };
+  }
   async getGameInputState(): Promise<GuaGameInputState> { return { schemaVersion: 1, held: [] }; }
   async performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }> { this.logs = [...this.logs, { sequence: this.logs.length + 1, level: "info", message: `game_input(${command.type})` }]; return { requestId: this.logs.length }; }
 }
@@ -487,6 +503,27 @@ export function createCoalescedAsyncRunner(task: () => Promise<void>): () => Pro
   };
 }
 
+export async function findGameInputActionsCompatible(
+  client: GuaInspectorClient,
+  selector: GuaGameInputActionSelector,
+): Promise<GuaGameInputActionSearchResult> {
+  try {
+    return await client.findGameInputActions(selector);
+  } catch (error) {
+    if (!/unsupported|unknown command/i.test((error as Error).message)) throw error;
+    const map = await client.getGameInputActions();
+    const limit = selector.limit ?? 20;
+    const matches = map.actions.filter((action) => (!selector.id || action.id === selector.id) &&
+      (!selector.query || action.id.includes(selector.query) || action.description?.includes(selector.query) || action.aliases?.some((alias) => alias.includes(selector.query!))) &&
+      (!selector.valueType || action.valueType === selector.valueType) && (selector.active === undefined || action.active === selector.active) &&
+      (!selector.context || selector.context === map.context) && (!selector.category || action.category === selector.category) &&
+      (!selector.tags || selector.tags.every((tag) => action.tags?.includes(tag))))
+      .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    const actions = matches.slice(0, limit);
+    return { ...map, count: actions.length, truncated: matches.length > actions.length, actions };
+  }
+}
+
 export class WebSocketInspectorClient implements GuaInspectorClient {
   private socket: WebSocket | null = null;
   private connectPromise: Promise<WebSocket> | null = null;
@@ -540,6 +577,12 @@ export class WebSocketInspectorClient implements GuaInspectorClient {
   }
   async resumeClock(): Promise<GuaClockStatus> { return this.request({ type: "clock_resume" }); }
   async getGameInputActions(): Promise<GuaGameInputActions> { return this.request({ type: "get_game_input_actions" }); }
+  async findGameInputActions(selector: GuaGameInputActionSelector): Promise<GuaGameInputActionSearchResult> {
+    const valueType = selector.valueType === undefined ? undefined : ({ button: 1, axis1d: 2, vector2: 3, text: 4 } as const)[selector.valueType];
+    const { id, ...rest } = selector;
+    return this.request({ type: "find_game_input_actions", ...rest, actionId: id, valueType,
+      active: selector.active === undefined ? undefined : selector.active ? 2 : 1 } as unknown as GuaInspectorCommandInput);
+  }
   async getGameInputState(): Promise<GuaGameInputState> { return this.request({ type: "get_game_input_state" }); }
   async performGameInput(command: GameInputCommandInput): Promise<{ requestId: number }> {
     const receipt = await this.request<{ requestId: number }>(command);

@@ -7,6 +7,8 @@ import type {
   GuaClockStatus,
   GuaContextStatus,
   GuaGameInputActions,
+  GuaGameInputActionSearchResult,
+  GuaGameInputActionSelector,
   GuaGameInputState,
   GameInputCommandInput,
   GuaWorldObjectTree,
@@ -45,6 +47,16 @@ export function handleMessage(message: string | Buffer, target: DemoRuntime = ru
       case "clock_run_for": return ok(command.id, target.runClockFor(command.durationMs, command.stepMs));
       case "clock_resume": return ok(command.id, target.resumeClock());
       case "get_game_input_actions": return ok(command.id, target.getGameInputActions());
+      case "find_game_input_actions": return ok(command.id, target.findGameInputActions({
+        id: command.actionId,
+        query: command.query,
+        valueType: command.valueType === undefined ? undefined : ({ 1: "button", 2: "axis1d", 3: "vector2", 4: "text" } as const)[command.valueType],
+        active: command.active === undefined || command.active === 0 ? undefined : command.active === 2,
+        context: command.context,
+        category: command.category,
+        tags: command.tags,
+        limit: command.limit,
+      }));
       case "get_game_input_state": return ok(command.id, target.getGameInputState());
       case "poll_game_input": return ok(command.id, { completed: true, succeeded: true, errorCode: 0 });
       case "poll_events":
@@ -198,6 +210,17 @@ export class DemoRuntime {
     { id: "jump", description: "Jump", valueType: "button", holdable: true, active: true, bindings: ["Space"], risk: "safe", requiresConfirmation: false },
     { id: "move", description: "Move", valueType: "vector2", range: { minimum: -1, maximum: 1 }, holdable: true, active: true, bindings: ["Gamepad.leftStick"], risk: "safe", requiresConfirmation: false },
   ] }; }
+  findGameInputActions(selector: GuaGameInputActionSelector): GuaGameInputActionSearchResult {
+    const map = this.getGameInputActions();
+    const matches = map.actions.filter((action) => (!selector.id || action.id === selector.id) &&
+      (!selector.query || action.id.includes(selector.query) || action.description?.includes(selector.query) || action.aliases?.some((alias) => alias.includes(selector.query!))) &&
+      (!selector.valueType || action.valueType === selector.valueType) && (selector.active === undefined || action.active === selector.active) &&
+      (!selector.context || selector.context === map.context) && (!selector.category || action.category === selector.category) &&
+      (!selector.tags || selector.tags.every((tag) => action.tags?.includes(tag))))
+      .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    const limit = selector.limit ?? 20;
+    return { ...map, count: Math.min(matches.length, limit), truncated: matches.length > limit, actions: matches.slice(0, limit) };
+  }
   getGameInputState(): GuaGameInputState { return { schemaVersion: 1, held: [...this.heldGameInputs] }; }
   performGameInput(command: GameInputCommandInput): { requestId: number } {
     const requestId = this.nextGameInputRequestId++;

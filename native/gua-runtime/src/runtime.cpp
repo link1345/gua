@@ -148,6 +148,7 @@ void filter_runtime_capabilities(std::string& json, bool virtual_clock_enabled, 
 {
     if (!virtual_clock_enabled) remove_capability(json, "virtual_clock_v1");
     if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_SEMANTIC) == 0) remove_capability(json, "semantic_game_input_v1");
+    if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_SEMANTIC) == 0) remove_capability(json, "semantic_game_input_search_v1");
     if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_KEYBOARD) == 0) remove_capability(json, "raw_keyboard_input_v1");
     if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_POINTER) == 0) remove_capability(json, "raw_pointer_input_v1");
     if ((game_input_capabilities & GUA_RUNTIME_GAME_INPUT_GAMEPAD) == 0) remove_capability(json, "raw_gamepad_input_v1");
@@ -1022,6 +1023,13 @@ extern "C" int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime,
     return gua_register_game_input_action_v1(runtime->context, descriptor);
 }
 
+extern "C" int gua_runtime_register_game_input_action_v2(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v2_t* descriptor)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    return gua_register_game_input_action_v2(runtime->context, descriptor);
+}
+
 extern "C" int gua_runtime_end_game_input_frame(gua_runtime_t* runtime)
 {
     if (!valid_runtime(runtime)) return 0;
@@ -1082,7 +1090,7 @@ extern "C" int gua_runtime_enqueue_game_input_for_profile_v2(gua_runtime_t* runt
     if (required == UINT32_MAX || (required != 0 && (available & required) == 0))
         return GUA_GAME_INPUT_ERROR_UNSUPPORTED;
     uint64_t request_id = 0;
-    const int result = gua_enqueue_game_input_v2(runtime->context, descriptor, &request_id);
+    const int result = gua_enqueue_game_input_for_profile_v2(runtime->context, descriptor, observation_profile, &request_id);
     if (result == GUA_GAME_INPUT_OK) {
         runtime->game_input_request_profiles[request_id] = { observation_profile, descriptor->owner_id, false };
         if (out_request_id != nullptr) *out_request_id = request_id;
@@ -1129,7 +1137,27 @@ extern "C" int gua_runtime_copy_game_input_actions_json(gua_runtime_t* runtime, 
 {
     if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
     const std::lock_guard lock(runtime->context_mutex);
-    return gua_copy_game_input_actions_json(runtime->context, out_json, out_json_size);
+    return gua_copy_game_input_actions_json_for_profile(runtime->context, runtime->observation_profile, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_copy_player_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return copy_json_string("{}", out_json, out_json_size);
+    const std::lock_guard lock(runtime->context_mutex);
+    if ((effective_game_input_capabilities(runtime, GUA_OBSERVATION_PROFILE_PLAYER) & GUA_RUNTIME_GAME_INPUT_SEMANTIC) == 0)
+        return copy_json_string("{}", out_json, out_json_size);
+    return gua_copy_game_input_actions_json_for_profile(runtime->context, GUA_OBSERVATION_PROFILE_PLAYER, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_query_game_input_actions_json(gua_runtime_t* runtime,
+    const gua_game_input_action_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime) || selector == nullptr ||
+        (observation_profile != GUA_OBSERVATION_PROFILE_DEBUG && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (runtime->observation_profile == GUA_OBSERVATION_PROFILE_PLAYER && observation_profile != GUA_OBSERVATION_PROFILE_PLAYER) return 0;
+    if ((effective_game_input_capabilities(runtime, observation_profile) & GUA_RUNTIME_GAME_INPUT_SEMANTIC) == 0) return 0;
+    return gua_query_game_input_actions_json(runtime->context, selector, observation_profile, out_json, out_json_size);
 }
 
 extern "C" int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, uint64_t owner_id, char* out_json, int out_json_size)
@@ -1748,9 +1776,26 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
         },
         .get_game_input_actions_json = [runtime] {
             const std::lock_guard lock(runtime->context_mutex);
-            const int size = gua_copy_game_input_actions_json(runtime->context, nullptr, 0);
+            const int size = gua_copy_game_input_actions_json_for_profile(runtime->context, runtime->observation_profile, nullptr, 0);
             std::string json(static_cast<std::size_t>(size), '\0');
-            gua_copy_game_input_actions_json(runtime->context, json.data(), size);
+            gua_copy_game_input_actions_json_for_profile(runtime->context, runtime->observation_profile, json.data(), size);
+            json.resize(static_cast<std::size_t>(size - 1));
+            return json;
+        },
+        .query_game_input_actions_json = [runtime](const gua::ws::GameInputQuerySelector& selector) {
+            std::vector<const char*> tag_pointers;
+            tag_pointers.reserve(selector.tags.size());
+            for (const auto& tag : selector.tags) tag_pointers.push_back(tag.c_str());
+            gua_game_input_action_selector_v1_t native { sizeof(gua_game_input_action_selector_v1_t),
+                selector.id.empty() ? nullptr : selector.id.c_str(), selector.query.empty() ? nullptr : selector.query.c_str(),
+                selector.value_type, selector.active, selector.context.empty() ? nullptr : selector.context.c_str(),
+                selector.category.empty() ? nullptr : selector.category.c_str(),
+                tag_pointers.empty() ? nullptr : tag_pointers.data(), static_cast<std::uint32_t>(tag_pointers.size()), selector.limit };
+            const std::lock_guard lock(runtime->context_mutex);
+            const int size = gua_query_game_input_actions_json(runtime->context, &native, runtime->observation_profile, nullptr, 0);
+            if (size <= 0) return std::string();
+            std::string json(static_cast<std::size_t>(size), '\0');
+            gua_query_game_input_actions_json(runtime->context, &native, runtime->observation_profile, json.data(), size);
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
         },
@@ -1802,7 +1847,8 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
                 command.target.c_str(), command.value_json.c_str(), command.x, command.y, command.lease_ms,
                 command.device_index, command.sensitive ? 1 : 0, command.confirmed ? 1 : 0 };
             std::uint64_t request_id = 0;
-            const int result = gua_enqueue_game_input_v2(runtime->context, &descriptor, &request_id);
+            const int result = gua_enqueue_game_input_for_profile_v2(runtime->context, &descriptor,
+                runtime->observation_profile, &request_id);
             if (result == GUA_GAME_INPUT_OK)
                 runtime->game_input_request_profiles[request_id] = { runtime->observation_profile, owner_id, false };
             return result == GUA_GAME_INPUT_OK ? static_cast<long long>(request_id) : static_cast<long long>(result);

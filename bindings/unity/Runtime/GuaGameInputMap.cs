@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Gua.Core;
 using Gua.Runtime;
 using UnityEngine;
 
@@ -21,10 +22,14 @@ public sealed class GuaGameInputAction
     public string[] Bindings = Array.Empty<string>();
     public string Risk = "safe";
     public bool RequiresConfirmation;
+    public string Category = "";
+    public string[] Aliases = Array.Empty<string>();
+    public string[] Tags = Array.Empty<string>();
+    public GuaAgentExposure AgentExposure;
 
     internal GuaGameInputActionDescriptor Descriptor() => new(
         Id, Description, ValueType, HasRange ? Minimum : null, HasRange ? Maximum : null,
-        Holdable, Active, Bindings, Risk, RequiresConfirmation);
+        Holdable, Active, Bindings, Risk, RequiresConfirmation, Category, Aliases, Tags, AgentExposure);
 }
 
 public sealed class GuaGameInputMap : MonoBehaviour

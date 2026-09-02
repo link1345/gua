@@ -62,7 +62,7 @@ export interface GuaUiTree {
 export interface GuaScreenshot { dataUri: string; width: number; height: number }
 
 export const guaGameInputCapabilities = [
-  "semantic_game_input_v1", "raw_keyboard_input_v1", "raw_pointer_input_v1", "raw_gamepad_input_v1",
+  "semantic_game_input_v1", "semantic_game_input_search_v1", "raw_keyboard_input_v1", "raw_pointer_input_v1", "raw_gamepad_input_v1",
   "text_input_v1", "game_input_lease_v1",
 ] as const;
 export type GuaGameInputCapability = (typeof guaGameInputCapabilities)[number];
@@ -70,9 +70,18 @@ export type GuaGameInputValueType = "button" | "axis1d" | "vector2" | "text";
 export interface GuaGameInputAction {
   id: string; description: string; valueType: GuaGameInputValueType; range?: { minimum: number; maximum: number };
   holdable: boolean; active: boolean; bindings: string[]; risk: string; requiresConfirmation: boolean;
+  category?: string; aliases?: string[]; tags?: string[]; agentExposure?: "auto" | "private";
 }
 export interface GuaGameInputActionMap {
   schemaVersion: 1; sessionEpoch: number; revision: number; context: string; actions: GuaGameInputAction[];
+}
+export interface GuaGameInputActionSelector {
+  id?: string; query?: string; valueType?: GuaGameInputValueType; active?: boolean; context?: string;
+  category?: string; tags?: string[]; limit?: number;
+}
+export interface GuaGameInputActionSearchResult {
+  schemaVersion: 1; sessionEpoch: number; revision: number; context: string; count: number; truncated: boolean;
+  actions: GuaGameInputAction[];
 }
 export interface GuaGameInputState { schemaVersion: 1; held: unknown[] }
 export type GuaGameInputRequest =
@@ -122,6 +131,7 @@ export interface GuaBrowserBridge {
   findWorldObjects?(selector: GuaWorldSelector, options?: GuaBridgeCallOptions): Promise<GuaWorldQueryResult>;
   getGameInputCapabilities?(): Promise<GuaGameInputCapability[]>;
   getGameInputActions?(): Promise<GuaGameInputActionMap>;
+  findGameInputActions?(selector: GuaGameInputActionSelector): Promise<GuaGameInputActionSearchResult>;
   getGameInputState?(): Promise<GuaGameInputState>;
   performGameInput?(request: GuaGameInputRequest, options?: GuaBridgeCallOptions): Promise<GuaGameInputCompletion>;
 }
@@ -216,6 +226,7 @@ export async function registerGuaWebMcp(
           executionOptions?.signal,
           pollIntervalMs,
           defaultTimeoutMs,
+          gameInputCapabilities.includes("semantic_game_input_search_v1"),
         ),
       }, { signal: controller.signal });
       registeredTools.push(definition.name);
@@ -247,6 +258,7 @@ function gameInputDefinitions(capabilities: GuaGameInputCapability[], bridge: Gu
   if (capabilities.includes("semantic_game_input_v1") && bridge.getGameInputActions) {
     for (const name of ["get_game_input_actions", "press_game_input_action", "set_game_input_action", "release_game_input_action"]) enabled.add(name);
   }
+  if (capabilities.includes("semantic_game_input_search_v1") && bridge.findGameInputActions) enabled.add("find_game_input_actions");
   if (capabilities.length > 0) enabled.add("release_all_game_inputs");
   if (capabilities.length > 0 && bridge.getGameInputState) enabled.add("get_game_input_state");
   if (capabilities.includes("raw_keyboard_input_v1")) for (const name of ["key_down", "key_up", "press_physical_key"]) enabled.add(name);
@@ -263,6 +275,7 @@ async function executeTool(
   signal: AbortSignal | undefined,
   pollIntervalMs: number,
   defaultTimeoutMs: number,
+  gameInputSearchSupported: boolean,
 ): Promise<unknown> {
   try {
     throwIfAborted(signal);
@@ -319,6 +332,11 @@ async function executeTool(
       if (!bridge.getGameInputActions) throw new GuaWebError("engine_unsupported", "The engine bridge does not support semantic game input.");
       return toolResult(await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out reading the game input action map."));
     }
+    if (name === "find_game_input_actions") {
+      if (!bridge.findGameInputActions) throw new GuaWebError("engine_unsupported", "The engine bridge does not support game input search.");
+      return toolResult(await withTimeout(bridge.findGameInputActions(gameInputSelector(input)), defaultTimeoutMs, signal,
+        "Timed out searching the game input action map."));
+    }
     if (name === "get_game_input_state") {
       rejectUnknownArguments(input, new Set());
       if (!bridge.getGameInputState) throw new GuaWebError("engine_unsupported", "The engine bridge does not expose page-owned game input state.");
@@ -327,9 +345,12 @@ async function executeTool(
     if (isGameInputTool(name)) {
       if (!bridge.performGameInput) throw new GuaWebError("engine_unsupported", "The engine bridge does not support game input.");
       const request = gameInputRequest(name, input);
-      if ((request.type === "press_game_input_action" || request.type === "set_game_input_action") && bridge.getGameInputActions) {
-        const map = await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out validating the game input action map.");
-        const action = map.actions.find((candidate) => candidate.id === request.actionId);
+      if ((request.type === "press_game_input_action" || request.type === "set_game_input_action") && (bridge.getGameInputActions || (gameInputSearchSupported && bridge.findGameInputActions))) {
+        const actions = gameInputSearchSupported && bridge.findGameInputActions
+          ? (await withTimeout(bridge.findGameInputActions({ id: request.actionId, limit: 1 }), defaultTimeoutMs, signal,
+              "Timed out validating the game input action map.")).actions
+          : (await withTimeout(bridge.getGameInputActions!(), defaultTimeoutMs, signal, "Timed out validating the game input action map.")).actions;
+        const action = actions.find((candidate) => candidate.id === request.actionId);
         if (!action) throw new GuaWebError("invalid_request", `Unknown game input action: ${request.actionId}`);
         if (action.requiresConfirmation && request.confirmed !== true) {
           throw new GuaWebError("invalid_request", `Game input action '${request.actionId}' requires confirmed=true.`);
@@ -416,6 +437,28 @@ async function waitForWorldObject(
     await delay(Math.min(pollIntervalMs, Math.max(0, deadline - performance.now())), signal);
   } while (true);
   throw new GuaWebError("timeout", "Timed out waiting for a Gua world object.", { timeoutMs });
+}
+
+function gameInputSelector(input: Record<string, unknown>): GuaGameInputActionSelector {
+  rejectUnknownArguments(input, new Set(["id", "query", "valueType", "active", "context", "category", "tags", "limit"]));
+  const stringValue = (key: string): string | undefined => {
+    const value = input[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length === 0) throw new GuaWebError("invalid_request", `${key} must be a non-empty string.`);
+    return value;
+  };
+  const tags = input.tags;
+  if (tags !== undefined && (!Array.isArray(tags) || !tags.every((tag) => typeof tag === "string" && tag.length > 0)))
+    throw new GuaWebError("invalid_request", "tags must contain non-empty strings.");
+  const valueType = stringValue("valueType");
+  if (valueType !== undefined && !["button", "axis1d", "vector2", "text"].includes(valueType))
+    throw new GuaWebError("invalid_request", "valueType is invalid.");
+  if (input.active !== undefined && typeof input.active !== "boolean") throw new GuaWebError("invalid_request", "active must be boolean.");
+  return {
+    id: stringValue("id"), query: stringValue("query"), valueType: valueType as GuaGameInputValueType | undefined,
+    active: input.active as boolean | undefined, context: stringValue("context"), category: stringValue("category"),
+    tags: tags as string[] | undefined, limit: optionalInteger(input, "limit", 20, 1, 100),
+  };
 }
 
 function rejectUnknownArguments(input: Record<string, unknown>, allowed: Set<string>): void {

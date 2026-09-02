@@ -330,7 +330,7 @@ actions are visible; action maps are not inferred from engine assets or the UI
 tree. Hosts validate IDs, active context, finite values, ranges, and holdability
 both when enqueueing and when consuming requests.
 
-Semantic commands are `get_game_input_actions`, `press_game_input_action`,
+Semantic commands are `get_game_input_actions`, `find_game_input_actions`, `press_game_input_action`,
 `set_game_input_action`, `release_game_input_action`, `get_game_input_state`,
 and `release_all_game_inputs`. Raw commands are `key_down`, `key_up`,
 `press_physical_key`, pointer move/button/wheel operations, standard-mapping
@@ -344,6 +344,23 @@ W3C `KeyboardEvent.code` values enumerated by `commands.schema.json` through
 alphanumeric, navigation, left/right modifier locations, F1-F24, numpad
 digit/operator, and PrintScreen codes; clients must not assume every optional
 or platform-specific W3C code is available.
+
+Descriptor v2 adds optional `category`, `aliases`, `tags`, and `agentExposure`.
+Category follows the Action ID ASCII identifier and byte limits. Aliases and
+tags contain at most 16 distinct, non-empty values of 1-64 Unicode code points;
+metadata is compared exactly without Unicode normalization or case folding.
+`find_game_input_actions` accepts exact `id`, ordinal case-sensitive substring
+`query` over ID/description/aliases, `valueType`, `active`, exact `context`,
+exact `category`, all-of `tags`, and `limit`. Conditions are ANDed and Action IDs
+are sorted ordinally. Results contain projected `revision`, actual `context`,
+returned `count`, `truncated`, and `actions`, but never the total match count.
+The public C++/.NET/MCP/WebMCP selector field remains `id`; the flat WebSocket
+command encodes that field as `actionId` because its top-level `id` is reserved
+for request correlation.
+Player projection removes `private` actions before all filtering and truncation,
+so result shape does not reveal their presence. Its independent revision does
+not advance for private-only changes. Descriptor metadata is observable and
+must not contain secrets.
 Before dispatching `press_game_input_action` or `set_game_input_action`, clients
 resolve the current descriptor and require `confirmed=true` when
 `requiresConfirmation` is set. The confirmation decision travels through the
@@ -379,7 +396,8 @@ injection. A completed result is acknowledged and removed after a successful
 full-buffer copy; implementations retain at most 1024 unacknowledged results per owner
 and discard results owned by a released session.
 
-Adapters advertise only initialized paths from `semantic_game_input_v1`,
+Adapters advertise search additively as `semantic_game_input_search_v1` and only
+initialized input paths from `semantic_game_input_v1`,
 `raw_keyboard_input_v1`, `raw_pointer_input_v1`, `raw_gamepad_input_v1`,
 `text_input_v1`, and `game_input_lease_v1`. Raw input is opt-in; an adapter with
 no active pump and neutral-release path must omit the capability and return

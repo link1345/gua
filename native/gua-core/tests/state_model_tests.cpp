@@ -1611,7 +1611,6 @@ int main()
     empty_binding.bindings_json = "[\"\"]";
     assert(gua_register_game_input_action_v1(context, &empty_binding) == 0);
     assert(gua_end_game_input_frame(context) == 0);
-    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
     const gua_game_input_action_descriptor_v1_t move {
         sizeof(gua_game_input_action_descriptor_v1_t), "move", "Move player", GUA_GAME_INPUT_VECTOR2,
         -1.0, 1.0, 1, 1, 1, "[\"KeyW/KeyA/KeyS/KeyD\"]", "safe", 0
@@ -1630,18 +1629,194 @@ int main()
     };
     auto guarded_protected = guarded_safe;
     guarded_protected.requires_confirmation = 1;
+    const char* discover_aliases[] { "open menu", "show inventory" };
+    const char* discover_tags[] { "menu", "inventory" };
+    const gua_game_input_action_descriptor_v1_t discover_base {
+        sizeof(gua_game_input_action_descriptor_v1_t), "discover", "Open the inventory", GUA_GAME_INPUT_BUTTON,
+        0.0, 0.0, 0, 0, 1, "[]", "safe", 0
+    };
+    const gua_game_input_action_descriptor_v2_t discover {
+        sizeof(gua_game_input_action_descriptor_v2_t), discover_base, "navigation", discover_aliases, 2,
+        discover_tags, 2, GUA_AGENT_EXPOSURE_AUTO
+    };
+    auto private_action_base = discover_base;
+    private_action_base.id = "debug-cheat"; private_action_base.description = "Debug cheat";
+    const gua_game_input_action_descriptor_v2_t private_action {
+        sizeof(gua_game_input_action_descriptor_v2_t), private_action_base, "debug", nullptr, 0, nullptr, 0, GUA_AGENT_EXPOSURE_PRIVATE
+    };
+    auto invalid_exposure = private_action;
+    invalid_exposure.agent_exposure = 99;
+    assert(gua_begin_game_input_frame(context, "invalid-exposure") == 1);
+    assert(gua_register_game_input_action_v2(context, &invalid_exposure) == 0);
+    assert(gua_end_game_input_frame(context) == 0);
+    const std::string long_alias(65, 'x');
+    const char* long_aliases[] { long_alias.c_str() };
+    auto invalid_alias = discover;
+    invalid_alias.aliases = long_aliases; invalid_alias.alias_count = 1;
+    assert(gua_begin_game_input_frame(context, "invalid-alias") == 1);
+    assert(gua_register_game_input_action_v2(context, &invalid_alias) == 0);
+    assert(gua_end_game_input_frame(context) == 0);
+    const char* duplicate_tags[] { "menu", "menu" };
+    auto invalid_tags = discover;
+    invalid_tags.tags = duplicate_tags; invalid_tags.tag_count = 2;
+    assert(gua_begin_game_input_frame(context, "invalid-tags") == 1);
+    assert(gua_register_game_input_action_v2(context, &invalid_tags) == 0);
+    assert(gua_end_game_input_frame(context) == 0);
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
     assert(gua_register_game_input_action_v1(context, &move) == 1);
     assert(gua_register_game_input_action_v1(context, &interact) == 1);
     assert(gua_register_game_input_action_v1(context, &chat) == 1);
     assert(gua_register_game_input_action_v1(context, &guarded_safe) == 1);
+    assert(gua_register_game_input_action_v2(context, &discover) == 1);
+    assert(gua_register_game_input_action_v2(context, &private_action) == 1);
     assert(gua_end_game_input_frame(context) == 1);
     const int map_size = gua_copy_game_input_actions_json(context, nullptr, 0);
     std::string map(static_cast<std::size_t>(map_size), '\0');
     gua_copy_game_input_actions_json(context, map.data(), map_size);
     assert(map.find("\"context\":\"gameplay\"") != std::string::npos);
+    assert(map.find("\"category\":\"navigation\"") != std::string::npos);
+    assert(map.find("\"agentExposure\":\"private\"") != std::string::npos);
+    const char* query_tags[] { "inventory" };
+    gua_game_input_action_selector_v1_t action_selector { sizeof(gua_game_input_action_selector_v1_t), nullptr,
+        "inventory", 0, GUA_FILTER_TRUE, "gameplay", "navigation", query_tags, 1, 20 };
+    int search_size = gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    std::string search(static_cast<std::size_t>(search_size), '\0');
+    assert(search_size > 0 && gua_query_game_input_actions_json(context, &action_selector,
+        GUA_OBSERVATION_PROFILE_DEBUG, search.data(), search_size) == search_size);
+    assert(search.find("\"count\":1") != std::string::npos && search.find("\"id\":\"discover\"") != std::string::npos);
+    const std::string long_query(129, 'q');
+    auto invalid_selector = action_selector;
+    invalid_selector.query = long_query.c_str();
+    assert(gua_query_game_input_actions_json(context, &invalid_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0) == 0);
+    invalid_selector = action_selector; invalid_selector.value_type = 99;
+    assert(gua_query_game_input_actions_json(context, &invalid_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0) == 0);
+    const char* repeated_selector_tags[] { "inventory", "inventory" };
+    invalid_selector = action_selector; invalid_selector.tags = repeated_selector_tags; invalid_selector.tag_count = 2;
+    assert(gua_query_game_input_actions_json(context, &invalid_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0) == 0);
+    action_selector = gua_game_input_action_selector_v1_t { sizeof(gua_game_input_action_selector_v1_t), nullptr,
+        nullptr, 0, GUA_FILTER_ANY, nullptr, nullptr, nullptr, 0, 100 };
+    search_size = gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    search.assign(static_cast<std::size_t>(search_size), '\0');
+    gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_PLAYER, search.data(), search_size);
+    assert(search.find("debug-cheat") == std::string::npos && search.find("\"count\":5") != std::string::npos);
+    const int player_map_size = gua_copy_game_input_actions_json_for_profile(context,
+        GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::string player_map(static_cast<std::size_t>(player_map_size), '\0');
+    gua_copy_game_input_actions_json_for_profile(context, GUA_OBSERVATION_PROFILE_PLAYER,
+        player_map.data(), player_map_size);
+    const auto player_revision_at = player_map.find("\"revision\":");
+    const auto player_revision_end = player_map.find(',', player_revision_at);
+    const std::string player_revision = player_map.substr(player_revision_at, player_revision_end - player_revision_at);
+    auto changed_private_base = private_action_base;
+    changed_private_base.description = "Changed private metadata";
+    const gua_game_input_action_descriptor_v2_t changed_private_action {
+        sizeof(gua_game_input_action_descriptor_v2_t), changed_private_base, "debug", nullptr, 0, nullptr, 0,
+        GUA_AGENT_EXPOSURE_PRIVATE
+    };
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_register_game_input_action_v1(context, &chat) == 1);
+    assert(gua_register_game_input_action_v1(context, &guarded_safe) == 1);
+    assert(gua_register_game_input_action_v2(context, &discover) == 1);
+    assert(gua_register_game_input_action_v2(context, &changed_private_action) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    const int unchanged_player_size = gua_copy_game_input_actions_json_for_profile(context,
+        GUA_OBSERVATION_PROFILE_PLAYER, nullptr, 0);
+    std::string unchanged_player(static_cast<std::size_t>(unchanged_player_size), '\0');
+    gua_copy_game_input_actions_json_for_profile(context, GUA_OBSERVATION_PROFILE_PLAYER,
+        unchanged_player.data(), unchanged_player_size);
+    assert(unchanged_player.find(player_revision) != std::string::npos);
+
+    assert(gua_begin_game_input_frame(context, "bulk") == 1);
+    for (int index = 204; index >= 0; --index) {
+        char id[32] {}, description[32] {};
+        std::snprintf(id, sizeof(id), "action-%03d", index);
+        std::snprintf(description, sizeof(description), "Action %03d", index);
+        const gua_game_input_action_descriptor_v1_t bulk { sizeof(bulk), id, description, GUA_GAME_INPUT_BUTTON,
+            0.0, 0.0, 0, 0, 1, "[]", "safe", 0 };
+        assert(gua_register_game_input_action_v1(context, &bulk) == 1);
+    }
+    assert(gua_end_game_input_frame(context) == 1);
+    action_selector = gua_game_input_action_selector_v1_t { sizeof(action_selector), nullptr, "Action", 0,
+        GUA_FILTER_TRUE, "bulk", nullptr, nullptr, 0, 20 };
+    search_size = gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    search.assign(static_cast<std::size_t>(search_size), '\0');
+    gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_DEBUG, search.data(), search_size);
+    assert(search.find("\"count\":20") != std::string::npos && search.find("\"truncated\":true") != std::string::npos);
+    assert(search.find("action-000") < search.find("action-019") && search.find("action-020") == std::string::npos);
+    action_selector.limit = 100;
+    search_size = gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_DEBUG, nullptr, 0);
+    search.assign(static_cast<std::size_t>(search_size), '\0');
+    gua_query_game_input_actions_json(context, &action_selector, GUA_OBSERVATION_PROFILE_DEBUG, search.data(), search_size);
+    assert(search.find("\"count\":100") != std::string::npos && search.find("\"truncated\":true") != std::string::npos);
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_register_game_input_action_v1(context, &chat) == 1);
+    assert(gua_register_game_input_action_v1(context, &guarded_safe) == 1);
+    assert(gua_register_game_input_action_v2(context, &discover) == 1);
+    assert(gua_register_game_input_action_v2(context, &private_action) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
 
     const uint64_t owner_a = gua_create_game_input_owner(context);
     const uint64_t owner_b = gua_create_game_input_owner(context);
+    const gua_game_input_request_descriptor_v2_t private_player_request {
+        sizeof(gua_game_input_request_descriptor_v2_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_PRESS,
+        "debug-cheat", "true", 0, 0, 5000, 0, 0, 0
+    };
+    assert(gua_enqueue_game_input_for_profile_v2(context, &private_player_request,
+        GUA_OBSERVATION_PROFILE_PLAYER, nullptr) == GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND);
+    const gua_game_input_request_descriptor_v2_t stale_player_request {
+        sizeof(gua_game_input_request_descriptor_v2_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_PRESS,
+        "discover", "true", 0, 0, 5000, 0, 0, 0
+    };
+    uint64_t stale_player_id = 0;
+    assert(gua_enqueue_game_input_for_profile_v2(context, &stale_player_request,
+        GUA_OBSERVATION_PROFILE_PLAYER, &stale_player_id) == GUA_GAME_INPUT_OK);
+    const gua_game_input_action_descriptor_v2_t hidden_discover {
+        sizeof(gua_game_input_action_descriptor_v2_t), discover_base, "navigation", discover_aliases, 2,
+        discover_tags, 2, GUA_AGENT_EXPOSURE_PRIVATE
+    };
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v2(context, &hidden_discover) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    gua_game_input_request_v1_t stale_consumed { sizeof(gua_game_input_request_v1_t) };
+    assert(gua_consume_game_input_request(context, &stale_consumed) == 0);
+    const int stale_player_result_size = gua_copy_game_input_result_json(context, owner_a, stale_player_id, nullptr, 0);
+    std::string stale_player_result(static_cast<std::size_t>(stale_player_result_size), '\0');
+    gua_copy_game_input_result_json(context, owner_a, stale_player_id, stale_player_result.data(), stale_player_result_size);
+    assert(stale_player_result.find("\"errorCode\":" + std::to_string(GUA_GAME_INPUT_ERROR_ACTION_NOT_FOUND)) != std::string::npos);
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_register_game_input_action_v1(context, &chat) == 1);
+    assert(gua_register_game_input_action_v1(context, &guarded_safe) == 1);
+    assert(gua_register_game_input_action_v2(context, &discover) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    const gua_game_input_request_descriptor_v2_t stale_active_request {
+        sizeof(gua_game_input_request_descriptor_v2_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_PRESS,
+        "interact", "true", 0, 0, 5000, 0, 0, 0
+    };
+    uint64_t stale_active_id = 0;
+    assert(gua_enqueue_game_input_for_profile_v2(context, &stale_active_request,
+        GUA_OBSERVATION_PROFILE_PLAYER, &stale_active_id) == GUA_GAME_INPUT_OK);
+    auto inactive_interact = interact; inactive_interact.active = 0;
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v1(context, &inactive_interact) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
+    assert(gua_consume_game_input_request(context, &stale_consumed) == 0);
+    const int stale_active_result_size = gua_copy_game_input_result_json(context, owner_a, stale_active_id, nullptr, 0);
+    std::string stale_active_result(static_cast<std::size_t>(stale_active_result_size), '\0');
+    gua_copy_game_input_result_json(context, owner_a, stale_active_id, stale_active_result.data(), stale_active_result_size);
+    assert(stale_active_result.find("\"errorCode\":" + std::to_string(GUA_GAME_INPUT_ERROR_INACTIVE)) != std::string::npos);
+    assert(gua_begin_game_input_frame(context, "gameplay") == 1);
+    assert(gua_register_game_input_action_v1(context, &move) == 1);
+    assert(gua_register_game_input_action_v1(context, &interact) == 1);
+    assert(gua_register_game_input_action_v1(context, &chat) == 1);
+    assert(gua_register_game_input_action_v1(context, &guarded_safe) == 1);
+    assert(gua_register_game_input_action_v2(context, &discover) == 1);
+    assert(gua_end_game_input_frame(context) == 1);
     const gua_game_input_request_descriptor_v1_t unconfirmed_guarded {
         sizeof(gua_game_input_request_descriptor_v1_t), owner_a, GUA_GAME_INPUT_SEMANTIC, GUA_GAME_INPUT_PRESS,
         "guarded", "true", 0, 0, 5000, 0, 0

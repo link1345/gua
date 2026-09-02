@@ -100,6 +100,7 @@ void gua_runtime_set_player_game_input_capabilities(gua_runtime_t* runtime, uint
 uint32_t gua_runtime_get_game_input_capabilities(gua_runtime_t* runtime, int observation_profile);
 int gua_runtime_begin_game_input_frame(gua_runtime_t* runtime, const char* input_context);
 int gua_runtime_register_game_input_action_v1(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v1_t* descriptor);
+int gua_runtime_register_game_input_action_v2(gua_runtime_t* runtime, const gua_game_input_action_descriptor_v2_t* descriptor);
 int gua_runtime_end_game_input_frame(gua_runtime_t* runtime);
 int gua_runtime_abort_game_input_frame(gua_runtime_t* runtime);
 uint64_t gua_runtime_create_game_input_owner(gua_runtime_t* runtime);
@@ -113,6 +114,9 @@ int gua_runtime_consume_game_input_request(gua_runtime_t* runtime, gua_game_inpu
 int gua_runtime_complete_game_input_request(gua_runtime_t* runtime, uint64_t request_id, int succeeded, int error_code);
 int gua_runtime_tick_game_input_leases(gua_runtime_t* runtime, double elapsed_ms);
 int gua_runtime_copy_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_copy_player_game_input_actions_json(gua_runtime_t* runtime, char* out_json, int out_json_size);
+int gua_runtime_query_game_input_actions_json(gua_runtime_t* runtime, const gua_game_input_action_selector_v1_t* selector,
+    int observation_profile, char* out_json, int out_json_size);
 int gua_runtime_copy_game_input_state_json(gua_runtime_t* runtime, uint64_t owner_id, char* out_json, int out_json_size);
 int gua_runtime_copy_game_input_result_json(gua_runtime_t* runtime, uint64_t owner_id, uint64_t request_id, char* out_json, int out_json_size);
 /* Adapter opt-in: enable only after the host publishes world frames. */

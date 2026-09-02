@@ -2,6 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { DemoRuntime, handleMessage } from "../src/index";
 
 describe("DemoRuntime virtual clock", () => {
+  test("maps the flat search wire fields without treating correlation id as an action id", () => {
+    const runtime = new DemoRuntime(() => 0);
+    const all = handleMessage(JSON.stringify({ id: 9, type: "find_game_input_actions", limit: 20 }), runtime);
+    expect(all).toMatchObject({ id: 9, ok: true, result: { count: 2, truncated: false } });
+
+    const exact = handleMessage(JSON.stringify({ id: 10, type: "find_game_input_actions", actionId: "jump", valueType: 1, active: 2, limit: 1 }), runtime);
+    expect(exact).toMatchObject({ id: 10, ok: true, result: { count: 1, actions: [{ id: "jump" }] } });
+  });
+
   test("rejects installation until the current timeline is reset", () => {
     const runtime = new DemoRuntime(() => 0);
     expect(runtime.installClock(100, 10).nowMs).toBe(100);

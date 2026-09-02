@@ -4,6 +4,7 @@ import {
   type GuaInspectorClient,
   type GuaClockStatus,
   type GuaGameInputActions,
+  type GuaGameInputActionSelector,
   type GuaGameInputState,
   type GameInputCommandInput,
   type GuaNode,
@@ -14,6 +15,7 @@ import {
   WebSocketInspectorClient,
   createCoalescedAsyncRunner,
   createInspectorState,
+  findGameInputActionsCompatible,
   formatBounds,
   getSelectedNode,
   hasCompleteBounds,
@@ -97,7 +99,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
       setState((current) => updateInspectorState(current, snapshot));
       await refreshClock();
       try {
-        const [actions, inputState] = await Promise.all([inspectorClient.getGameInputActions(), inspectorClient.getGameInputState()]);
+        const [actions, inputState] = await Promise.all([findGameInputActionsCompatible(inspectorClient, { limit: 20 }), inspectorClient.getGameInputState()]);
         setGameInputActions(actions); setGameInputState(inputState);
       } catch { setGameInputActions(null); setGameInputState(null); }
       setStatus("idle");
@@ -216,7 +218,7 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
         (action) => inspectorClient.performAction(action),
         parsedSecrets as Record<string, string>,
         (command) => inspectorClient.performGameInput(command),
-        () => inspectorClient.getGameInputActions(),
+        (actionId) => findGameInputActionsCompatible(inspectorClient, { id: actionId, limit: 1 }),
         (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
       );
       await refresh();
@@ -298,10 +300,11 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
         <GameInputPanel
           actions={gameInputActions}
           state={gameInputState}
+          onSearch={async (selector) => setGameInputActions(await findGameInputActionsCompatible(inspectorClient, selector))}
           onInput={async (command) => {
             const currentCommand = await prepareManualGameInput(
               command,
-              () => inspectorClient.getGameInputActions(),
+              (actionId) => findGameInputActionsCompatible(inspectorClient, { id: actionId, limit: 1 }),
               (action) => window.confirm(`Action '${action.id}' (${action.risk}) requires confirmation. Continue?`),
             );
             if (currentCommand === null) return;
@@ -341,16 +344,39 @@ export function GuaInspectorApp({ client }: GuaInspectorAppProps) {
   );
 }
 
-function GameInputPanel({ actions, state, onInput, onError }: {
+function GameInputPanel({ actions, state, onSearch, onInput, onError }: {
   actions: GuaGameInputActions | null; state: GuaGameInputState | null;
+  onSearch(selector: GuaGameInputActionSelector): Promise<void>;
   onInput(command: GameInputCommandInput): Promise<void>; onError(message: string): void;
 }) {
   const [rawCode, setRawCode] = useState("Space");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [tags, setTags] = useState("");
+  const [valueType, setValueType] = useState("");
+  const [activeOnly, setActiveOnly] = useState(true);
   const run = (command: GameInputCommandInput) => {
     void onInput(command).catch((caught) => onError((caught as Error).message));
   };
   return <section className="gua-panel gua-game-input-panel">
     <PanelHeader title="Game Input" detail={actions === null ? "unsupported" : `${actions.context} · r${actions.revision}`} />
+    <form className="gua-game-action-search" onSubmit={(event) => {
+      event.preventDefault();
+      void onSearch({ query: query || undefined, category: category || undefined,
+        tags: tags ? tags.split(",").map((tag) => tag.trim()).filter(Boolean) : undefined,
+        valueType: valueType ? valueType as GuaGameInputActionSelector["valueType"] : undefined,
+        active: activeOnly ? true : undefined, limit: 20 }).catch((caught) => onError((caught as Error).message));
+    }}>
+      <input aria-label="Search game actions" placeholder="Search actions" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+      <input aria-label="Game action category" placeholder="Category" value={category} onChange={(event) => setCategory(event.currentTarget.value)} />
+      <input aria-label="Game action tags" placeholder="Tags (comma separated)" value={tags} onChange={(event) => setTags(event.currentTarget.value)} />
+      <select aria-label="Game action value type" value={valueType} onChange={(event) => setValueType(event.currentTarget.value)}>
+        <option value="">Any type</option><option value="button">button</option><option value="axis1d">axis1d</option>
+        <option value="vector2">vector2</option><option value="text">text</option>
+      </select>
+      <label><input type="checkbox" checked={activeOnly} onChange={(event) => setActiveOnly(event.currentTarget.checked)} />Active</label>
+      <button type="submit">Find</button>
+    </form>
     {actions?.actions.map((action) => <div className="gua-game-action" key={action.id}>
       <span><strong>{action.id}</strong><small>{action.valueType} · {action.active ? "active" : "inactive"} · {action.risk}</small></span>
       {action.valueType === "button" ? <>
