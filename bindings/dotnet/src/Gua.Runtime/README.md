@@ -33,6 +33,11 @@ The NuGet package deploys `gua_runtime.dll`, `libgua_runtime.so`, or
 `osx-arm64` native assets. `GUA_RUNTIME_NATIVE_DIR` remains available for local
 build overrides.
 
+World queries use `GuaWorldSelector.Near` plus an optional positive `Limit` for
+same-snapshot radius search. The runtime delegates XY/XYZ distance evaluation to
+the native core and returns snapshot metadata and aligned spatial distances, so
+engine adapters and remote bridges do not implement their own geometry.
+
 Local distributable packing requires an absolute `GuaNativeAssetsRoot` whose
 four RID directories contain `gua_runtime.dll`, `libgua_runtime.so`, or
 `libgua_runtime.dylib` as appropriate. Packing fails when that root is omitted

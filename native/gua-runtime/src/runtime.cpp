@@ -658,6 +658,14 @@ extern "C" int gua_runtime_query_world_objects_json(gua_runtime_t* runtime, cons
     return gua_query_world_objects_json(runtime->context, selector, runtime->observation_profile, out_json, out_json_size);
 }
 
+extern "C" int gua_runtime_query_world_objects_v2_json(gua_runtime_t* runtime, const gua_world_selector_v2_t* selector, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (!runtime->world_object_tree_enabled) return copy_json_string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}", out_json, out_json_size);
+    return gua_query_world_objects_v2_json(runtime->context, selector, runtime->observation_profile, out_json, out_json_size);
+}
+
 extern "C" int gua_runtime_copy_player_world_object_tree_json(gua_runtime_t* runtime, char* out_json, int out_json_size)
 {
     if (!valid_runtime(runtime)) return 0;
@@ -674,6 +682,14 @@ extern "C" int gua_runtime_query_player_world_objects_json(gua_runtime_t* runtim
     const std::lock_guard lock(runtime->context_mutex);
     if (!runtime->world_object_tree_enabled) return copy_json_string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}", out_json, out_json_size);
     return gua_query_world_objects_json(runtime->context, selector, GUA_OBSERVATION_PROFILE_PLAYER, out_json, out_json_size);
+}
+
+extern "C" int gua_runtime_query_player_world_objects_v2_json(gua_runtime_t* runtime, const gua_world_selector_v2_t* selector, char* out_json, int out_json_size)
+{
+    if (!valid_runtime(runtime)) return 0;
+    const std::lock_guard lock(runtime->context_mutex);
+    if (!runtime->world_object_tree_enabled) return copy_json_string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}", out_json, out_json_size);
+    return gua_query_world_objects_v2_json(runtime->context, selector, GUA_OBSERVATION_PROFILE_PLAYER, out_json, out_json_size);
 }
 
 extern "C" const char* gua_runtime_get_ui_tree_json(gua_runtime_t* runtime)
@@ -1697,11 +1713,15 @@ extern "C" int gua_runtime_start_inspector_bridge(gua_runtime_t* runtime, int po
                 selector.tag.empty() ? nullptr : selector.tag.c_str(), selector.tag_match,
                 selector.parent_id.empty() ? nullptr : selector.parent_id.c_str(), selector.direct_child ? 1 : 0,
                 selector.visible_to_player, selector.active, selector.state_type < 0 ? nullptr : &state };
+            gua_world_near_v1_t near { sizeof(gua_world_near_v1_t),
+                selector.relative_to_object_id.empty() ? nullptr : selector.relative_to_object_id.c_str(), selector.max_distance };
+            gua_world_selector_v2_t native_v2 { sizeof(gua_world_selector_v2_t), native,
+                selector.spatial ? &near : nullptr, selector.limit };
             const std::lock_guard lock(runtime->context_mutex);
             if (!runtime->world_object_tree_enabled) return std::string("{\"valid\":false,\"error\":\"unsupported\",\"matches\":[]}");
-            const int size = gua_query_world_objects_json(runtime->context, &native, runtime->observation_profile, nullptr, 0);
+            const int size = gua_query_world_objects_v2_json(runtime->context, &native_v2, runtime->observation_profile, nullptr, 0);
             std::string json(static_cast<std::size_t>(size), '\0');
-            gua_query_world_objects_json(runtime->context, &native, runtime->observation_profile, json.data(), size);
+            gua_query_world_objects_v2_json(runtime->context, &native_v2, runtime->observation_profile, json.data(), size);
             json.resize(static_cast<std::size_t>(size - 1));
             return json;
         },

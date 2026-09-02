@@ -10,6 +10,7 @@ export type {
 export { selectorFromArguments, worldObservationTools } from "gua-world-tools";
 
 import {
+  parseWorldQueryResult,
   selectorFromArguments,
   worldObservationTools,
   type GuaWorldObject,
@@ -304,12 +305,12 @@ async function executeTool(
       }
       const selector = worldSelector(input);
       if (name === "find_world_objects") {
-        const result = await withTimeout(
+        const result = parseWorldQueryResult(await withTimeout(
           bridge.findWorldObjects(selector, { signal, timeoutMs: defaultTimeoutMs }),
           defaultTimeoutMs,
           signal,
           "Timed out querying the current Gua World Object Tree.",
-        );
+        ), selector);
         if (!result.valid) throw new GuaWebError("invalid_request", result.error ?? "The host rejected the world selector.");
         return toolResult(result);
       }
@@ -425,12 +426,12 @@ async function waitForWorldObject(
   do {
     throwIfAborted(signal);
     const remainingMs = Math.ceil(Math.max(0, deadline - performance.now()));
-    const result = await withTimeout(
+    const result = parseWorldQueryResult(await withTimeout(
       bridge.findWorldObjects!(selector, { signal, timeoutMs: remainingMs }),
       remainingMs,
       signal,
       "Timed out waiting for a Gua world object.",
-    );
+    ), selector);
     if (!result.valid) throw new GuaWebError("invalid_request", result.error ?? "The host rejected the world selector.");
     if (result.matches[0]) return result.matches[0];
     if (performance.now() >= deadline) break;

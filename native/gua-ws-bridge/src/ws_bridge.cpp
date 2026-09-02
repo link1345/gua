@@ -4,18 +4,18 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cerrno>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <iostream>
+#include <locale>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -639,10 +639,11 @@ std::optional<double> json_number_field(std::string_view json, std::string_view 
     if (delimiter == json.size() || (json[delimiter] != ',' && json[delimiter] != '}' && json[delimiter] != ']'))
         return std::nullopt;
     const std::string token(json.substr(start, end - start));
-    char* parsed_end = nullptr;
-    errno = 0;
-    const double value = std::strtod(token.c_str(), &parsed_end);
-    return errno != ERANGE && parsed_end == token.c_str() + token.size() && std::isfinite(value)
+    std::istringstream stream(token);
+    stream.imbue(std::locale::classic());
+    double value = 0;
+    stream >> value;
+    return !stream.fail() && stream.peek() == std::char_traits<char>::eof() && std::isfinite(value)
         ? std::optional<double>(value) : std::nullopt;
 }
 
@@ -864,11 +865,22 @@ Command parse_command(std::string_view json)
     command.world_selector.state_string = json_string_field(json, "stateString").value_or("");
     command.world_selector.state_number = json_number_field(json, "stateNumber").value_or(0);
     command.world_selector.state_bool = json_bool_field(json, "stateBool");
+    command.world_selector.relative_to_object_id = json_string_field(json, "relativeToObjectId").value_or("");
+    command.world_selector.max_distance = json_number_field(json, "maxDistance").value_or(0);
+    const auto world_limit = json_number_field(json, "limit");
+    const bool world_limit_valid = world_limit.has_value() && *world_limit >= 1 &&
+        *world_limit <= static_cast<double>(UINT32_MAX) && std::trunc(*world_limit) == *world_limit;
+    command.world_selector.limit = world_limit_valid ? static_cast<unsigned int>(*world_limit) : 0;
+    const bool relative_present = json_has_field(json, "relativeToObjectId");
+    const bool max_distance_present = json_has_field(json, "maxDistance");
+    const bool limit_present = json_has_field(json, "limit");
+    command.world_selector.spatial = relative_present && max_distance_present;
     constexpr std::array world_query_fields { std::string_view("id"), std::string_view("type"), std::string_view("worldId"),
         std::string_view("worldIdMatch"), std::string_view("kind"), std::string_view("kindMatch"), std::string_view("label"),
         std::string_view("labelMatch"), std::string_view("tag"), std::string_view("tagMatch"), std::string_view("parentId"),
         std::string_view("directChild"), std::string_view("visibleToPlayer"), std::string_view("active"), std::string_view("stateKey"),
-        std::string_view("stateType"), std::string_view("stateString"), std::string_view("stateNumber"), std::string_view("stateBool") };
+        std::string_view("stateType"), std::string_view("stateString"), std::string_view("stateNumber"), std::string_view("stateBool"),
+        std::string_view("relativeToObjectId"), std::string_view("maxDistance"), std::string_view("limit") };
     command.world_selector_valid = (command.type != "query_world_objects" || json_has_only_top_level_fields(json, world_query_fields)) &&
         valid_optional_non_empty_string(json, "worldId") &&
         valid_optional_non_empty_string(json, "kind") && valid_optional_non_empty_string(json, "label") &&
@@ -877,7 +889,10 @@ Command parse_command(std::string_view json)
         valid_optional_int_range(json, "labelMatch", 0, 2) && valid_optional_int_range(json, "tagMatch", 0, 2) &&
         valid_optional_int_range(json, "directChild", 0, 1) &&
         valid_optional_int_range(json, "visibleToPlayer", 0, 2) && valid_optional_int_range(json, "active", 0, 2) &&
-        (!command.world_selector.direct_child || !command.world_selector.parent_id.empty());
+        (!command.world_selector.direct_child || !command.world_selector.parent_id.empty()) &&
+        (relative_present == max_distance_present) && (!relative_present || (!command.world_selector.relative_to_object_id.empty() &&
+            json_number_field(json, "maxDistance").has_value() && command.world_selector.max_distance >= 0)) &&
+        (!limit_present || (command.world_selector.spatial && world_limit_valid));
     const bool state_key_present = json_has_field(json, "stateKey");
     const bool state_type_present = json_has_field(json, "stateType");
     const bool state_string_present = json_has_field(json, "stateString");

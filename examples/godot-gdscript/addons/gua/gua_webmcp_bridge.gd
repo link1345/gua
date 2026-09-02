@@ -320,7 +320,7 @@ func _query_world(arguments: Array) -> void:
 		_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "World query must be an object."}))
 		return
 	var command: Dictionary = source
-	_respond(arguments, adapter.query_player_world_objects_json({
+	var selector := {
 		"id": command.get("worldId", ""),
 		"kind": command.get("kind", ""),
 		"label": command.get("label", ""),
@@ -334,7 +334,27 @@ func _query_world(arguments: Array) -> void:
 		"state_string": command.get("stateString", ""),
 		"state_number": command.get("stateNumber", 0.0),
 		"state_bool": command.get("stateBool", false),
-	}))
+	}
+	if command.has("relativeToObjectId"):
+		selector["relative_to_object_id"] = command.get("relativeToObjectId")
+	if command.has("maxDistance"):
+		selector["max_distance"] = command.get("maxDistance")
+	if command.has("limit"):
+		var limit = _normalize_world_limit(command.get("limit"))
+		if limit == null:
+			_respond(arguments, JSON.stringify({"code": "invalid_request", "message": "World query limit must be an integer from 1 through 4294967295."}))
+			return
+		selector["limit"] = limit
+	_respond(arguments, adapter.query_player_world_objects_json(selector))
+
+
+func _normalize_world_limit(value: Variant) -> Variant:
+	if typeof(value) not in [TYPE_INT, TYPE_FLOAT]:
+		return null
+	var numeric := float(value)
+	if not is_finite(numeric) or numeric < 1.0 or numeric > 4294967295.0 or numeric != floor(numeric):
+		return null
+	return int(numeric)
 
 
 func _enqueue_action(arguments: Array) -> void:

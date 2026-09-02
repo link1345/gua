@@ -72,3 +72,9 @@ When a world policy omits `Exposure`, it inherits the descriptor's legacy
 `AgentExposure`; set it explicitly only to override that value.
 `GetUiTreeJson(GuaObservationProfile.Player)` and the matching diagnostics
 overload preview the exact host-side projection without changing Debug defaults.
+
+`GuaWorldSelector.Near` performs an additive v2 query around a stable object ID;
+`Limit` is optional and must be positive. `GuaWorldQueryResult` reports the
+evaluated World snapshot's epoch/frame/revision and, for nearby queries, aligned
+distances ordered by distance then object ID. Distances use the publisher's
+world units and are evaluated after Debug/Player projection.

@@ -691,6 +691,86 @@ int main()
     assert(gua_get_context_status(world, &world_status) == 1 && world_status.world_object_count == 2 && world_status.world_revision == 2);
     gua_destroy_context(world);
 
+    // Spatial World queries evaluate one projected snapshot, sort deterministically, and preserve v1 output.
+    gua_context_t* spatial_world = gua_create_context();
+    assert(gua_begin_world_frame(spatial_world, "spatial") == 1);
+    const auto spatial_object = [](const char* id, int space, double x, double y, double z, int exposure = GUA_AGENT_EXPOSURE_AUTO) {
+        return gua_world_object_descriptor_v1_t { sizeof(gua_world_object_descriptor_v1_t), id, nullptr, "door", id, nullptr,
+            space, x, y, z, 1, 1, exposure, nullptr, nullptr, nullptr, 0, nullptr, 0 };
+    };
+    auto player_2d = spatial_object("player", GUA_WORLD_SPACE_2D, 0, 0, 0); player_2d.kind = "player";
+    auto door_b = spatial_object("door-b", GUA_WORLD_SPACE_2D, 3, 4, 0);
+    auto door_a = spatial_object("door-a", GUA_WORLD_SPACE_2D, -3, 4, 0);
+    auto outside = spatial_object("door-outside", GUA_WORLD_SPACE_2D, 6, 0, 0);
+    auto secret_ref = spatial_object("secret-ref", GUA_WORLD_SPACE_2D, 0, 0, 0, GUA_AGENT_EXPOSURE_PRIVATE);
+    auto reference_3d = spatial_object("reference-3d", GUA_WORLD_SPACE_3D, 10, 10, 10); reference_3d.kind = "player";
+    auto door_3d = spatial_object("door-3d", GUA_WORLD_SPACE_3D, 11, 12, 12);
+    auto huge_ref = spatial_object("huge-ref", GUA_WORLD_SPACE_2D, std::numeric_limits<double>::max(), 0, 0); huge_ref.kind = "player";
+    auto huge_door = spatial_object("huge-door", GUA_WORLD_SPACE_2D, -std::numeric_limits<double>::max(), 0, 0);
+    auto omitted_ref = spatial_object("omitted-ref", GUA_WORLD_SPACE_2D, 0, 0, 0); omitted_ref.kind = "player";
+    auto omitted_door = spatial_object("omitted-door", GUA_WORLD_SPACE_2D, 1, 0, 0);
+    const gua_agent_field_rule_v1_t omit_position_x {
+        sizeof(gua_agent_field_rule_v1_t), "position.x", GUA_AGENT_FIELD_OMIT, GUA_WORLD_VALUE_NULL };
+    const gua_agent_policy_v1_t omit_position_policy {
+        sizeof(gua_agent_policy_v1_t), GUA_AGENT_EXPOSURE_AUTO, 0, 0, &omit_position_x, 1 };
+    const gua_world_object_descriptor_v2_t projected_omitted_ref {
+        sizeof(gua_world_object_descriptor_v2_t), omitted_ref, omit_position_policy };
+    const gua_world_object_descriptor_v2_t projected_omitted_door {
+        sizeof(gua_world_object_descriptor_v2_t), omitted_door, omit_position_policy };
+    assert(gua_register_world_object_v1(spatial_world, &player_2d) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &door_b) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &door_a) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &outside) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &secret_ref) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &reference_3d) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &door_3d) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &huge_ref) == 1);
+    assert(gua_register_world_object_v1(spatial_world, &huge_door) == 1);
+    assert(gua_register_world_object_v2(spatial_world, &projected_omitted_ref) == 1);
+    assert(gua_register_world_object_v2(spatial_world, &projected_omitted_door) == 1);
+    assert(gua_end_world_frame(spatial_world) == 1);
+    const gua_world_selector_v1_t spatial_base { sizeof(gua_world_selector_v1_t), nullptr, 0, "door", GUA_MATCH_EXACT };
+    const gua_world_near_v1_t near_player { sizeof(gua_world_near_v1_t), "player", 5 };
+    const gua_world_selector_v2_t spatial_selector { sizeof(gua_world_selector_v2_t), spatial_base, &near_player, 1 };
+    char spatial_json[4096] {};
+    gua_query_world_objects_v2_json(spatial_world, &spatial_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    const std::string limited_spatial(spatial_json);
+    assert(limited_spatial.find("\"sessionEpoch\":1") != std::string::npos);
+    assert(limited_spatial.find("\"frameSequence\":1") != std::string::npos);
+    assert(limited_spatial.find("\"door-a\"") != std::string::npos);
+    assert(limited_spatial.find("\"door-b\"") == std::string::npos);
+    assert(limited_spatial.find("\"truncated\":true") != std::string::npos);
+    assert(limited_spatial.find("\"distance\":5") != std::string::npos);
+    auto unlimited_selector = spatial_selector; unlimited_selector.limit = 0;
+    gua_query_world_objects_v2_json(spatial_world, &unlimited_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"door-a\"") < std::string(spatial_json).find("\"door-b\""));
+    const gua_world_near_v1_t near_3d { sizeof(gua_world_near_v1_t), "reference-3d", 3 };
+    auto selector_3d = unlimited_selector; selector_3d.near = &near_3d;
+    gua_query_world_objects_v2_json(spatial_world, &selector_3d, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"door-3d\"") != std::string::npos);
+    const gua_world_near_v1_t near_unknown { sizeof(gua_world_near_v1_t), "unknown", 100 };
+    auto unknown_selector = unlimited_selector; unknown_selector.near = &near_unknown;
+    gua_query_world_objects_v2_json(spatial_world, &unknown_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"matches\":[]") != std::string::npos);
+    const gua_world_near_v1_t near_secret { sizeof(gua_world_near_v1_t), "secret-ref", 100 };
+    unknown_selector.near = &near_secret;
+    gua_query_world_objects_v2_json(spatial_world, &unknown_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"matches\":[]") != std::string::npos);
+    const gua_world_near_v1_t near_huge { sizeof(gua_world_near_v1_t), "huge-ref", std::numeric_limits<double>::max() };
+    unknown_selector.near = &near_huge;
+    gua_query_world_objects_v2_json(spatial_world, &unknown_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"huge-door\"") == std::string::npos);
+    const gua_world_near_v1_t near_omitted { sizeof(gua_world_near_v1_t), "omitted-ref", 100 };
+    unknown_selector.near = &near_omitted;
+    gua_query_world_objects_v2_json(spatial_world, &unknown_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"matches\":[]") != std::string::npos);
+    unknown_selector.near = &near_player;
+    gua_query_world_objects_v2_json(spatial_world, &unknown_selector, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("\"omitted-door\"") == std::string::npos);
+    gua_query_world_objects_json(spatial_world, &spatial_base, GUA_OBSERVATION_PROFILE_PLAYER, spatial_json, sizeof(spatial_json));
+    assert(std::string(spatial_json).find("sessionEpoch") == std::string::npos);
+    gua_destroy_context(spatial_world);
+
     // Malformed descriptors and explicit aborts reject the whole staged frame.
     gua_context_t* atomic_world = gua_create_context();
     assert(gua_begin_world_frame(atomic_world, "stable") == 1);

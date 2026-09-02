@@ -447,6 +447,19 @@ typedef struct gua_world_selector_v1_t {
     const gua_world_state_value_v1_t* state;
 } gua_world_selector_v1_t;
 
+typedef struct gua_world_near_v1_t {
+    uint32_t struct_size;
+    const char* relative_to_object_id;
+    double max_distance;
+} gua_world_near_v1_t;
+
+typedef struct gua_world_selector_v2_t {
+    uint32_t struct_size;
+    gua_world_selector_v1_t base;
+    const gua_world_near_v1_t* near;
+    uint32_t limit;
+} gua_world_selector_v2_t;
+
 typedef struct gua_node_state_t {
     int visible;
     int enabled;
@@ -642,6 +655,8 @@ int gua_end_world_frame(gua_context_t* ctx);
 int gua_abort_world_frame(gua_context_t* ctx);
 int gua_copy_world_object_tree_json(gua_context_t* ctx, int observation_profile, char* out_json, int out_json_size);
 int gua_query_world_objects_json(gua_context_t* ctx, const gua_world_selector_v1_t* selector, int observation_profile, char* out_json, int out_json_size);
+/* v2 keeps matches as World Object values and adds snapshot metadata plus optional spatial metadata. limit 0 means unbounded. */
+int gua_query_world_objects_v2_json(gua_context_t* ctx, const gua_world_selector_v2_t* selector, int observation_profile, char* out_json, int out_json_size);
 int gua_enqueue_click(gua_context_t* ctx, const char* node_id);
 int gua_consume_click_request(gua_context_t* ctx, const char* node_id);
 int gua_emit_click(gua_context_t* ctx, const char* node_id);

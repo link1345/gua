@@ -12,11 +12,73 @@ import { validateRecording as validateInspectorRecording } from "../../inspector
 
 const roots: string[] = [];
 
+class ControlledWebSocket extends EventTarget {
+  readyState = WebSocket.CONNECTING;
+  closed = false;
+  lastRequestId: number | undefined;
+
+  constructor(private readonly respondAutomatically = true) { super(); }
+
+  open(): void {
+    this.readyState = WebSocket.OPEN;
+    this.dispatchEvent(new Event("open"));
+  }
+
+  send(payload: string): void {
+    const request = JSON.parse(payload);
+    this.lastRequestId = request.id;
+    if (this.respondAutomatically) queueMicrotask(() => this.respond(request.id));
+  }
+
+  respond(id: number, matches: unknown[] = []): void {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+      id,
+      ok: true,
+      result: { valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches },
+    }) }));
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = WebSocket.CLOSED;
+    this.dispatchEvent(new Event("close"));
+  }
+
+  terminate(): void { this.close(); }
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("GuaAutomationManager", () => {
+  test("rejects a nearby bridge result without spatial metadata", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return undefined;
+        return new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message(socket, message) {
+          const request = JSON.parse(String(message));
+          socket.send(JSON.stringify({ id: request.id, ok: true, result: {
+            valid: true, sessionEpoch: 1, frameSequence: 1, revision: 1, matches: [],
+          } }));
+        },
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    try {
+      await expect(bridge.findWorldObjects({ near: { relativeToObjectId: "player", maxDistance: 5 } }))
+        .rejects.toThrow("invalid world query result");
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
   test("bounds world waits by their requested deadline", async () => {
     const server = Bun.serve({
       port: 0,
@@ -38,6 +100,111 @@ describe("GuaAutomationManager", () => {
     } finally {
       bridge.close();
       server.stop(true);
+    }
+  });
+
+  test("cancels world waits while a bridge query is pending", async () => {
+    let queryReceived!: () => void;
+    const received = new Promise<void>((resolve) => { queryReceived = resolve; });
+    const server = Bun.serve({
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return undefined;
+        return new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message() {
+          queryReceived();
+          // Intentionally withhold the query response until cancellation.
+        },
+      },
+    });
+    const bridge = new GuaBridgeClient(`ws://127.0.0.1:${server.port}`, 5000);
+    const controller = new AbortController();
+    try {
+      const waiting = bridge.waitForWorldObject({ kind: "door" }, 5000, controller.signal);
+      await received;
+      controller.abort();
+      await expect(waiting).rejects.toThrow("cancelled");
+    } finally {
+      bridge.close();
+      server.stop(true);
+    }
+  });
+
+  test("bounds world waits while the bridge connection is pending", async () => {
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket(false);
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    });
+    const startedAt = performance.now();
+    try {
+      await expect(bridge.waitForWorldObject({ kind: "door" }, 50)).rejects
+        .toThrow("Timed out waiting for a Gua world object");
+      expect(performance.now() - startedAt).toBeLessThan(500);
+      expect(sockets[0]?.closed).toBe(true);
+      const recovered = bridge.findWorldObjects({ kind: "door" });
+      expect(sockets).toHaveLength(2);
+      sockets[1]!.open();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const requestId = sockets[1]!.lastRequestId;
+      expect(requestId).toBeDefined();
+      if (requestId === undefined) throw new Error("The recovered request was not sent.");
+      sockets[0]!.respond(requestId, [{ id: "stale", kind: "enemy", space: "world2d", position: { x: 1, y: 1 },
+        visibleToPlayer: true, active: true, agentExposure: "auto", state: {} }]);
+      sockets[1]!.respond(requestId);
+      await expect(recovered).resolves.toMatchObject({ valid: true, matches: [] });
+    } finally {
+      bridge.close();
+    }
+  });
+
+  test("cancels world waits while the bridge connection is pending", async () => {
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket();
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    });
+    const controller = new AbortController();
+    const startedAt = performance.now();
+    try {
+      const waiting = bridge.waitForWorldObject({ kind: "door" }, 5000, controller.signal);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      controller.abort();
+      await expect(waiting).rejects.toThrow("cancelled");
+      expect(performance.now() - startedAt).toBeLessThan(500);
+      expect(sockets[0]?.closed).toBe(true);
+      const recovered = bridge.findWorldObjects({ kind: "door" });
+      expect(sockets).toHaveLength(2);
+      sockets[1]!.open();
+      await expect(recovered).resolves.toMatchObject({ valid: true, matches: [] });
+    } finally {
+      bridge.close();
+    }
+  });
+
+  test("keeps a shared connection attempt alive for an uncancelled waiter", async () => {
+    const sockets: ControlledWebSocket[] = [];
+    const bridge = new GuaBridgeClient("ws://bridge.test", 5000, () => {
+      const socket = new ControlledWebSocket();
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    });
+    const controller = new AbortController();
+    try {
+      const cancelled = bridge.findWorldObjects({ kind: "cancelled" }, 5000, controller.signal);
+      const surviving = bridge.findWorldObjects({ kind: "door" }, 5000);
+      expect(sockets).toHaveLength(1);
+      controller.abort();
+      await expect(cancelled).rejects.toThrow("cancelled");
+      expect(sockets[0]?.closed).toBe(false);
+      sockets[0]!.open();
+      await expect(surviving).resolves.toMatchObject({ valid: true, matches: [] });
+    } finally {
+      bridge.close();
     }
   });
 

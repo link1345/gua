@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gua.dev/schema/world-query-result.schema.json",
+  "title": "Gua World Object Query Result",
+  "type": "object",
+  "required": ["valid", "matches"],
+  "additionalProperties": false,
+  "properties": {
+    "valid": { "type": "boolean" },
+    "matches": { "type": "array", "items": { "$ref": "world-object-tree.schema.json#/$defs/object" } },
+    "error": { "type": "string" },
+    "sessionEpoch": { "type": "integer", "minimum": 1 },
+    "frameSequence": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "spatial": {
+      "type": "object",
+      "required": ["relativeToObjectId", "truncated", "distances"],
+      "additionalProperties": false,
+      "properties": {
+        "relativeToObjectId": { "type": "string", "minLength": 1 },
+        "truncated": { "type": "boolean" },
+        "distances": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["objectId", "distance"], "additionalProperties": false,
+            "properties": {
+              "objectId": { "type": "string", "minLength": 1 },
+              "distance": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "valid": { "const": true } }, "required": ["valid"] },
+      "then": { "required": ["sessionEpoch", "frameSequence", "revision"], "not": { "required": ["error"] } },
+      "else": { "required": ["error"], "not": { "anyOf": [{ "required": ["sessionEpoch"] }, { "required": ["frameSequence"] }, { "required": ["revision"] }, { "required": ["spatial"] }] } }
+    }
+  ]
+}

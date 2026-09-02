@@ -35,6 +35,10 @@ struct WorldQuerySelector {
     std::string state_string;
     double state_number = 0;
     bool state_bool = false;
+    std::string relative_to_object_id;
+    double max_distance = 0;
+    unsigned int limit = 0;
+    bool spatial = false;
 };
 
 struct GameInputQuerySelector {

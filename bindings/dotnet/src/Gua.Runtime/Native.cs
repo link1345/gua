@@ -30,6 +30,8 @@ internal static unsafe class Native
     [StructLayout(LayoutKind.Sequential)] internal struct WorldObject { internal uint StructSize; internal nint Id, ParentId, Kind, Label, Description; internal int Space; internal double X, Y, Z; internal int VisibleToPlayer, Active, AgentExposure; internal nint DomainId, RelatedUiNodeId, Tags; internal uint TagCount; internal nint StateValues; internal uint StateValueCount; }
     [StructLayout(LayoutKind.Sequential)] internal struct WorldObjectV2 { internal uint StructSize; internal WorldObject Base; internal AgentPolicy AgentPolicy; }
     [StructLayout(LayoutKind.Sequential)] internal struct WorldSelector { internal uint StructSize; internal nint Id; internal int IdMatch; internal nint Kind; internal int KindMatch; internal nint Label; internal int LabelMatch; internal nint Tag; internal int TagMatch; internal nint ParentId; internal int DirectChild, VisibleToPlayer, Active; internal nint State; }
+    [StructLayout(LayoutKind.Sequential)] internal struct WorldNear { internal uint StructSize; internal nint RelativeToObjectId; internal double MaxDistance; }
+    [StructLayout(LayoutKind.Sequential)] internal struct WorldSelectorV2 { internal uint StructSize; internal WorldSelector Base; internal nint Near; internal uint Limit; }
 
 #if !NETSTANDARD2_1
     static Native() => NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
@@ -72,8 +74,10 @@ internal static unsafe class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_abort_world_frame(nint runtime);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_world_object_tree_json(nint runtime, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_world_objects_json(nint runtime, in WorldSelector selector, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_world_objects_v2_json(nint runtime, in WorldSelectorV2 selector, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_copy_player_world_object_tree_json(nint runtime, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_player_world_objects_json(nint runtime, in WorldSelector selector, byte* output, int size);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern unsafe int gua_runtime_query_player_world_objects_v2_json(nint runtime, in WorldSelectorV2 selector, byte* output, int size);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_consume_action_request(nint runtime, int action, [MarshalAs(UnmanagedType.LPUTF8Str)] string? nodeId, ref ActionRequest request);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_action(nint runtime, in ActionDescriptor descriptor, out ulong requestId);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int gua_runtime_enqueue_player_action(nint runtime, in ActionDescriptor descriptor, out ulong requestId);

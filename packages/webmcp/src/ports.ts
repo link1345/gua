@@ -43,6 +43,9 @@ interface GuaWorldWireSelector {
   stateString?: string;
   stateNumber?: number;
   stateBool?: boolean;
+  relativeToObjectId?: string;
+  maxDistance?: number;
+  limit?: number;
 }
 
 export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBridgeOptions = {}): GuaBrowserBridge {
@@ -56,7 +59,7 @@ export function createGuaInPageBridge(port: GuaInPagePort, options: GuaInPageBri
   if (options.screenshot) bridge.getScreenshot = async () => parseScreenshot(await invoke(port, { type: "get_screenshot" }));
   if (options.world) {
     bridge.getWorldObjectTree = async (callOptions) => parseWorldObjectTree(await invoke(port, { type: "get_world_object_tree" }, callOptions));
-    bridge.findWorldObjects = async (selector, callOptions) => parseWorldQueryResult(await invoke(port, worldQueryCommand(selector), callOptions));
+    bridge.findWorldObjects = async (selector, callOptions) => parseWorldQueryResult(await invoke(port, worldQueryCommand(selector), callOptions), selector);
   }
   if (options.gameInput) {
     bridge.getGameInputCapabilities = async () => parseGameInputCapabilities(await invoke(port, { type: "get_game_input_capabilities" }));
@@ -96,6 +99,9 @@ function worldQueryCommand(selector: GuaWorldSelector): GuaInPageCommand {
     stateString: typeof state?.value === "string" ? state.value : undefined,
     stateNumber: typeof state?.value === "number" ? state.value : undefined,
     stateBool: typeof state?.value === "boolean" ? state.value : undefined,
+    relativeToObjectId: selector.near?.relativeToObjectId,
+    maxDistance: selector.near?.maxDistance,
+    limit: selector.limit,
   }) as GuaInPageCommand;
 }
 

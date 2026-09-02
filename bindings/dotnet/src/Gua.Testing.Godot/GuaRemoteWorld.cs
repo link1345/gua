@@ -33,6 +33,8 @@ public sealed partial class GuaRemoteContext
             else if (state.Value is byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
                 command["stateNumber"] = WorldNumber(state.Key, state.Value);
         }
+        if (selector.Near is { } near) { command["relativeToObjectId"] = near.RelativeToObjectId; command["maxDistance"] = near.MaxDistance; }
+        if (selector.Limit is { } limit) command["limit"] = limit;
         return command;
     }
 

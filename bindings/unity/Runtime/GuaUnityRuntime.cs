@@ -381,6 +381,16 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             return false;
         }
         var fields = new HashSet<string>(commandFields ?? Array.Empty<string>(), StringComparer.Ordinal);
+        var hasRelative = fields.Contains("relativeToObjectId");
+        var hasMaxDistance = fields.Contains("maxDistance");
+        var hasLimit = fields.Contains("limit");
+        if (hasRelative != hasMaxDistance || (hasRelative && (string.IsNullOrEmpty(source.relativeToObjectId) ||
+            !double.IsFinite(source.maxDistance) || source.maxDistance < 0)) ||
+            (hasLimit && (!hasRelative || source.limit < 1 || source.limit > uint.MaxValue)))
+        {
+            error = "World spatial criteria require relativeToObjectId, a finite non-negative maxDistance, and an optional positive limit.";
+            return false;
+        }
         var stateFieldCount = new[] { "stateKey", "stateType", "stateString", "stateNumber", "stateBool" }.Count(fields.Contains);
         GuaWorldStateCriterion? state = null;
         if (stateFieldCount != 0)
@@ -414,7 +424,11 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
         selector = new GuaWorldSelector(
             Id: EmptyToNull(source.worldId), Kind: EmptyToNull(source.kind), Label: EmptyToNull(source.label), Tag: EmptyToNull(source.tag),
             ParentId: EmptyToNull(source.parentId), DirectChild: source.directChild != 0,
-            VisibleToPlayer: WorldFilter(source.visibleToPlayer), Active: WorldFilter(source.active), State: state);
+            VisibleToPlayer: WorldFilter(source.visibleToPlayer), Active: WorldFilter(source.active), State: state)
+        {
+            Near = hasRelative ? new GuaWorldNear(source.relativeToObjectId, source.maxDistance) : null,
+            Limit = hasLimit ? (uint)source.limit : null,
+        };
         return true;
     }
     private static bool? WorldFilter(int value) => value == 0 ? null : value == 2;
@@ -567,9 +581,10 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
     [Serializable] private sealed class WebCommand
     {
         public string type; public WebAction request;
-        public string worldId, kind, label, tag, parentId, stateKey, stateString;
+        public string worldId, kind, label, tag, parentId, stateKey, stateString, relativeToObjectId;
         public int directChild, visibleToPlayer, active, stateType;
-        public double stateNumber;
+        public double stateNumber, maxDistance;
+        public long limit;
         public bool stateBool;
     }
     [Serializable] private sealed class WebAction
