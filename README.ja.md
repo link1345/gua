@@ -94,6 +94,8 @@ World Object Tree観測ツール、capabilityで制御されたSemantic Game Act
 定義は`gua-world-tools`として公開します。`gui-mcp`もWebSocket接続も不要で、WebMCP非対応
 ブラウザでもゲーム本体はそのまま動作します。各タブがゲームとツール登録を所有し、
 独自のブラウザセッションルーターは持ちません。
+成功した呼び出しは、JSON文字列をMCP形式のtext contentで包まず、Guaの構造化結果を
+直接返します。
 ゲーム入力は現在のページが所有し、request-correlatedなhost completionを待ちます。
 timeout、キャンセル、ツール登録解除、engine終了時には全入力を解放します。Raw toolは
 hostが入力pumpとcleanup経路を明示的に初期化するまで公開しません。

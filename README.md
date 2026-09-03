@@ -104,6 +104,8 @@ neither `gui-mcp` nor a WebSocket connection, and browsers without WebMCP remain
 fully functional. Each tab owns its game and tool registrations; there is no
 custom browser session router. See the [browser-native WebMCP guide](https://gua.orizika.com/webmcp/)
 or the [`gua-webmcp` package reference](packages/webmcp/README.md).
+Successful calls return their structured Gua result directly instead of wrapping
+serialized JSON in an MCP-style text content block.
 Game input is owned by the current page, waits for request-correlated host
 completion, and is released on timeout, cancellation, unregister, or engine
 shutdown. Raw tools remain absent until the host explicitly initializes their

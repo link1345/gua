@@ -8,9 +8,11 @@ import {
   registerGuaWebMcp,
   guaWebMcpToolDefinitions,
   type GuaBrowserBridge,
+  type GuaGameInputActionSearchResult,
   type GuaWorldObject,
   type GuaWorldObjectTree,
   type GuaUiTree,
+  type GuaWebActionCompletion,
   type GuaWebActionRequest,
 } from "../src/index";
 
@@ -135,9 +137,9 @@ describe("registerGuaWebMcp", () => {
     const waitSchema = page.tools.get("wait_for_node")!.inputSchema as { properties: { timeoutMs: { maximum?: number } } };
     expect(waitSchema.properties.timeoutMs.maximum).toBe(2_147_483_647);
 
-    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as { content: Array<{ text: string }> };
+    const result = await page.tools.get("click_node")!.execute({ nodeId: "start" }) as GuaWebActionCompletion;
     expect(requests).toEqual([{ action: "click", nodeId: "start" }]);
-    expect(JSON.parse(result.content[0]!.text).requestId).toBe(41);
+    expect(result.requestId).toBe(41);
 
     registration.unregister();
     expect(page.signals.get("click_node")?.aborted).toBe(true);
@@ -169,8 +171,8 @@ describe("registerGuaWebMcp", () => {
     ]));
     expect(registration.registeredTools).not.toContain("pointer_move");
     expect(registration.registeredTools).not.toContain("set_gamepad_axis");
-    const found = await page.tools.get("find_game_input_actions")!.execute({ query: "Jump", active: true }) as { content: Array<{ text: string }> };
-    expect(JSON.parse(found.content[0]!.text).actions[0].id).toBe("jump");
+    const found = await page.tools.get("find_game_input_actions")!.execute({ query: "Jump", active: true }) as GuaGameInputActionSearchResult;
+    expect(found.actions[0]!.id).toBe("jump");
     for (const invalid of [{ id: "Invalid" }, { tags: ["same", "same"] }, { query: "q".repeat(129) }, { query: "before\0after" }]) {
       const rejected = await page.tools.get("find_game_input_actions")!.execute(invalid) as { isError: boolean; content: Array<{ text: string }> };
       expect(rejected.isError).toBe(true);
@@ -324,11 +326,11 @@ describe("registerGuaWebMcp", () => {
     ]));
     expect(registration.registeredTools).not.toContain("interact_world_object");
 
-    const treeResult = await page.tools.get("get_world_object_tree")!.execute({}) as { content: Array<{ text: string }> };
-    expect(JSON.parse(treeResult.content[0]!.text).objects[0].id).toBe("door");
+    const treeResult = await page.tools.get("get_world_object_tree")!.execute({}) as GuaWorldObjectTree;
+    expect(treeResult.objects[0]!.id).toBe("door");
     await page.tools.get("find_world_objects")!.execute({ parentId: "room", directChild: true, stateKey: "locked", stateValue: true });
-    const waitResult = await page.tools.get("wait_for_world_object")!.execute({ id: "door", timeoutMs: 100 }) as { content: Array<{ text: string }> };
-    expect(JSON.parse(waitResult.content[0]!.text).id).toBe("door");
+    const waitResult = await page.tools.get("wait_for_world_object")!.execute({ id: "door", timeoutMs: 100 }) as GuaWorldObject;
+    expect(waitResult.id).toBe("door");
     expect(selectors).toEqual([
       { parentId: "room", directChild: true, state: { key: "locked", value: true } },
       { id: "door" },
@@ -421,10 +423,10 @@ describe("registerGuaWebMcp", () => {
     };
     const registration = await registerGuaWebMcp(bridge, { document: page.document, pollIntervalMs: 0 });
     expect(registration.registeredTools).not.toContain("get_screenshot");
-    const waited = await page.tools.get("wait_for_node")!.execute({ nodeId: "password", timeoutMs: 100 }) as { content: Array<{ text: string }> };
-    expect(JSON.parse(waited.content[0]!.text).id).toBe("password");
-    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: "secret-marker", sensitive: true }) as { content: Array<{ text: string }> };
-    expect(result.content[0]!.text).not.toContain("secret-marker");
+    const waited = await page.tools.get("wait_for_node")!.execute({ nodeId: "password", timeoutMs: 100 }) as GuaUiTree["nodes"][number];
+    expect(waited.id).toBe("password");
+    const result = await page.tools.get("set_value")!.execute({ nodeId: "password", value: "secret-marker", sensitive: true }) as GuaWebActionCompletion;
+    expect(JSON.stringify(result)).not.toContain("secret-marker");
   });
 
   test("allows set_value to clear a control with an empty string", async () => {
@@ -629,11 +631,11 @@ describe("registerGuaWebMcp", () => {
     const second = modelDocument();
     await registerGuaWebMcp(bridgeWithTree(tree([button("first")])), { document: first.document });
     await registerGuaWebMcp(bridgeWithTree(tree([button("second")])), { document: second.document });
-    const firstTree = await first.tools.get("get_ui_tree")!.execute({}) as { content: Array<{ text: string }> };
-    const secondTree = await second.tools.get("get_ui_tree")!.execute({}) as { content: Array<{ text: string }> };
-    expect(firstTree.content[0]!.text).toContain("first");
-    expect(firstTree.content[0]!.text).not.toContain("second");
-    expect(secondTree.content[0]!.text).toContain("second");
+    const firstTree = await first.tools.get("get_ui_tree")!.execute({}) as GuaUiTree;
+    const secondTree = await second.tools.get("get_ui_tree")!.execute({}) as GuaUiTree;
+    expect(firstTree.nodes[0]!.id).toBe("first");
+    expect(firstTree.nodes.some((node) => node.id === "second")).toBe(false);
+    expect(secondTree.nodes[0]!.id).toBe("second");
   });
 });
 

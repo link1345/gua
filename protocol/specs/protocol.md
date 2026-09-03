@@ -513,6 +513,9 @@ transport consumer, not a replacement for `gui-mcp` or the Inspector bridge. One
 page calls one engine-owned in-page bridge; it does not open a WebSocket, select
 a remote endpoint, or introduce a Gua session ID. Browser tabs remain isolated
 by their ordinary JavaScript and engine instances.
+Successful tool executions return the structured Gua result directly from the
+WebMCP callback. They do not wrap serialized JSON in an MCP-style text content
+block; browser serialization remains a transport detail.
 
 The browser-safe surface shares the base tool names and semantics for
 `get_ui_tree`, v1 semantic actions, `wait_for_node`, and optional
