@@ -281,22 +281,22 @@ async function executeTool(
   try {
     throwIfAborted(signal);
     if (name === "get_ui_tree") {
-      return toolResult(await withTimeout(
+      return await withTimeout(
         bridge.getUiTree(),
         defaultTimeoutMs,
         signal,
         "Timed out reading the current Gua semantic UI tree.",
-      ));
+      );
     }
     if (name === "get_world_object_tree") {
       rejectUnknownArguments(input, new Set());
       if (!bridge.getWorldObjectTree) throw new GuaWebError("engine_unsupported", "The engine bridge does not support the World Object Tree.");
-      return toolResult(await withTimeout(
+      return await withTimeout(
         bridge.getWorldObjectTree({ signal, timeoutMs: defaultTimeoutMs }),
         defaultTimeoutMs,
         signal,
         "Timed out reading the current Gua World Object Tree.",
-      ));
+      );
     }
     if (name === "find_world_objects" || name === "wait_for_world_object") {
       if (!bridge.findWorldObjects) throw new GuaWebError("engine_unsupported", "The engine bridge does not support world object queries.");
@@ -312,36 +312,36 @@ async function executeTool(
           "Timed out querying the current Gua World Object Tree.",
         ), selector);
         if (!result.valid) throw new GuaWebError("invalid_request", result.error ?? "The host rejected the world selector.");
-        return toolResult(result);
+        return result;
       }
       const timeoutMs = input.timeoutMs === undefined
         ? Math.min(defaultTimeoutMs, 300_000)
         : optionalInteger(input, "timeoutMs", defaultTimeoutMs, 1, 300_000);
-      return toolResult(await waitForWorldObject(bridge, selector, timeoutMs, pollIntervalMs, signal));
+      return await waitForWorldObject(bridge, selector, timeoutMs, pollIntervalMs, signal);
     }
     if (name === "get_screenshot") {
       if (!bridge.getScreenshot) throw new GuaWebError("engine_unsupported", "The engine bridge does not support screenshots.");
-      return toolResult(await withTimeout(
+      return await withTimeout(
         bridge.getScreenshot(),
         defaultTimeoutMs,
         signal,
         "Timed out reading the latest Gua screenshot.",
-      ));
+      );
     }
     if (name === "get_game_input_actions") {
       rejectUnknownArguments(input, new Set());
       if (!bridge.getGameInputActions) throw new GuaWebError("engine_unsupported", "The engine bridge does not support semantic game input.");
-      return toolResult(await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out reading the game input action map."));
+      return await withTimeout(bridge.getGameInputActions(), defaultTimeoutMs, signal, "Timed out reading the game input action map.");
     }
     if (name === "find_game_input_actions") {
       if (!bridge.findGameInputActions) throw new GuaWebError("engine_unsupported", "The engine bridge does not support game input search.");
-      return toolResult(await withTimeout(bridge.findGameInputActions(gameInputSelector(input)), defaultTimeoutMs, signal,
-        "Timed out searching the game input action map."));
+      return await withTimeout(bridge.findGameInputActions(gameInputSelector(input)), defaultTimeoutMs, signal,
+        "Timed out searching the game input action map.");
     }
     if (name === "get_game_input_state") {
       rejectUnknownArguments(input, new Set());
       if (!bridge.getGameInputState) throw new GuaWebError("engine_unsupported", "The engine bridge does not expose page-owned game input state.");
-      return toolResult(await withTimeout(bridge.getGameInputState(), defaultTimeoutMs, signal, "Timed out reading page-owned game input state."));
+      return await withTimeout(bridge.getGameInputState(), defaultTimeoutMs, signal, "Timed out reading page-owned game input state.");
     }
     if (isGameInputTool(name)) {
       if (!bridge.performGameInput) throw new GuaWebError("engine_unsupported", "The engine bridge does not support game input.");
@@ -364,12 +364,12 @@ async function executeTool(
       if (!completion.succeeded) throw new GuaWebError("action_failed", `The host rejected ${request.type}.`, {
         requestId: completion.requestId, hostError: completion.errorCode,
       });
-      return toolResult(completion);
+      return completion;
     }
     if (name === "wait_for_node") {
       const nodeId = requiredString(input, "nodeId");
       const timeoutMs = optionalInteger(input, "timeoutMs", defaultTimeoutMs, 0, maxBrowserTimerDelayMs);
-      return toolResult(await waitForNode(bridge, nodeId, timeoutMs, pollIntervalMs, signal));
+      return await waitForNode(bridge, nodeId, timeoutMs, pollIntervalMs, signal);
     }
     const request = actionRequest(name, input);
     await validateAction(bridge, request, defaultTimeoutMs, signal);
@@ -393,7 +393,7 @@ async function executeTool(
     const safeCompletion = (request.action === "set_value" && request.sensitive) || completion.sensitive
       ? { ...completion, value: "", sensitive: true }
       : completion;
-    return toolResult(safeCompletion);
+    return safeCompletion;
   } catch (error) {
     if (name === "text_input" && input.sensitive === true) {
       const code = error instanceof GuaWebError ? error.code : "action_failed";
@@ -668,7 +668,6 @@ async function performGameInputWithCancellation(
   }
 }
 
-function toolResult(value: unknown) { return { content: [{ type: "text", text: JSON.stringify(value) }] }; }
 function requiredString(input: Record<string, unknown>, key: string, allowEmpty = false): string {
   if (typeof input[key] !== "string" || (!allowEmpty && (input[key] as string).length === 0)) {
     throw new GuaWebError("invalid_request", `${key} must be ${allowEmpty ? "a string" : "a non-empty string"}.`);
