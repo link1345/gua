@@ -639,7 +639,7 @@ public sealed partial class GuaUnityRuntime : MonoBehaviour
             foreach (var source in FindObjectsByType<GuaWorldObject>(FindObjectsInactive.Include, FindObjectsSortMode.None)
                 .Where(item => item.gameObject.scene.IsValid() && item.gameObject.scene.isLoaded)
                 .OrderBy(item => ScenePath(item.gameObject.scene), StringComparer.Ordinal)
-                .ThenBy(item => item.gameObject.scene.handle)
+                .ThenBy(item => item.gameObject.scene.handle.GetRawData())
                 .ThenBy(item => HierarchyPath(item.transform), StringComparer.Ordinal)
                 .ThenBy(item => item.Id, StringComparer.Ordinal))
             {

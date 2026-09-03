@@ -53,7 +53,7 @@ public sealed class UnityIntegrationTests
     }
 
     [Test]
-    public void RenderedPlayer_ReflectsUiAndDispatchesButtonListener()
+    public async Task RenderedPlayer_ReflectsUiAndDispatchesButtonListener()
     {
         var player = Environment.GetEnvironmentVariable("GUA_UNITY_PLAYER");
         if (string.IsNullOrWhiteSpace(player)) Assert.Ignore("Set GUA_UNITY_PLAYER to run the Unity integration fixture.");
@@ -79,11 +79,16 @@ public sealed class UnityIntegrationTests
         Assert.That(host.RemoteContext.GetRemoteTree().Nodes.All(node => Encoding.UTF8.GetByteCount(node.Id) <= 127), Is.True,
             "Unity must keep node IDs round-trippable through the fixed-size C ABI action request.");
 
+        var playerWorld = await host.RemoteContext.WaitForWorldObjectAsync(
+            new GuaWorldSelector(Id: "player-world"), TimeSpan.FromSeconds(15));
+        Assert.That(playerWorld.Id, Is.EqualTo("player-world"));
         var nearbyDoors = host.RemoteContext.QueryWorldObjects(new GuaWorldSelector(
             Kind: "door", State: new GuaWorldStateCriterion("locked", true))
             { Near = new GuaWorldNear("player-world", 5), Limit = 1 });
+        var nearbyDoorIds = nearbyDoors.Matches.Select(match => match.Id).ToArray();
         Assert.That(nearbyDoors.Valid, Is.True);
-        Assert.That(nearbyDoors.Matches.Select(match => match.Id), Is.EqualTo(new[] { "door-a" }));
+        Assert.That(nearbyDoorIds, Is.EqualTo(new[] { "door-a" }),
+            $"Unexpected spatial query result: {JsonSerializer.Serialize(nearbyDoors)}");
         Assert.That(nearbyDoors.Spatial?.Truncated, Is.True);
         Assert.That(nearbyDoors.Spatial?.Distances.Single().Distance, Is.EqualTo(5));
         Assert.That(nearbyDoors.SessionEpoch, Is.Not.Null);
